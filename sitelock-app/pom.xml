@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.sitelock</groupId>
+    <artifactId>sitelock-parent</artifactId>
+    <version>1.0.0</version>
+  </parent>
+
+  <artifactId>sitelock-app</artifactId>
+  <name>SiteLock App (CLI)</name>
+  <description>CLI siteblock: block/unblock/status/reset + dns start/stop/status.</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.sitelock</groupId>
+      <artifactId>sitelock-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.sitelock</groupId>
+      <artifactId>sitelock-dns</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>info.picocli</groupId>
+      <artifactId>picocli</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.datatype</groupId>
+      <artifactId>jackson-datatype-jsr310</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>siteblock-${project.version}</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>info.picocli</groupId>
+              <artifactId>picocli-codegen</artifactId>
+              <version>${picocli.version}</version>
+            </path>
+          </annotationProcessorPaths>
+        </configuration>
+      </plugin>
+
+      <!-- Fat-jar executável (java -jar sitelock-app/target/siteblock-*.jar).
+           Escolha: maven-shade-plugin em vez de maven-assembly-plugin, porque o shade
+           desempacota e reempacota as dependências num único JAR com merge de recursos
+           e ManifestResourceTransformer (Main-Class correto), tratando overlaps de
+           META-INF/services (picocli/jackson) que o assembly só colocaria lado a lado.
+           Uso: mvn clean package (ver run.sh/run.bat e README). -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.6.0</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals>
+              <goal>shade</goal>
+            </goals>
+            <configuration>
+              <createDependencyReducedPom>false</createDependencyReducedPom>
+              <transformers>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                  <mainClass>com.sitelock.SiteLockApplication</mainClass>
+                </transformer>
+              </transformers>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>
