@@ -19,7 +19,7 @@ import java.util.Scanner;
 import java.util.concurrent.Callable;
 
 /**
- * {@code sitelock unblock <dominio...> [--force]}.
+ * {@code siteblock unblock <dominio...> [--force]}.
  *
  * <p>Regra anti-impulso (por domínio): bloqueio temporário ainda ativo só pode
  * ser removido com {@code --force} + confirmação digitada ({@code SIM}).
@@ -91,7 +91,7 @@ public class UnblockCommand implements Callable<Integer> {
             }
         } catch (CorruptedStateException e) {
             System.err.println("Erro: estado corrompido (" + e.getMessage() + ").");
-            System.err.println("Nada foi alterado. Para recriar do zero, apague o arquivo manualmente ou rode: sitelock reset --yes");
+            System.err.println("Nada foi alterado. Para recriar do zero, apague o arquivo manualmente ou rode: siteblock reset --yes");
             return 1;
         } catch (IOException e) {
             System.err.println("Erro ao limpar bloqueios expirados: " + e.getMessage());

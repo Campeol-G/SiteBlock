@@ -30,7 +30,7 @@ import java.util.TreeMap;
  *       comum se o FS não suportar). Nunca escreve por cima do original.</li>
  *   <li>Lock inter-processos: antes de ler ou escrever, adquire lock
  *       exclusivo em {@code blocks.json.lock}. Isso serializa dois CLIs
- *       SiteLock concorrentes. Não protege contra editores externos — limitação
+ *       SiteBlock concorrentes. Não protege contra editores externos — limitação
  *       documentada (para isso seria preciso lock mandatório do SO).</li>
  *   <li>Validação: JSON ilegível → {@link CorruptedStateException}, sem apagar
  *       nada. O chamador deve abortar e orientar o usuário (modo não-interativo

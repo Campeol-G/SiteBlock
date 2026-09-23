@@ -52,7 +52,7 @@ import java.util.Set;
  *       continua intacto (o .tmp órfão pode ser ignorado/apagado).</li>
  *   <li>Lock: as operações de arquivo adquirem lock exclusivo em um arquivo de
  *       lock no diretório de estado (ex.: {@code ~/.sitelock/hosts.lock}).
- *       Isso serializa dois processos <b>SiteLock</b> concorrentes. Não protege
+ *       Isso serializa dois processos <b>SiteBlock</b> concorrentes. Não protege
  *       contra editores externos simultâneos — limitação conhecida de file
  *       locking cooperativo.</li>
  *   <li>Falha de escrita: como nunca escrevemos por cima do original (só via

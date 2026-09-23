@@ -8,7 +8,7 @@ import java.nio.file.Path;
 import java.util.concurrent.Callable;
 
 /**
- * {@code sitelock reset --yes} — recuperação de estado corrompido.
+ * {@code siteblock reset --yes} — recuperação de estado corrompido.
  *
  * <p>Comando extra (além de block/unblock/status): como o modo de
  * JSON-corrompido é não-interativo por decisão da Etapa 1, este comando oferece
@@ -38,7 +38,7 @@ public class ResetCommand implements Callable<Integer> {
         if (!yes) {
             System.err.println("Isso apagará TODOS os registros de bloqueio do estado (blocks.json).");
             System.err.println("O /etc/hosts NÃO será alterado por este comando.");
-            System.err.println("Rode de novo com --yes para confirmar: sitelock reset --yes");
+            System.err.println("Rode de novo com --yes para confirmar: siteblock reset --yes");
             return 2;
         }
         Path stateFile = CliSupport.resolveStateFile(stateFileOverride);

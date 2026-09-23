@@ -20,7 +20,7 @@ import java.util.Map;
  * <p><b>FUTURO (Etapa 2 — daemon):</b> a checagem "sob demanda" só atualiza
  * quando o usuário roda um comando. Para limpeza contínua, chamar
  * {@link #sweepExpired()} a partir de um serviço em background — ex.: um
- * {@code systemd timer} executando {@code sitelock status} periodicamente, ou
+ * {@code systemd timer} executando {@code siteblock status} periodicamente, ou
  * uma thread agendada ({@code ScheduledExecutorService}) dentro de um daemon.
  * O método já é idempotente e seguro para chamadas concorrentes/periódicas.
  */

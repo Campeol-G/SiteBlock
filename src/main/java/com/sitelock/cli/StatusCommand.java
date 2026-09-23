@@ -16,7 +16,7 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 
 /**
- * {@code sitelock status} — lista bloqueios. Não exige sudo para listar;
+ * {@code siteblock status} — lista bloqueios. Não exige sudo para listar;
  * a limpeza de expirados só ocorre se houver escrita no hosts.
  */
 @Command(name = "status", description = "Lista dominios bloqueados e tempo restante.",
@@ -54,12 +54,12 @@ public class StatusCommand implements Callable<Integer> {
                         .count();
                 if (pending > 0) {
                     System.out.println("Aviso: há " + pending + " bloqueio(s) expirado(s) pendentes de limpeza.");
-                    System.out.println("Rode com sudo (ex.: sudo java -jar sitelock-*.jar status) para concluir a limpeza no /etc/hosts.");
+                    System.out.println("Rode com sudo (ex.: sudo siteblock status) para concluir a limpeza no /etc/hosts.");
                 }
             }
         } catch (CorruptedStateException e) {
             System.err.println("Erro: estado corrompido (" + e.getMessage() + ").");
-            System.err.println("Nada foi alterado. Para recriar do zero, apague o arquivo manualmente ou rode: sitelock reset --yes");
+            System.err.println("Nada foi alterado. Para recriar do zero, apague o arquivo manualmente ou rode: siteblock reset --yes");
             return 1;
         } catch (IOException e) {
             System.err.println("Erro ao ler estado: " + e.getMessage());

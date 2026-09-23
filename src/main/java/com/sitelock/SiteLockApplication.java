@@ -10,17 +10,17 @@ import picocli.CommandLine.Command;
 import java.util.concurrent.Callable;
 
 /**
- * Ponto de entrada do SiteLock (Etapa 1: bloqueio local via /etc/hosts).
+ * Ponto de entrada do SiteBlock (Etapa 1: bloqueio local via /etc/hosts).
  *
  * <p>Arquitetura preparada para a Etapa 2 (servidor DNS): o bloqueio real está
  * atrás da interface {@code com.sitelock.blocker.SiteBlocker}; o CLI e o
  * {@code com.sitelock.core.BlockService} dependem da abstração, de modo que um
  * futuro {@code DnsBlocker} possa ser composto sem alterar os comandos.
  */
-@Command(name = "sitelock",
+@Command(name = "siteblock",
         description = "Bloqueia sites localmente via /etc/hosts.",
         mixinStandardHelpOptions = true,
-        version = "SiteLock 1.0.0",
+        version = "SiteBlock 1.0.0",
         subcommands = {BlockCommand.class, UnblockCommand.class, StatusCommand.class, ResetCommand.class})
 public class SiteLockApplication implements Callable<Integer> {
 

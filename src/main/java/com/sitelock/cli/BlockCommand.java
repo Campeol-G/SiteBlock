@@ -19,7 +19,7 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 
 /**
- * {@code sitelock block <dominio...> [--for <duracao>]}.
+ * {@code siteblock block <dominio...> [--for <duracao>]}.
  *
  * <p>P1: aceita 1..N domínios na mesma invocação (ex.: TikTok usa
  * {@code vm./vt./cdn} além do apex). A mesma duração vale para todos.
@@ -111,7 +111,7 @@ public class BlockCommand implements Callable<Integer> {
             }
         } catch (CorruptedStateException e) {
             System.err.println("Erro: estado corrompido (" + e.getMessage() + ").");
-            System.err.println("Nada foi alterado. Para recriar do zero, apague o arquivo manualmente ou rode: sitelock reset --yes");
+            System.err.println("Nada foi alterado. Para recriar do zero, apague o arquivo manualmente ou rode: siteblock reset --yes");
             System.err.println("(O /etc/hosts NÃO foi modificado por segurança.)");
             return 1;
         } catch (IOException e) {
@@ -163,7 +163,7 @@ public class BlockCommand implements Callable<Integer> {
             }
             if (expiresAt == null) {
                 System.out.println("Bloqueado " + domain + " (+ www." + domain
-                        + ", IPv4+IPv6) permanentemente (até 'sitelock unblock " + domain + "').");
+                         + ", IPv4+IPv6) permanentemente (até 'siteblock unblock " + domain + "').");
             } else {
                 System.out.println("Bloqueado " + domain + " (+ www." + domain + ", IPv4+IPv6) por "
                         + DurationParser.formatRemaining(duration) + ".");

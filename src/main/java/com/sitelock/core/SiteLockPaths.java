@@ -11,7 +11,7 @@ import java.util.Locale;
 import java.util.Optional;
 
 /**
- * Resolve os caminhos usados pelo SiteLock.
+ * Resolve os caminhos usados pelo SiteBlock.
  *
  * <p>Decisão crítica (resposta do usuário — "Home do usuário real"): quando o
  * programa roda com {@code sudo}, {@code user.home}/{@code $HOME} apontam para

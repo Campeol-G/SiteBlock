@@ -51,6 +51,6 @@ final class CliSupport {
 
     static String sudoHint(String subcommand) {
         return "Sem permissão de escrita em " + SiteLockPaths.getHostsPath()
-                + ". Rode com sudo, ex.: sudo java -jar sitelock-*.jar " + subcommand;
+                + ". Rode com sudo, ex.: sudo siteblock " + subcommand;
     }
 }

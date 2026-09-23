@@ -5,10 +5,10 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>com.sitelock</groupId>
-  <artifactId>sitelock</artifactId>
+  <artifactId>siteblock</artifactId>
   <version>1.0.0</version>
   <packaging>jar</packaging>
-  <name>SiteLock</name>
+  <name>SiteBlock</name>
   <description>CLI para bloquear dominios localmente via /etc/hosts, com bloqueio temporizado ou permanente.</description>
 
   <properties>
@@ -72,7 +72,7 @@
         <version>3.5.2</version>
       </plugin>
 
-      <!-- Gera fat-jar executavel: sudo java -jar target/sitelock-1.0.0.jar ... -->
+      <!-- Gera fat-jar executavel: siteblock ... (ver bin/siteblock) -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-shade-plugin</artifactId>

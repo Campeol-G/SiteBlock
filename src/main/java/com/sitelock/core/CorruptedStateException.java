@@ -9,7 +9,7 @@ import java.io.IOException;
  * <p>Decisão (resposta do usuário — modo não-interativo): o programa
  * <b>não</b> apaga nem recria o arquivo sozinho. Quem chamou deve abortar
  * a operação e orientar o usuário a apagar manualmente ou rodar
- * {@code sitelock reset} (ver {@code ResetCommand}).
+ * {@code siteblock reset} (ver {@code ResetCommand}).
  */
 public class CorruptedStateException extends IOException {
 
