@@ -54,7 +54,8 @@ public class StatusCommand implements Callable<Integer> {
                         .count();
                 if (pending > 0) {
                     System.out.println("Aviso: há " + pending + " bloqueio(s) expirado(s) pendentes de limpeza.");
-                    System.out.println("Rode com sudo (ex.: sudo siteblock status) para concluir a limpeza no /etc/hosts.");
+                    System.out.println("Rode com sudo (ex.: " + CliSupport.sudoCommand("status")
+                            + ") para concluir a limpeza no /etc/hosts.");
                 }
             }
         } catch (CorruptedStateException e) {

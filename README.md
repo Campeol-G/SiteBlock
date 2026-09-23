@@ -47,9 +47,12 @@ siteblock status
 sudo siteblock unblock tiktok.com
 ```
 
-> Se o `sudo` não encontrar o `siteblock` (o `secure_path` do sudo costuma
-> ignorar `~/.local/bin`), use a instalação em `/usr/local/bin` (acima) ou
-> `sudo $HOME/.local/bin/siteblock ...`.
+> `block`/`unblock` exigem root, e o `sudo` usa um PATH reduzido
+> (`secure_path`) que ignora `~/.local/bin` — por isso a instalação em
+> `/usr/local/bin` é a recomendada para uso com sudo (é executada uma única
+> vez). Sem ela, chame pelo caminho completo
+> (`sudo $HOME/.local/bin/siteblock ...`); as mensagens de erro do próprio
+> `siteblock` já mostram o comando exato a usar.
 
 O estado fica em `~/.sitelock/blocks.json` — **do usuário real** (respeita
 `SUDO_USER`, para não cair em `/root/.sitelock` sob sudo). O backup do hosts

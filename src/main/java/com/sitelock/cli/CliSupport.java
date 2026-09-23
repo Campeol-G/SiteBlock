@@ -51,6 +51,25 @@ final class CliSupport {
 
     static String sudoHint(String subcommand) {
         return "Sem permissão de escrita em " + SiteLockPaths.getHostsPath()
-                + ". Rode com sudo, ex.: sudo siteblock " + subcommand;
+                + ". Rode com sudo, ex.: " + sudoCommand(subcommand);
+    }
+
+    /**
+     * Monta a invocação com sudo que realmente funciona no terminal.
+     *
+     * <p>Motivação: o {@code siteblock} costuma morar em {@code ~/.local/bin},
+     * fora do {@code secure_path} do sudo — então um {@code sudo siteblock ...}
+     * puro falha com "command not found". O wrapper informa seu caminho
+     * absoluto via {@code -Dsiteblock.bin=...} e a dica usa esse caminho
+     * (quando a instalação é em {@code /usr/local/bin}, o nome curto basta).
+     */
+    static String sudoCommand(String subcommand) {
+        String bin = System.getProperty("siteblock.bin", "siteblock");
+        String display = "/usr/local/bin/siteblock".equals(bin) ? "siteblock" : bin;
+        if (display.contains(" ")) {
+            display = "\"" + display + "\"";
+        }
+        String args = subcommand == null || subcommand.isBlank() ? "" : " " + subcommand;
+        return "sudo " + display + args;
     }
 }

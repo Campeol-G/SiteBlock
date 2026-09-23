@@ -16,4 +16,14 @@ if [[ -z "$JAR" || ! -f "$JAR" ]]; then
   exit 1
 fi
 
-exec java -jar "$JAR" "$@"
+# Resolve o 'java' para caminho absoluto: sob 'sudo' o PATH e reduzido
+# (secure_path) e a busca relativa poderia falhar.
+JAVA_BIN="$(command -v java || true)"
+if [[ -z "$JAVA_BIN" ]]; then
+  echo "siteblock: 'java' (26+) nao encontrado no PATH." >&2
+  exit 1
+fi
+
+# Informa ao app como ele foi invocado, para que as dicas de 'sudo' mostrem
+# um comando que realmente funciona (o sudo ignora ~/.local/bin).
+exec "$JAVA_BIN" -Dsiteblock.bin="$SCRIPT" -jar "$JAR" "$@"
