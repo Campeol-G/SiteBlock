@@ -13,7 +13,7 @@
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <maven.compiler.release>17</maven.compiler.release>
+    <maven.compiler.release>26</maven.compiler.release>
     <picocli.version>4.7.6</picocli.version>
     <jackson.version>2.18.2</jackson.version>
     <junit.version>5.11.4</junit.version>
@@ -55,7 +55,7 @@
         <artifactId>maven-compiler-plugin</artifactId>
         <version>3.13.0</version>
         <configuration>
-          <release>17</release>
+          <release>26</release>
           <annotationProcessorPaths>
             <path>
               <groupId>info.picocli</groupId>

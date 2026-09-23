@@ -1,6 +1,6 @@
 # SiteBlock — Etapa 1 (bloqueio local via /etc/hosts)
 
-CLI em Java 17+ para bloquear domínios na própria máquina, redirecionando para
+CLI em Java 26+ para bloquear domínios na própria máquina, redirecionando para
 `127.0.0.1` via `/etc/hosts`. Suporta bloqueio temporizado (`--for`) ou
 permanente até `unblock` manual.
 
