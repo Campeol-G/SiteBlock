@@ -17,10 +17,11 @@ class PermissionAdvisorTest {
     @ParameterizedTest
     @ValueSource(strings = {"Linux", "linux", "Ubuntu"})
     void linuxHintsSudo(String osName) {
+        Path hosts = Path.of("/etc/hosts");
         String hint = new PermissionAdvisor(osName)
-                .elevationHint(Path.of("/etc/hosts"), "block tiktok.com");
+                .elevationHint(hosts, "block tiktok.com");
         assertTrue(hint.toLowerCase().contains("sudo"), "esperava 'sudo': " + hint);
-        assertTrue(hint.contains("/etc/hosts"), hint);
+        assertTrue(hint.contains(hosts.toString()), hint);
     }
 
     @ParameterizedTest
