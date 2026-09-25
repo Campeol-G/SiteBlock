@@ -3,15 +3,19 @@
 # Uso: siteblock <comando> [opcoes]  (ex.: siteblock block tiktok.com --for 1h30m)
 set -euo pipefail
 
-SCRIPT="$(readlink -f "${BASH_SOURCE[0]}")"
+SCRIPT="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || realpath "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
 ROOT="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
 
 JAR="${SITEBLOCK_JAR:-}"
 if [[ -z "$JAR" ]]; then
+  JAR="$(ls -1t "$ROOT"/sitelock-app/target/siteblock-*.jar 2>/dev/null | head -n 1 || true)"
+fi
+if [[ -z "$JAR" ]]; then
+  # Compat: layout antigo de módulo único.
   JAR="$(ls -1t "$ROOT"/target/siteblock-*.jar 2>/dev/null | head -n 1 || true)"
 fi
 if [[ -z "$JAR" || ! -f "$JAR" ]]; then
-  echo "siteblock: fat-jar nao encontrado (procurado em: $ROOT/target/siteblock-*.jar)." >&2
+  echo "siteblock: fat-jar nao encontrado (procurado em: $ROOT/sitelock-app/target/siteblock-*.jar)." >&2
   echo "Compile antes com: cd \"$ROOT\" && mvn package" >&2
   exit 1
 fi
