@@ -1,117 +1,93 @@
-# SiteBlock — Etapa 1 (bloqueio local via /etc/hosts)
+# SiteBlock
 
-CLI em Java 26+ para bloquear domínios na própria máquina, redirecionando para
-`127.0.0.1` via `/etc/hosts`. Suporta bloqueio temporizado (`--for`) ou
-permanente até `unblock` manual.
+CLI simples em Java para bloquear sites na sua máquina editando o arquivo hosts. Tem também um servidor DNS local opcional para estender o bloqueio a outros aparelhos da mesma rede.
 
-> Etapa futura (não implementada): servidor DNS para bloquear em outros
-> dispositivos da rede. A arquitetura já está preparada: o bloqueio real fica
-> atrás da interface `com.sitelock.blocker.SiteBlocker` (hoje só existe
-> `HostsFileBlocker`); um futuro `DnsBlocker` pode ser composto sem tocar no CLI.
+## Requisitos
 
-## Compilar
+- Java 26+ (`java -version`)
+- Maven 3.8+ só para compilar (`mvn -version`)
+
+## Baixar e compilar
 
 ```bash
+git clone https://github.com/Campeol-G/SiteBlock.git
+cd SiteBlock
 mvn package
 ```
 
-Gera `target/siteblock-1.0.0.jar` (fat-jar executável).
-
-## Instalar o comando `siteblock`
-
-O repositório traz `bin/siteblock`, que encontra o fat-jar e executa a CLI.
-Para ter `siteblock` no terminal, aponte um link para ele no `PATH`:
-
-```bash
-ln -sf "$PWD/bin/siteblock" ~/.local/bin/siteblock     # usuário (~/.local/bin no PATH)
-sudo ln -sf "$PWD/bin/siteblock" /usr/local/bin/siteblock  # sistema (uso com sudo)
-```
-
-Depois, o comando para rodar no terminal é sempre:
-
-```bash
-siteblock <comando> [opções]
-```
-
-sem `java -jar` nem caminho do jar (ex.: `siteblock block tiktok.com --for 1h30m`).
-O jar também pode ser indicado explicitamente via `SITEBLOCK_JAR=/caminho.jar`.
+O executável sai em `sitelock-app/target/siteblock-*.jar`.
 
 ## Rodar
 
-Editar `/etc/hosts` exige root. Comandos que modificam (`block`, `unblock`) e a
-limpeza de expirados falham com mensagem clara se não houver escrita — rode com `sudo`:
+Para ter o comando `siteblock` no terminal, crie um link no `PATH`:
 
 ```bash
-sudo siteblock block tiktok.com --for 1h30m
-siteblock status
-sudo siteblock unblock tiktok.com
+ln -sf "$PWD/bin/siteblock" ~/.local/bin/siteblock
 ```
 
-> `block`/`unblock` exigem root, e o `sudo` usa um PATH reduzido
-> (`secure_path`) que ignora `~/.local/bin` — por isso a instalação em
-> `/usr/local/bin` é a recomendada para uso com sudo (é executada uma única
-> vez). Sem ela, chame pelo caminho completo
-> (`sudo $HOME/.local/bin/siteblock ...`); as mensagens de erro do próprio
-> `siteblock` já mostram o comando exato a usar.
+Depois use direto:
 
-O estado fica em `~/.sitelock/blocks.json` — **do usuário real** (respeita
-`SUDO_USER`, para não cair em `/root/.sitelock` sob sudo). O backup do hosts
-original vai para `~/.sitelock/hosts.backup` (criado uma única vez).
+```bash
+sudo siteblock block tiktok.com --for 1h
+siteblock status
+```
+
+Alternativas sem instalar (`run.sh`/`run.bat` acham o jar sozinhos, ou passe o caminho em `SITEBLOCK_JAR`):
+
+```bash
+./run.sh block tiktok.com --for 1h
+./run.sh status
+```
+
+No Windows:
+
+```bat
+run.bat block tiktok.com --for 1h
+run.bat status
+```
+
+Ou direto:
+
+```bash
+java -jar sitelock-app/target/siteblock-*.jar status
+```
+
+Mexer no hosts e ouvir na porta 53 exige permissão alta. No Linux/macOS use `sudo` para `block`, `unblock` e `dns start` na porta padrão. Dá para testar o DNS sem sudo com `--port 5300`.
 
 ## Comandos
 
 ```bash
-# Bloqueio temporário (30m, 2h, 1h30m, 1d — apenas m/h/d minúsculos, colados)
-# Aceita 1..N domínios por chamada (útil p/ TikTok: apex + subdomínios/CDN)
-sudo siteblock block tiktok.com vm.tiktok.com vt.tiktok.com --for 30m
-sudo siteblock block youtube.com --for 1h30m
+# Bloquear (temporário ou permanente)
+sudo ./run.sh block tiktok.com vm.tiktok.com --for 30m
+sudo ./run.sh block youtube.com --for 1h30m
+sudo ./run.sh block twitter.com
 
-# Bloqueio permanente (até unblock manual)
-sudo siteblock block twitter.com
+# Ver o que está bloqueado
+./run.sh status
 
-# Re-bloquear atualiza a duração (avisa que sobrescreveu)
-sudo siteblock block tiktok.com --for 2h
+# Desbloquear (se ainda tiver prazo, pede --force + confirmação digitada)
+sudo ./run.sh unblock tiktok.com
+sudo ./run.sh unblock tiktok.com --force
 
-# Listar (não precisa de sudo para listar; com sudo também limpa expirados)
-siteblock status
+# Apagar o estado e começar do zero (não mexe no hosts)
+./run.sh reset --yes
 
-# Desbloquear (recusa se ainda houver prazo; informa quanto falta)
-sudo siteblock unblock tiktok.com vm.tiktok.com
-
-# Desbloqueio antecipado: exige --force + digitar SIM (por dominio)
-sudo siteblock unblock tiktok.com --force
-
-# Estado corrompido: o programa aborta sem apagar nada; para recriar:
-siteblock reset --yes
-# (não altera o /etc/hosts — limpe o restante com unblock)
+# DNS para a rede local
+sudo ./run.sh dns start
+./run.sh dns status
+sudo ./run.sh dns stop
 ```
 
-Sempre são bloqueadas as quatro linhas por dominio: `dominio` + `www.dominio`,
-em IPv4 (`127.0.0.1`) e IPv6 (`::1`).
-Entradas como `https://WWW.TikTok.com/feed` são normalizadas para `tiktok.com`
-(com aviso). O `/etc/hosts` não suporta wildcard (`*.tiktok.com`), por isso
-liste os subdomínios explicitamente.
+Durações aceitas: `30m`, `2h`, `1h30m`, `1d`. Sem `--for`, o bloqueio fica até `unblock`.
 
-> Nota (bug corrigido): versões anteriores gravavam o `/etc/hosts` com
-> permissão `600` (ilegível sem sudo, bloqueio "fantasma") e criavam
-> `~/.sitelock/*` como root. Agora as permissões/dono originais são
-> preservadas e o estado volta a pertencer ao usuário real. Se seu `/etc/hosts`
-> ficou `600`, repare uma vez: `sudo chmod 644 /etc/hosts`, e
-> `sudo chown -R $USER:$USER ~/.sitelock/`.
+## Onde fica o estado
 
-## Expiração automática
+- Bloqueios: `~/.sitelock/blocks.json`
+- Backup do hosts original: `~/.sitelock/hosts.backup` (criado uma vez)
+- Estado do DNS: `~/.sitelock/dns-server.json`
 
-A cada execução de qualquer comando, os bloqueios expirados são removidos do
-`/etc/hosts` e do JSON antes de processar o comando pedido. Limitação: se o
-usuário não rodar nada, nada é limpo — para limpeza contínua, agende chamadas
-periódicas (ex.: `systemd timer` rodando `siteblock status`) — ver comentário em
-`BlockService.sweepExpired()`.
+## Limites honestos
 
-## Testes
-
-```bash
-mvn test
-```
-
-Cobre: parsing de duração, validação/normalização de domínio, manipulação do
-bloco de marcadores em memória e serialização do JSON.
+- Bloqueio por hosts não tem curinga: `tiktok.com` não cobre `vm.tiktok.com`, liste os subdomínios.
+- App que usa DNS próprio ou IP fixo fura o bloqueio.
+- Expirado só sai do hosts quando algum comando roda; sem agendador, não há limpeza sozinha.
