@@ -188,9 +188,10 @@ Mesma resistência do `unblock` de hoje, sem exceção:
   duas etapas em toda ferramenta, e quebrar isso só aqui cria um atalho que
   não existe em `unblock` individual. A flag é uma palavra; a dor que se quer
   remover são as 40 confirmações, não a flag.
-- Lista os domínios do perfil hoje bloqueados **temporário e ativo**, com o
-  tempo restante de cada um, e o total somado que está sendo descartado.
-- Se essa lista estiver vazia, libera sem perguntar nada.
+- Lista os domínios do perfil hoje bloqueados, **todos**: os temporários
+  ativos com o tempo restante de cada um, e os permanentes marcados como
+  `permanente`. Mostra o total somado de tempo que está sendo descartado.
+- Se a lista estiver vazia, libera sem perguntar nada.
 - Se não estiver, uma confirmação digitada **antes de desbloquear qualquer
   um**. Não é uma confirmação por domínio como o `unblock` faz
   (`UnblockCommand.java:125`): 40 prompts de "SIM" são exatamente a atrito
@@ -199,18 +200,17 @@ Mesma resistência do `unblock` de hoje, sem exceção:
 - Sair com o código 3 que o `unblock` já usa para "cancelado", para que
   scripts possam distinguir.
 
-**Em aberto:** o que fazer com os domínios do perfil que hoje estão
-**permanentes**. O `unblock` atual não pede confirmação para eles
-(`isTemporaryAndActive` é falso, `UnblockCommand.java:103`). Duas leituras
-defensáveis, e a escolha muda o que o usuário precisa digitar:
+**Os permanentes entram na confirmação** — decisão do usuário, e uma
+melhoria sobre o `unblock` individual, que os solta em silêncio
+(`isTemporaryAndActive` é falso para eles, `UnblockCommand.java:103`).
 
-- **Silenciosos**, espelhando `unblock`. Consistente, e menos atrito.
-- **Entram na confirmação.** Um bloqueio permanente é o compromisso mais
-  deliberado que a pessoa assumiu — mais do que um de 8h. Um `profile unblock`
-  que solta os permanentes em silêncio é o caminho mais curto para o dia
-  inteiro acabar.
-
-Pergunta em aberto para o usuário.
+A assimetria é proposital e vale um comentário no código. Um bloqueio
+permanente é o compromisso **mais forte** que a pessoa assumiu, não o mais
+fraco: é o que se faz quando se quer fechar a porta de vez. Se o
+`profile unblock` os soltasse em silêncio, seria o caminho mais curto para
+descartar uma trava ilimitada sem digitar uma tecla — exatamente o atalho que
+o `--force` desta seção existe para não criar. O `unblock` individual fica
+como está, por não ser escopo mudá-lo.
 
 O `unblock` individual continua como está. Nada dele muda.
 
@@ -324,22 +324,20 @@ root, então esse passo não é uma novidade na curva.
 |---|---|---|
 | Linux | unit em `/etc/systemd/system/sitelock-sweeper.service` | `systemctl enable --now` |
 | macOS | plist em `/Library/LaunchDaemons/com.sitelock.sweeper.plist` | `launchctl bootstrap system` |
-| Windows | Task Scheduler, `schtasks /create` | ver **Em aberto** abaixo |
+| Windows | Task Scheduler, `onlogon`, `/rl highest` | `schtasks /create /sc ONLOGON /rl HIGHEST /tn sitelock-sweeper` |
 
-**Em aberto no Windows: `onlogon` ou `onstart`.** Não é um detalhe, muda o
-modelo de privilégio e a posse dos arquivos:
+No Windows o disparo é **no login**, não no boot — decisão do usuário.
+`ONSTART /ru SYSTEM` seria "iniciar com o computador" ao pé da letra, mas
+troca a identidade do processo: `user.home` passa a ser o profile do SYSTEM,
+todo arquivo criado no `stateDir` nasce root, e o
+`SiteLockPaths.chownToRealUserIfSudo` não socorre (ele se apoia em
+`SUDO_USER`, que não existe nesse contexto), passando a exigir devolução de
+posse explícita. `ONLOGON` com `HIGHEST` dá o privilégio de root que o daemon
+precisa sem trazer esse custo, e é o análogo mais próximo do unit de sistema
+que os outros dois SOs obrigatoriamente são.
 
-- **`onlogon`** (usuário logado, `/rl highest`): roda quando alguém entra.
-  `user.home` já é o do usuário. É o análogo mais próximo de "unit de
-  sistema", que é o que os outros dois SOs obrigatoriamente são.
-- **`onstart`** (`/ru SYSTEM`): roda desde o boot, antes de qualquer login —
-  é o que "iniciar com o computador" significa ao pé da letra. Mas
-  `user.home` vira o profile do SYSTEM, todo arquivo criado no `stateDir`
-  nasce root, e o `SiteLockPaths.chownToRealUserIfSudo` não ajuda (ele se
-  apoia em `SUDO_USER`, que não existe nesse contexto). Passa a precisar de
-  devolução de posse explícita.
-
-Pergunta em aberto para o usuário.
+O que se perde é o caso "máquina ligada, ninguém logado". Não importa: sem
+sessão aberta não há navegador para estar bloqueado.
 
 Por que raiz e não usuário: unit de usuário e LaunchAgent rodam sem
 privilégio, e sem privilégio o daemon não consegue tirar nada do
@@ -611,13 +609,8 @@ cravados" mora.
 | 16 | `reset --yes` **não** apaga `profiles.json` | perfil é receita, não é estado de bloqueio |
 | 17 | Aviso de daemon em stdout, prefixo `AVISO:` | segue o que `StatusCommand` já faz; não é erro, logo não vai para stderr |
 | 18 | Reconciliação estado↔hosts como **melhoria**, não agora | é o item mais defensável da fila, e não é necessário para o resto |
-
-# Em aberto — precisa do usuário
-
-1. **Windows: `onlogon` ou `onstart`.** Ver a tabela de autostart. Muda o
-   modelo de privilégio e a posse dos arquivos no `stateDir`.
-2. **`profile unblock` e os domínios atualmente permanentes.** Entram na
-   confirmação digitada ou são liberados em silêncio? Ver a seção do unlock.
+| 19 | Windows dispara no login (`ONLOGON`/`HIGHEST`), não no boot | **usuário** — privilege de root sem o custo de posse do profile SYSTEM |
+| 20 | Permanentes entram na confirmação do `profile unblock` | **usuário** — é o compromisso mais forte, não o mais fraco; soltá-lo calado seria o atalho que o `--force` existe para impedir |
 
 # Aberto para o builder
 
@@ -626,3 +619,5 @@ cravados" mora.
 - Se `profile` merece `--json` para saída legível por script.
 - Se vale um `siteblock profile rename` ou se re-salvar resolve.
 - Como reportar progresso de 40+ domínios sem poluir o stdout.
+- Se os 4 últimos minutos de texto do §"caminhos cravados" viram um teste de
+  integração ou se a asserção de substring do `AutostartArtifactTest` basta.
