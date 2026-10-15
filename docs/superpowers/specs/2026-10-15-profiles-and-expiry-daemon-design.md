@@ -612,12 +612,81 @@ cravados" mora.
 | 19 | Windows dispara no login (`ONLOGON`/`HIGHEST`), não no boot | **usuário** — privilege de root sem o custo de posse do profile SYSTEM |
 | 20 | Permanentes entram na confirmação do `profile unblock` | **usuário** — é o compromisso mais forte, não o mais fraco; soltá-lo calado seria o atalho que o `--force` existe para impedir |
 
-# Aberto para o builder
+# Decidido pelo builder (o usuário não escolheu; reversible)
 
-- Como exatamente classificar um nome de perfil (regex, ou lista de
-  caracteres proibidos).
-- Se `profile` merece `--json` para saída legível por script.
-- Se vale um `siteblock profile rename` ou se re-salvar resolve.
-- Como reportar progresso de 40+ domínios sem poluir o stdout.
-- Se os 4 últimos minutos de texto do §"caminhos cravados" viram um teste de
-  integração ou se a asserção de substring do `AutostartArtifactTest` basta.
+Os pontos que estavam abertos na primeira versão deste documento, resolvidos:
+
+| # | Questão aberta | Decisão | Por quê |
+|---|---|---|---|
+| 21 | Como classificar um nome de perfil | regex única `^[A-Za-z0-9_-]{1,64}$` | uma regra só mata `../../`, espaço e caractere de controle no mesmo lugar; lista de proibidos sempre deixa um buraco |
+| 22 | `profile` merece `--json`? | **não** | ninguém pediu; a CLI é humana e `status` não tem `--json` |
+| 23 | `profile rename`? | **não** | `profile save --force` resolve, e o `save` já recusa sobrescrever |
+| 24 | Como reportar 40+ domínios | um por linha, sem paginação, resumo no fim | paginação em terminal não tem "próxima página" sem interação; quem quer dado bruto tem o `blocks.json` |
+| 25 | Teste dos caminhos cravados: integração ou substring? | **os dois** | a substring no `AutostartArtifactTest` roda no CI e pega o texto errado; só ela não prova que o processo lê o `stateDir` cravado |
+
+Sobre o item 25, o teste de integração é um subprocesso: `__run-daemon --once`
+lançado com `SUDO_USER` removido do ambiente e `-Duser.home=<dir vazio>`, com
+`-Dsitelock.stateDir=<dir do teste>`, tem que varrer o `stateDir` cravado e não
+`user.home`. É a única forma de cobrir o `SUDO_USER`, que não se manipula
+in-process.
+
+## Sob `--state-file` nos testes: onde mora o `profiles.json`
+
+`CliSupport` já resolve os arquivos vizinhos por `resolveSibling` a partir do
+state file (`CliSupport.java:34-40,46`). O `profiles.json` segue o mesmo
+padrão: filho do diretório do `blocks.json`. Sem flag nova.
+
+## Correções encontradas na revisão deste documento
+
+Uma revisão independente do documento contra o código achou quatro problemas
+de fundo e cinco afirmações factualmente erradas. As quatro correções de
+fundo estão detalhadas em `docs/superpowers/plans/2026-10-15-profiles-and-expiry-daemon.md`:
+
+1. **Quem escreve o `daemon.json`.** A tabela acima diz que o pai escreve
+   `pid`/`startedAt`/`stateDir`. Mas o autostart não tem pai: o
+   systemd/launchd/schtasks executa `__run-daemon` direto, então depois de um
+   boot não existiria PID nenhum — `daemon status` diria "parado" com o
+   processo vivo, `daemon stop` não teria o que matar, e o aviso de "não há
+   daemon vivo" dispararia numa máquina corretamente configurada. **O filho
+   escreve o próprio `daemon.json`** e o pai apenas verifica.
+2. **Flush de DNS no daemon.** "`sweepExpired()` é a única coisa que ele
+   chama" não basta: todo outro caminho que mexe no hosts faz
+   `flushDnsBestEffort()`. Sem o flush a linha sai do `/etc/hosts`, o daemon
+   registra o sweep, e o navegador continua resolvendo do cache — a feature
+   fica invisível no único caso que ela existe para atender. **O daemon faz
+   flush depois de um sweep que removeu algo.**
+3. **Posse dos arquivos.** O raciocínio de "systemd ausente" e `ONSTART /ru
+   SYSTEM` vale igual para o unit de sistema e para a LaunchDaemon: root sem
+   `SUDO_USER`, logo `chownToRealUserIfSudo` não socorre e o `blocks.json` nasce
+   do root na primeira escrita (a escrita atômica troca o inode). Como a spec
+   promete duas vezes que `daemon status` roda sem `sudo`, **o artefato embute
+   `-Dsitelock.user=<dono>` e o daemon devolve a posse**.
+4. **`profile unblock` e o `--force`.** "Sem `--force`, recusa tudo" e "os
+   permanentes entram na confirmação" são incompatíveis se o gate cobrir só os
+   temporários: um perfil só de travas ilimitadas sairia sem flag e sem
+   digitar nada, que é o atalho que o próprio `--force` existe para impedir.
+   **O `--force` é o gate e cobre qualquer domínio ativo, inclusive
+   permanente; a confirmação digitada é a camada de dentro e inclui os
+   permanentes.**
+
+Erros de fato sobre o código (o plano usa as referências corretas):
+
+- `SiteLockPaths.java` tem 131 linhas: `getHostsPath()` está em `:54`, a
+  leitura da property em `:55`. O `:255` citado não existe.
+- `AVISO:` (maiúsculo) existe em `DnsStartCommand.java:193`; `StatusCommand.java:55`
+  e `BlockCommand.java:64` usam `Aviso:`. O plano usa `AVISO:`, como a decisão 17
+  manda, e registra que a divergência é deliberada.
+- `BlockService.java:56` não é a chamada de `unblock`: o laço abre em `:58` e a
+  chamada está em `:60`.
+- O custo por domínio do `blockInFile` são **três** locks e três leituras
+  (`:290` e `:291` chamam `readHostsLocked`, e `modifyHosts` lê de novo), não
+  duas. O `unblockInFile` são duas. A conclusão não muda.
+- `sweepExpired()` não é chamado por todo comando: `reset`, os cinco
+  subcomandos de `dns` e a raiz não chamam, e o `status` só chama quando o
+  hosts é gravável.
+
+## Este documento será removido
+
+O usuário pediu para apagar `docs/superpowers/` depois da implementação. O
+plano de implementação (`docs/superpowers/plans/`) vai junto, a não ser que ele
+peça o contrário.
