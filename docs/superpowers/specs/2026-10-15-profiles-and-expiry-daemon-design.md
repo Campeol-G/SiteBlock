@@ -183,19 +183,34 @@ Perfil 'trabalho' aplicado.
 Mesma resistência do `unblock` de hoje, sem exceção:
 
 - Roda `sweepExpired()` primeiro.
-- Lista os domínios do perfil que estão **temporários e ativos**, com o tempo
-  restante de cada um.
-- Se a lista estiver vazia, libera sem perguntar nada (não há nada a
-  arriscar).
-- Se não estiver, exige confirmação digitada **antes de desbloquear
-  qualquer um**, mostrando a lista e o total de tempo que está sendo
-  descartado. Não é uma confirmação por domínio como o `unblock` faz — 40
-  prompts de "SIM" são exatamente a atrito que esta feature existe para
-  remover. É uma confirmação para a operação inteira.
-- Cancelar **não desfaz nada**: o comando não toca em domínio algum, nem
-  nos que já estariam expirados naturalmente.
+- **Mantém o passo de `--force`.** Sem ele, recusa tudo e sai com 3, exatamente
+  como `UnblockCommand.java:99` faz. Desbloquear antes do prazo é operação de
+  duas etapas em toda ferramenta, e quebrar isso só aqui cria um atalho que
+  não existe em `unblock` individual. A flag é uma palavra; a dor que se quer
+  remover são as 40 confirmações, não a flag.
+- Lista os domínios do perfil hoje bloqueados **temporário e ativo**, com o
+  tempo restante de cada um, e o total somado que está sendo descartado.
+- Se essa lista estiver vazia, libera sem perguntar nada.
+- Se não estiver, uma confirmação digitada **antes de desbloquear qualquer
+  um**. Não é uma confirmação por domínio como o `unblock` faz
+  (`UnblockCommand.java:125`): 40 prompts de "SIM" são exatamente a atrito
+  que esta feature existe para remover.
+- Cancelar **não desfaz nada**: o comando não toca em domínio algum.
 - Sair com o código 3 que o `unblock` já usa para "cancelado", para que
   scripts possam distinguir.
+
+**Em aberto:** o que fazer com os domínios do perfil que hoje estão
+**permanentes**. O `unblock` atual não pede confirmação para eles
+(`isTemporaryAndActive` é falso, `UnblockCommand.java:103`). Duas leituras
+defensáveis, e a escolha muda o que o usuário precisa digitar:
+
+- **Silenciosos**, espelhando `unblock`. Consistente, e menos atrito.
+- **Entram na confirmação.** Um bloqueio permanente é o compromisso mais
+  deliberado que a pessoa assumiu — mais do que um de 8h. Um `profile unblock`
+  que solta os permanentes em silêncio é o caminho mais curto para o dia
+  inteiro acabar.
+
+Pergunta em aberto para o usuário.
 
 O `unblock` individual continua como está. Nada dele muda.
 
@@ -259,6 +274,40 @@ Robustez, na ordem do que importa:
   expirado para trás num shutdown.
 - Shutdown hook, como o servidor DNS faz (`DnsRunDaemonCommand.java:62`).
 
+### O que o daemon registra, e quem escreve
+
+Seguindo o precedente do DNS (`DnsStartCommand.java:145`), quem escreve o
+estado inicial é o **pai**, e o filho só apaga no final.
+
+`~/.sitelock/daemon.json`:
+
+| Campo | Quem escreve | Quando |
+|---|---|---|
+| `pid` | pai, no `daemon start` | uma vez |
+| `startedAt` | pai | uma vez |
+| `stateDir` cravado | pai | uma vez |
+| `lastSweepAt` | **filho** | só quando o sweep removeu algo, ou no boot |
+
+`lastSweepAt` ser reescrito a cada iteração seria uma escrita de root em
+diretório do usuário a cada 60 s, o dia inteiro, só para atualizar um campo que
+ninguém lê com essa frequência. Escrever **somente quando o sweep removeu
+domínio** limita o tráfego ao que é raro por definição, e `status` mostra
+exatamente o que a pessoa quer saber: "quando foi a última vez que alguma
+coisa expirou sozinha".
+
+**"Autostart ligado?"** sem elevação: no Linux/macOS é teste de existência do
+artefato (`/etc/systemd/system/sitelock-sweeper.service`,
+`/Library/LaunchDaemons/com.sitelock.sweeper.plist`); no Windows, `schtasks
+/query`. Nenhum dos três precisa de root para *consultar*, então `daemon
+status` roda sem `sudo`, igual ao `dns status` hoje.
+
+**Trava de instância única:** `daemon.lock` com `FileLock` retido pelo filho
+durante a vida inteira. Um `kill -9` **não** órfãoa o lock — o SO libera
+`FileLock` na morte do processo, é a propriedade que o torna adequado aqui,
+ao contrário de um lock por PID que sobreviveria ao processo. O PID file
+continua existindo só para o `status` mostrar e para o pai detectar filho já
+morto, como o `DnsDaemonState` faz.
+
 ### O que o daemon **não** faz
 
 Ele não adiciona nada ao `/etc/hosts`. Só remove. `sweepExpired()` é a única
@@ -275,7 +324,22 @@ root, então esse passo não é uma novidade na curva.
 |---|---|---|
 | Linux | unit em `/etc/systemd/system/sitelock-sweeper.service` | `systemctl enable --now` |
 | macOS | plist em `/Library/LaunchDaemons/com.sitelock.sweeper.plist` | `launchctl bootstrap system` |
-| Windows | Task Scheduler, trigger `onlogon`, `/rl highest` | `schtasks /create` |
+| Windows | Task Scheduler, `schtasks /create` | ver **Em aberto** abaixo |
+
+**Em aberto no Windows: `onlogon` ou `onstart`.** Não é um detalhe, muda o
+modelo de privilégio e a posse dos arquivos:
+
+- **`onlogon`** (usuário logado, `/rl highest`): roda quando alguém entra.
+  `user.home` já é o do usuário. É o análogo mais próximo de "unit de
+  sistema", que é o que os outros dois SOs obrigatoriamente são.
+- **`onstart`** (`/ru SYSTEM`): roda desde o boot, antes de qualquer login —
+  é o que "iniciar com o computador" significa ao pé da letra. Mas
+  `user.home` vira o profile do SYSTEM, todo arquivo criado no `stateDir`
+  nasce root, e o `SiteLockPaths.chownToRealUserIfSudo` não ajuda (ele se
+  apoia em `SUDO_USER`, que não existe nesse contexto). Passa a precisar de
+  devolução de posse explícita.
+
+Pergunta em aberto para o usuário.
 
 Por que raiz e não usuário: unit de usuário e LaunchAgent rodam sem
 privilégio, e sem privilégio o daemon não consegue tirar nada do
@@ -283,22 +347,77 @@ privilégio, e sem privilégio o daemon não consegue tirar nada do
 
 `daemon disable` reverte cada um dos três e remove o artefato.
 
+### Os caminhos absoluteos precisam ser cravados no artefato
+
+**Este é o ponto que faz a feature funcionar ou não, e é fácil de errar.**
+
+`SiteLockPaths.getRealUserHome()` (`SiteLockPaths.java:110`) só recupera a home
+do usuário real a partir de `SUDO_USER`. Um unit de **sistema** (sem `User=`),
+uma LaunchDaemon e um `schtasks /ru SYSTEM` rodam como root **sem
+`SUDO_USER`**. Nessas condições `user.home` é `/root` ou
+`C:\Windows\System32\config\systemprofile`, e o daemon leria um `blocks.json`
+que não é o mesmo que o do `sudo siteblock block`. Resultado: a feature
+inteira é um no-op **silencioso** — o daemon roda, faz sweep, não acha
+nada, e ninguém percebe.
+
+Portanto o artefato gerado **não pode depender de `user.home` em momento
+nenhum**. O `daemon enable` resolve os caminhos no instante da instalação e
+os embute no ExecStart/`ProgramArguments`/`/tr`:
+
+```
+-Dsitelock.stateDir=/home/<user>/.sitelock
+-Dsitelock.hostsFile=/etc/hosts
+```
+
+O gancho já existe: `SiteLockPaths.getStateDir()` e `getHostsPath()` leem
+`System.getProperty` **antes** de qualquer outra coisa
+(`SiteLockPaths.java:30` e `:255`). Nada em `SiteLockPaths` precisa mudar.
+
+E o mesmo caminho tem que ser passado ao `daemon start` manual, senão `start`
+e `enable` leem arquivos diferentes.
+
+Isso vale, por extensão, para `os hosts.lock`/`blocks.json.lock`: eles são
+resolvidos por `resolveSibling` a partir do state file
+(`BlockStore.java:39`, `CliSupport.java:46`), então cravar o `stateDir` já
+resolve os dois de brinde.
+
+Teste obrigatório: um `daemon start` disparado com `SUDO_USER` limpo e
+`user.home` apontando para um diretório vazio tem que operar sobre o
+`stateDir` cravado, não sobre o `user.home`. É exatamente o bug acima, e ele
+não aparece em nenhum teste feito à mão.
+
 ### Detalhes que vão quebrar se ninguém pensar neles
 
 **Caminho absoluto do jar.** Um unit do systemd não tem o seu `PATH`, não tem
 o `sudo` da sua sessão, e não passa pelo `run.sh`. A unit gerada precisa
 embutir o caminho absoluto do `java` e do jar/classepath no momento do
-`enable`. Se a propriedade `siteblock.jar` não estiver definida, cai para
-`java.class.path` — que é o que o `DnsStartCommand.buildChildCommand` já faz
-(`DnsStartCommand.java:203`), e que é válido só se o `enable` e o `start`
-vierem do mesmo lugar. Override manual: `daemon enable --jar <caminho>`.
+`enable`.
+
+Atenção: **a propriedade `siteblock.jar` não existe no projeto hoje.** Só
+existe `siteblock.bin`, setado em `bin/siteblock:33`, e `run.sh`/`run.bat` não
+passam `-D` nenhum. Então não há como "usar a propriedade que já existe". As
+opções, e a escolha:
+
+1. Passar a definir `-Dsiteblock.jar=<abs>` em `bin/siteblock`, `run.sh` e
+   `run.bat`, e adicionar `--jar <caminho>` no `daemon enable`. É a solução
+   real, mas toca três arquivos de launcher.
+2. Cair para `java.class.path`, que é o que `DnsStartCommand.buildChildCommand`
+   já faz (`DnsStartCommand.java:203`). Válido **apenas** se `enable` e
+   `start` vierem do mesmo lugar — o que costuma ser verdade (mesmo `bin/`),
+   mas não é garantido.
+
+Faz **as duas**: propriedade nova nos launchers, com o classpath como
+fallback. O `--jar` cobre o caso de instalação manual.
 
 **Jar em diretório gravável pelo usuário = escalonamento de privilégio.** O
-daemon vai rodar como root e executar código que o usuário pode trocar. Se o
-jar (ou o diretório dele) for gravável por não-root, o `enable` deve
-**avisar**, e o `start` deveria recusar sem `--allow-insecure-path`. Isso não
-é UID nem nome de usuário: o ponto é que o risco nasce quando se troca
-"eu digito sudo e veja o que estou executando" por "o sistema faz por mim".
+daemon vai rodar como root e executar código que o usuário pode trocar. No
+install documentado isso é verdade por construção — o jar vive em
+`~/Projects/.../target/` e o wrapper é um symlink em `~/.local/bin` — então
+um portão rígido **quebraria o caminho de instalação no primeiro dia**.
+Consequência: **aviso no `enable` e no `start`, nunca recusa**, e sem flag
+`--allow-insecure-path` (não há portão para burlar). O alvo aqui é o
+usuário distraído, não o atacante; quem quer burlar já edita o `/etc/hosts`
+com `sudo`, que é uma linha a mais.
 
 **systemd ausente.** Em container, WSL, ou distro sem systemd, `daemon
 enable` não tem o que escrever. Deve detectar (`/run/systemd/system` não
@@ -316,8 +435,21 @@ para repetir com `sudo` — reusando o `PermissionAdvisor` que já existe.
 - `block --for` quando não há daemon rodando nem autostart ligado **avisa**:
   "o prazo só vai ser aplicado quando você rodar outro comando do siteblock;
   rode `sudo siteblock daemon enable` para isso acontecer sozinho."
-- `status` mostra uma linha sobre o daemon quando existe temporário ativo,
-  pelo mesmo motivo.
+- `profile apply` avisa igual, quando o perfil criou algum temporário. É o
+  mesmo furo pelo caminho novo, e a pessoa não deve descobrir isso só
+  quando o site travar.
+- `status` mostra uma linha sobre o daemon quando existe temporário ativo.
+
+Definições, para não virar ruído:
+
+- **Gatilho:** avisa quando **não há daemon vivo** *ou* **não há autostart
+  instalado**. Os dois casos são defeito do ponto de vista do usuário, e
+  mesmo com autostart instalado o daemon pode estar naquele boot atrasado.
+- **Canal: stdout**, com o prefixo `AVISO:`, igual ao que `StatusCommand`
+  já usa (`StatusCommand.java:55`). Erro continua indo para stderr; isto não é
+  erro, é informação.
+- **`status` só fala quando há temporário ativo.** Block permanente não tem
+  prazo para vencer, então não há o que avisar.
 
 O aviso é o que fecha o ciclo: sem ele, a feature continua invisível e o
 comportamento antigo permanece o que a pessoa vai achar que é normal.
@@ -354,10 +486,32 @@ O caminho por domínio continua existindo — as assinaturas de um argumento
 delegam para a de lote com `List.of(domain)`. Comportamento idêntico, um só
 código.
 
-Com isso, `profile apply` faz: `sweepExpired` → merge em memória → **um**
-`save` do `blocks.json` → **um** `blockInFile` em lote. Se o batch do hosts
-falhar, reverte o `blocks.json` inteiro e reporta a falha. É o mesmo padrão
-de rollback que o `BlockCommand` já faz por domínio, aplicado uma vez.
+### O lote precisa passar pela interface `SiteBlocker`
+
+Um `default` no meio do caminho seria exatamente o tipo de coisa que
+funciona nos testes e falha na CLI, porque `CliSupport.newService`
+(`CliSupport.java:42`) entrega um `SiteBlocker` — e é por ele que os comandos
+alcançam o hosts. Os overrides `--hosts-file`/`--state-file` (que os testes
+usam) só funcionam se o lote passar por essa mesma costura.
+
+Então a mudança de API em `sitelock-core` é: `blockAll`/`unblockAll` no
+`SiteBlocker`, implementados em `HostsFileBlocker` delegando aos métodos de
+lote do `HostsFileManager`. Sem default — a interface tem uma única
+implementação, e forçar o compilador a achar as duas é mais barato que caçar
+um `UnsupportedOperationException` em produção.
+
+### E `sweepExpired()` também deve usar o lote
+
+`BlockService.sweepExpired()` hoje faz `blocker.unblock(domain)` **por
+domínio expirado** (`BlockService.java:56`). O daemon chama exatamente esse
+método a cada iteração. Se 40 domínios vencem juntos, são 40 passes de
+lock + read + escrita atômica do `/etc/hosts` — o mesmo custo que motivou
+esta seção, agora no caminho que mais importa.
+
+Trocar o laço interno por **uma** chamada `blocker.unblockAll(expirados)`.
+Não muda assinatura, não muda resultado observável, e é a mudança de melhor
+relação custo/benefício do documento inteiro: sem ela, o daemon fica lento
+justamente no pior dia.
 
 ### Ordem estado-vs-hosts e a janela de kill
 
@@ -370,6 +524,11 @@ A ordem escolhida tem a janela oposta: se o processo for **morto** entre os
 dois passos, o `blocks.json` diz "bloqueado" e o hosts não foi escrito, então
 o domínio está de fato livre. `status` vai dizer que está bloqueado. É
 fail-open e silencioso.
+
+Com o lote, `profile apply` faz: `sweepExpired` → merge em memória → **um**
+`save` do `blocks.json` → **um** `blockAll` no hosts. Se o lote falhar, reverte
+o `blocks.json` inteiro e reporta a falha. É o mesmo padrão de rollback que o
+`BlockCommand` já faz por domínio, aplicado uma vez.
 
 Aceito, porque matar o processo no meio de uma janela de milissegundos é
 raro, e fail-open é melhor que fail-closed aqui. **Mas** a limpeza tem como
@@ -400,14 +559,33 @@ O projeto tem suíte JUnit 5 e suíte roda no CI em Linux **e** Windows
 
 - `profile save/list/show/delete/apply/unblock` com `--hosts-file` e
   `--state-file` apontando para temp, como `CliCommandsTest` já faz.
-- Confirmação do unlock em massa: entrada errada **não** desbloqueia nada;
-  `SIM` desbloqueia; domínios já expirados passam sem prompt.
+- Confirmação do unlock em massa: sem `--force` recusa e devolve 3; entrada
+  errada **não** desbloqueia nada; `SIM` desbloqueia; domínios já expirados
+  passam sem prompt.
 
-## Integração (manual, documentado no README)
+## Autostart — testar o artefato, não o agendador
+
+O CI roda em Linux e Windows, nunca em macOS (`schtasks` e `launchctl` não
+existem nos outros). Testar o *agendador* seria impossível; testar o
+**artefato gerado** é possível, é puro, e é onde o bug do §"caminhos
+cravados" mora.
+
+- `AutostartArtifactTest`, um caso por `OsType`: gera o unit, o plist e o
+  comando do `schtasks` a partir de um `Path` e `java.class.path` conhecidos, e
+  afirma que o texto gerado **contém** o `stateDir` e o `hostsFile`
+  absolutos. É uma asserção de substring sobre uma string — e é
+  exatamente ela que pega o daemon apontando para `/root`.
+- `disable` é simétrico a `enable`: para os três, o `disable` remove o que o
+  `enable` criou, sem root quando possível.
+- A chamada ao sistema (`systemctl`, `launchctl`, `schtasks`) entra atrás de
+  um runner injetável, para o teste não precisar do binário real.
+
+## Manual, documentado no README
 
 - `daemon start` → `block --for 30s` → esperar → verificar que a linha sumiu
   do hosts **sem rodar nenhum comando**.
-- `daemon enable` → reboot → confirmar que o processo subiu.
+- `daemon enable` → reboot → confirmar que o processo subiu e que
+  `daemon status` aponta para o `stateDir` certo.
 
 ---
 
@@ -419,12 +597,27 @@ O projeto tem suíte JUnit 5 e suíte roda no CI em Linux **e** Windows
 | 2 | Guardar a **duração** no perfil, não o `expiresAt` | perfil é receita, não histórico; data salva de meses atrás é inútil |
 | 3 | Perfil-permanente sobre temporário **vira permanente** | simetria do `max`; era o único canto não coberto pela fala do usuário |
 | 4 | `profile save` recusa sobrescrever sem `--force` | perder a receita sem querer é o pior erro possível aqui |
-| 5 | Confirmação do unlock em massa é **uma**, não uma por domínio | 40 prompts são a atrito que a feature remove |
+| 5 | Confirmação do unlock em massa é **uma**, não uma por domínio | 40 prompts são o atrito que a feature remove |
 | 6 | `daemon` no singular, com `enable`/`disable` | vocabulário de systemd, que é o que metade dos usuários já conhece |
 | 7 | Sono adaptativo, teto padrão 60 s, ocioso 5 min | barato e mesmo assim reage a `block` de outro terminal em ≤ 1 min |
 | 8 | Assinaturas de hosts de 1 argumento delegam para a de lote | um só código, comportamento idêntico |
-| 9 | Aviso (não bloqueio) se o jar é gravável por não-root | avisar é o suficiente; o alvo é descuido, não atacante |
-| 10 | Reconciliação estado↔hosts como **melhoria**, não agora | é o item mais defensável da fila, e não é necessário para o resto |
+| 9 | Caminho inseguro é **aviso**, nunca recusa, sem flag de bypass | o install documentado é gravável pelo usuário; um portão rígido quebraria o dia 1 |
+| 10 | `-Dsiteblock.jar` nos três launchers, com classpath como fallback | a propriedade não existe hoje; sem ela o autostart não tem o que executar |
+| 11 | `sweepExpired()` migra para o lote junto | é o mesmo custo que motivou a Parte 3, no caminho que o daemon mais exercita |
+| 12 | `lastSweepAt` só é escrito quando o sweep removeu algo | evita escrita de root em diretório do usuário a cada 60 s para nada |
+| 13 | Lock de instância única é `FileLock`, não PID | `kill -9` não órfãoa um `FileLock`; um lock por PID sobreviveria ao processo |
+| 14 | "autostart ligado?" por teste de existência / `schtasks /query` | `daemon status` deve rodar sem `sudo`, como `dns status` já roda |
+| 15 | `profile save` com zero bloqueios ativos **erra**, não cria perfil vazio | perfil vazio não faz nada, e criá-lo em silêncio esconde o erro |
+| 16 | `reset --yes` **não** apaga `profiles.json` | perfil é receita, não é estado de bloqueio |
+| 17 | Aviso de daemon em stdout, prefixo `AVISO:` | segue o que `StatusCommand` já faz; não é erro, logo não vai para stderr |
+| 18 | Reconciliação estado↔hosts como **melhoria**, não agora | é o item mais defensável da fila, e não é necessário para o resto |
+
+# Em aberto — precisa do usuário
+
+1. **Windows: `onlogon` ou `onstart`.** Ver a tabela de autostart. Muda o
+   modelo de privilégio e a posse dos arquivos no `stateDir`.
+2. **`profile unblock` e os domínios atualmente permanentes.** Entram na
+   confirmação digitada ou são liberados em silêncio? Ver a seção do unlock.
 
 # Aberto para o builder
 
