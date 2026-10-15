@@ -86,7 +86,7 @@ Durações aceitas: `30m`, `2h`, `1h30m`, `1d`. Sem `--for`, o bloqueio fica at�
 - Backup do hosts original: `~/.sitelock/hosts.backup` (criado uma vez)
 - Estado do DNS: `~/.sitelock/dns-server.json`
 
-## Limites honestos
+## Limites
 
 - Bloqueio por hosts não tem curinga: `tiktok.com` não cobre `vm.tiktok.com`, liste os subdomínios.
 - App que usa DNS próprio ou IP fixo fura o bloqueio.
