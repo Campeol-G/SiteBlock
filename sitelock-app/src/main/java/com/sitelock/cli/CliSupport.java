@@ -14,6 +14,8 @@ import java.time.Clock;
 /** Helpers compartilhados pelos comandos CLI. */
 final class CliSupport {
 
+    static final String PROFILES_FILE_NAME = "profiles.json";
+
     private CliSupport() {
     }
 
@@ -37,6 +39,18 @@ final class CliSupport {
             return sf.resolveSibling("hosts.backup");
         }
         return SiteLockPaths.getBackupFile();
+    }
+
+    /**
+     * Onde mora o {@code profiles.json}: irmão do {@code blocks.json}, pelo mesmo
+     * motivo do {@code hosts.backup} e do {@code hosts.lock} — o {@code --state-file}
+     * dos testes aponta o diretório inteiro, sem precisar de uma flag nova.
+     */
+    static Path resolveProfilesFile(String stateFileOverride) {
+        if (stateFileOverride != null && !stateFileOverride.isBlank()) {
+            return Paths.get(stateFileOverride).resolveSibling(PROFILES_FILE_NAME);
+        }
+        return SiteLockPaths.getStateDir().resolve(PROFILES_FILE_NAME);
     }
 
     static BlockService newService(String hostsOverride, String stateOverride) {
