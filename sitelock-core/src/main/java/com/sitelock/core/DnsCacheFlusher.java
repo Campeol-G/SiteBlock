@@ -43,26 +43,60 @@ public final class DnsCacheFlusher {
 
     private final OsType osType;
     private final CommandRunner runner;
+    private final boolean privileged;
 
     /** Usa o SO real e execução via {@link ProcessBuilder}. */
     public DnsCacheFlusher() {
-        this(OsType.detect(), DnsCacheFlusher::runWithProcessBuilder);
+        this(OsType.detect(), isPrivilegedProcess(), DnsCacheFlusher::runWithProcessBuilder);
     }
 
     /** Injeta o SO (produção com SO simulado / testes). */
     public DnsCacheFlusher(OsType osType) {
-        this(osType, DnsCacheFlusher::runWithProcessBuilder);
+        this(osType, isPrivilegedProcess(), DnsCacheFlusher::runWithProcessBuilder);
     }
 
     /** Injeta o valor de {@code os.name} (para testes dos três ramos). */
     public DnsCacheFlusher(String osName) {
-        this(OsType.detect(osName), DnsCacheFlusher::runWithProcessBuilder);
+        this(OsType.detect(osName), isPrivilegedProcess(), DnsCacheFlusher::runWithProcessBuilder);
     }
 
     /** Injeta SO + runner (testes usam um fake, sem processo real). */
     DnsCacheFlusher(OsType osType, CommandRunner runner) {
+        this(osType, isPrivilegedProcess(), runner);
+    }
+
+    /**
+     * Injeta SO + privilégio + runner. É este construtor que os testes usam
+     * para provar a regra que importa: sem root, nada é tentado.
+     */
+    DnsCacheFlusher(OsType osType, boolean privileged, CommandRunner runner) {
         this.osType = osType == null ? OsType.UNKNOWN : osType;
+        this.privileged = privileged;
         this.runner = runner == null ? DnsCacheFlusher::runWithProcessBuilder : runner;
+    }
+
+    /**
+     * true quando o processo já tem elevação no SO atual.
+     *
+     * <p>No Unix, "root" é o que faz o flush do resolved ser possível. Fora
+     * dele, {@code systemd-resolve --flush-caches} não falha e segue em frente:
+     * o systemd-resolved aceita a chamada e o polkit abre um diálogo de
+     * autenticação pedindo a senha do usuário. Como o flush é <i>best-effort</i>,
+     * um passo opcional que pode travar esperando senha não pode rodar.
+     *
+     * <p>No Windows não existe root — {@code ipconfig /flushdns} só depende de o
+     * processo já ser administrador, e quem não é recebe o aviso de elevate.
+     */
+    static boolean isPrivilegedProcess() {
+        return "root".equals(System.getProperty("user.name", ""));
+    }
+
+    /**
+     * Se este processo pode tentar o flush sem abrir diálogo de autenticação.
+     * Windows não tem polkit: lá o flush é sempre tentado.
+     */
+    public boolean isPrivileged() {
+        return privileged || osType.isWindows();
     }
 
     /** Comandos tentados em ordem para o SO corrente (exposto para testes). */
@@ -91,6 +125,13 @@ public final class DnsCacheFlusher {
      */
     public FlushResult flush() {
         List<List<String>> commands = commandsForCurrentOs();
+        if (!isPrivileged()) {
+            // Sem elevação não tentamos nada: no Linux e no macOS a tentativa
+            // passa pelo systemd-resolved / dscacheutil, que exigem privilégio e
+            // abrem um pedido de senha (polkit) que ninguém deve precisar
+            // responder para completar um passo opcional.
+            return new FlushResult(false, "");
+        }
         List<String> errors = new ArrayList<>();
         for (List<String> cmd : commands) {
             try {
@@ -127,6 +168,11 @@ public final class DnsCacheFlusher {
             System.err.println("Aviso: " + PermissionAdvisor.dnsFlushFailureWarning());
             if (r.detail() != null && !r.detail().isBlank()) {
                 System.err.println("(flush DNS: " + r.detail() + ")");
+            } else if (!isPrivileged()) {
+                // Detalhe honesto: não tentamos nada porque falta elevação. Culpar
+                // "Permission denied" aqui sugeriria que o bloqueio falhou, e ele
+                // não falhou — quem roda privileged não chega neste caminho.
+                System.err.println("(flush DNS: só roda com elevação; o bloqueio em si foi salvo.)");
             } else if (osType == OsType.LINUX || osType == OsType.UNKNOWN) {
                 System.err.println("(flush DNS: tente 'systemd-resolve --flush-caches' ou "
                         + "'resolvectl flush-caches'; se ausentes, reinicie o navegador.)");
