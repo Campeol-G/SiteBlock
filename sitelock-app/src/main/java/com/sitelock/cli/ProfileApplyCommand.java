@@ -141,7 +141,15 @@ public class ProfileApplyCommand implements Callable<Integer> {
                 return 1;
             }
             try {
-                service.getBlocker().blockAll(paraBloquear);
+                // TODOS os domínios do perfil, inclusive os KEPT. Isso não é
+                // desperdício: addDomain é idempotente, e é o que permite ao
+                // apply CONSERTAR um estado que diz bloqueado com o hosts sem a
+                // linha. Esse desvio acontece quando um apply anterior morre
+                // entre o save e o blockAll; sem reescrever os KEPT, todo apply
+                // seguinte veria "nada a fazer" para sempre e o site ficaria
+                // aberto com o status mentindo.
+                List<String> todos = new ArrayList<>(decisions.keySet());
+                service.getBlocker().blockAll(todos);
             } catch (IOException e) {
                 try {
                     service.getStore().save(anterior);

@@ -49,40 +49,49 @@ public class BlockService {
      * Remove do hosts e do JSON os bloqueios já expirados.
      * Se o hosts não for gravável e houver expirados, nada muda e
      * {@code skippedDueToPermission} volta true.
+     *
+     * <p>O {@code load → unblockAll → save} inteiro roda dentro de uma
+     * transação do {@link BlockStore}. Fora dela, um {@code block} feito de outro
+     * terminal entre o {@code load} e o {@code save} seria apagado do estado — e
+     * o domínio ficaria preso no hosts sem registro em lugar nenhum. Com o
+     * daemon rodando a cada minuto, para sempre, essa janela não é "enquanto
+     * alguém digita": ela está sempre aberta.
      */
     public SweepResult sweepExpired() throws IOException {
-        Map<String, BlockEntry> state = store.load();
-        Instant now = Instant.now(clock);
-        List<String> expired = new ArrayList<>();
-        for (BlockEntry e : state.values()) {
-            if (e.isExpired(now)) {
-                expired.add(e.getDomain());
+        return store.inTransaction(tx -> {
+            Map<String, BlockEntry> state = tx.load();
+            Instant now = Instant.now(clock);
+            List<String> expired = new ArrayList<>();
+            for (BlockEntry e : state.values()) {
+                if (e.isExpired(now)) {
+                    expired.add(e.getDomain());
+                }
             }
-        }
-        if (expired.isEmpty()) {
-            return new SweepResult(List.of(), List.of(), false, state);
-        }
-        if (!isHostsWritable()) {
-            return new SweepResult(List.of(), List.of(), true, state);
-        }
-        try {
-            blocker.unblockAll(expired);
-        } catch (IOException e) {
-            // O lote é atômico: ou o hosts inteiro foi reescrito, ou nada foi.
-            // Por isso o estado não é tocado — a próxima varredura tenta os
-            // mesmos domínios de novo. O caminho antigo removia do estado o que
-            // já tinha dado certo e deixava o resto para a próxima volta, o que
-            // é melhor quando dá errado só no meio; já o inverso — estado sem
-            // linha no hosts — deixa um domínio preso sem como recuperá-lo.
-            List<String> failures = new ArrayList<>();
-            for (String domain : expired) {
-                failures.add(domain + ": " + e.getMessage());
+            if (expired.isEmpty()) {
+                return new SweepResult(List.of(), List.of(), false, state);
             }
-            throw new IOException("Falha ao limpar expirados do hosts: " + String.join("; ", failures), e);
-        }
-        state.keySet().removeAll(expired);
-        store.save(state);
-        return new SweepResult(List.copyOf(expired), List.of(), false, state);
+            if (!isHostsWritable()) {
+                return new SweepResult(List.of(), List.of(), true, state);
+            }
+            try {
+                blocker.unblockAll(expired);
+            } catch (IOException e) {
+                // O lote é atômico: ou o hosts inteiro foi reescrito, ou nada foi.
+                // Por isso o estado não é tocado — a próxima varredura tenta os
+                // mesmos domínios de novo, em vez de deixá-los presos no JSON
+                // sem registro no hosts, que é o modo de falha que o sweep
+                // jamais repara porque varre o JSON.
+                List<String> failures = new ArrayList<>();
+                for (String domain : expired) {
+                    failures.add(domain + ": " + e.getMessage());
+                }
+                throw new IOException("Falha ao limpar expirados do hosts: "
+                        + String.join("; ", failures), e);
+            }
+            state.keySet().removeAll(expired);
+            tx.save(state);
+            return new SweepResult(List.copyOf(expired), List.of(), false, state);
+        });
     }
 
     public boolean isHostsWritable() {

@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -72,11 +73,17 @@ public class ProfileUnblockCommand implements Callable<Integer> {
 
     ProfileUnblockCommand(String name, boolean force, String hostsFileOverride, String stateFileOverride,
             String answer) {
+        this(name, force, hostsFileOverride, stateFileOverride, answer, null);
+    }
+
+    ProfileUnblockCommand(String name, boolean force, String hostsFileOverride, String stateFileOverride,
+            String answer, SiteBlocker blockerOverride) {
         this.name = name;
         this.force = force;
         this.hostsFileOverride = hostsFileOverride;
         this.stateFileOverride = stateFileOverride;
         this.answer = answer;
+        this.blockerOverride = blockerOverride;
     }
 
     @Override
@@ -92,6 +99,17 @@ public class ProfileUnblockCommand implements Callable<Integer> {
         BlockService service = blockerOverride != null
                 ? CliSupport.newService(hostsFileOverride, stateFileOverride, blockerOverride)
                 : CliSupport.newService(hostsFileOverride, stateFileOverride);
+
+        // Sem esta trava, quem esquecer o sudo tem o pior desfecho possível: o
+        // estado é gravado primeiro, a escrita no hosts falha depois, e o
+        // domínio fica preso no hosts sem registro em lugar nenhum. O sweep
+        // varre o JSON — nunca vai limpá-lo — e todo comando passa a dizer
+        // "não está bloqueado". A recuperação seria editar o /etc/hosts à mão,
+        // que é exatamente o que este programa existe para dispensar.
+        if (!service.isHostsWritable()) {
+            System.err.println("Erro: " + CliSupport.elevationHint("profile unblock " + valid));
+            return 1;
+        }
 
         final Profile profile;
         try {
@@ -166,8 +184,12 @@ public class ProfileUnblockCommand implements Callable<Integer> {
             return 3;
         }
 
+        Map<String, BlockEntry> semOsAlvos = new HashMap<>(state);
+        for (String domain : alvos) {
+            semOsAlvos.remove(domain);
+        }
         try {
-            service.getStore().save(remover(state, alvos));
+            service.getStore().save(semOsAlvos);
         } catch (IOException e) {
             System.err.println("Erro ao salvar o estado: " + e.getMessage());
             return 1;
@@ -175,20 +197,25 @@ public class ProfileUnblockCommand implements Callable<Integer> {
         try {
             service.getBlocker().unblockAll(alvos);
         } catch (IOException e) {
+            // O hosts não aceitou: o estado tem que voltar. Sem este rollback o
+            // dominio fica preso no hosts sem registro, e nada no projeto
+            // consegue mais limpa-lo.
+            try {
+                service.getStore().save(state);
+            } catch (IOException rollback) {
+                System.err.println("Erro CRÍTICO: falha no hosts E ao reverter o estado: "
+                        + rollback.getMessage());
+                System.err.println("Os domínios " + String.join(", ", alvos)
+                        + " podem ter ficado no arquivo hosts sem registro. "
+                        + "Rode: sudo siteblock unblock " + alvos.get(0) + " --force");
+            }
             System.err.println("Erro ao remover os domínios do hosts: " + e.getMessage());
+            System.err.println("Nada foi alterado.");
             return 1;
         }
 
         System.out.println("Desbloqueados " + alvos.size() + " domínio(s) do perfil '" + valid + "'.");
         CliSupport.flushDnsBestEffort();
         return 0;
-    }
-
-    private static Map<String, BlockEntry> remover(Map<String, BlockEntry> state, List<String> alvos) {
-        Map<String, BlockEntry> novo = new java.util.HashMap<>(state);
-        for (String domain : alvos) {
-            novo.remove(domain);
-        }
-        return novo;
     }
 }

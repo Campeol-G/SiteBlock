@@ -87,7 +87,7 @@ public class DaemonEnableCommand implements Callable<Integer> {
                 caminhoDoJava(),
                 caminhoDoJar(),
                 System.getProperty("java.class.path", "."),
-                System.getProperty("user.name"),
+                usuarioReal(),
                 os);
 
         AutostartInstaller installer = new AutostartInstaller(os, systemRoot, runnerOverride);
@@ -105,6 +105,26 @@ public class DaemonEnableCommand implements Callable<Integer> {
         }
         System.out.println("Confira com: siteblock daemon status");
         return 0;
+    }
+
+    /**
+ * O usuário a quem o daemon deve devolver a posse dos arquivos que escreve.
+ *
+ * <p>NÃO é {@code user.name}. O {@code daemon enable} roda com sudo, e sob sudo
+ * a JVM resolve {@code user.name} a partir do uid — que é 0, ou seja,
+ * {@code "root"}. Embutilo embutiria {@code -Dsitelock.user=root}, e o
+ * {@code chownToUserIfConfigured} jogaria fora na hora (ele recusa root
+ * explicitamente), então a devolução de posse nunca aconteceria: o primeiro
+ * sweep do daemon deixaria o {@code blocks.json} do root, e o próprio
+ * {@code reset --yes} que a mensagem de estado corrompido recomenda deixaria de
+ * funcionar sem sudo.
+ *
+ * <p>{@link SiteLockPaths#realUserName()} é o certo: lê {@code SUDO_USER} e já
+ * rejeita {@code root}. Quando o enable é disparado sem sudo — de um pipeline,
+ * por exemplo — devolve vazio e o artefato simplesmente não embute usuário.
+ */
+private String usuarioReal() {
+        return SiteLockPaths.realUserName().orElse(null);
     }
 
     /**

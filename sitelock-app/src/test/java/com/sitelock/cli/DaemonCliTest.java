@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -19,11 +20,13 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -112,13 +115,21 @@ class DaemonCliTest {
         // Sem SUDO_USER: é o que o systemd, o launchd e o Task Scheduler fazem.
         pb.environment().remove("SUDO_USER");
         pb.redirectErrorStream(true);
+        // A saída vai para arquivo, e não para um pipe: um daemon de laço nunca
+        // fecha stdout, e ler o stream até o EOF travaria o teste para sempre.
+        log = tmp.resolve("daemon-saida.log");
+        pb.redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile()));
         return pb.start();
     }
 
-    private static String lerTudo(Process p) throws Exception {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        p.getInputStream().transferTo(out);
-        return out.toString(StandardCharsets.UTF_8);
+    private Path log;
+
+    private String saidaDoDaemon() {
+        try {
+            return Files.exists(log) ? Files.readString(log, StandardCharsets.UTF_8) : "";
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     // ---- os testes ----
@@ -130,8 +141,8 @@ class DaemonCliTest {
         semear(prazos("vencido.com", Instant.parse("2020-01-01T00:00:00Z")));
 
         Process p = iniciar("--once");
-        String saida = lerTudo(p);
         int exit = p.waitFor();
+        String saida = saidaDoDaemon();
 
         assertEquals(0, exit, "o daemon falhou:\n" + saida);
         assertFalse(hostsConteudo().contains("vencido.com"),
@@ -148,8 +159,8 @@ class DaemonCliTest {
         String antes = hostsConteudo();
 
         Process p = iniciar("--once");
-        String saida = lerTudo(p);
         int exit = p.waitFor();
+        String saida = saidaDoDaemon();
 
         assertEquals(0, exit, saida);
         assertEquals(antes, hostsConteudo(), "permanente não pode ser tocado");
@@ -195,46 +206,122 @@ class DaemonCliTest {
     }
 
     @Test
-    void iterationSurvivesCorruptedState() throws Exception {
+    void concurrentBlocksSurviveADaemonSweep() throws Exception {
+        // O daemon varre a cada segundo; enquanto isso, um `block` sai de outro
+        // processo. Sem a transação no BlockStore, o sweep grava o estado que
+        // leu antes e o bloqueio concorrente some do JSON — ficando preso no
+        // hosts sem registro, que é o modo de falha que o sweep nunca repara
+        // porque varre justamente o JSON.
+        semear(prazos("vencido.com", Instant.parse("2020-01-01T00:00:00Z")));
+
+        Process daemon = iniciar("--interval", "1");
+        try {
+            for (int i = 0; i < 100 && !Files.exists(ExpirationDaemonState.statePath(stateDir())); i++) {
+                Thread.sleep(100);
+            }
+            assertTrue(daemon.isAlive(), "o daemon não subiu");
+
+            for (int i = 0; i < 5; i++) {
+                assertEquals(0, new BlockCommand(List.of("concorrente" + i + ".com"), null,
+                        hosts().toString(), stateFile().toString()).call());
+                Thread.sleep(150);
+            }
+
+            // Deixa o sweep completar mais vezes ainda.
+            Thread.sleep(1500);
+
+            String estado = Files.readString(stateFile(), StandardCharsets.UTF_8);
+            for (int i = 0; i < 5; i++) {
+                assertTrue(estado.contains("concorrente" + i + ".com"),
+                        "o bloqueio concorrente " + i + " foi apagado pelo sweep:\n" + estado);
+            }
+            assertFalse(estado.contains("vencido.com"), "o expirado tem que ter saido");
+        } finally {
+            daemon.destroyForcibly();
+            daemon.waitFor();
+        }
+    }
+
+    @Test
+    void theLoopSurvivesCorruptedState() throws Exception {
+        // O teste precisa do LAÇO, não do --once: o caminho de --once sai com 1
+        // e nunca itera, então ele não prova nada sobre "o daemon renasce".
+        Files.createDirectories(stateDir());
+        Files.writeString(stateFile(), "{ nao é json", StandardCharsets.UTF_8);
+
+        Process p = iniciar("--interval", "1");
+        try {
+            String acumulado = "";
+            for (int i = 0; i < 40 && !acumulado.contains("corromp"); i++) {
+                Thread.sleep(100);
+                acumulado = saidaDoDaemon();
+            }
+            assertTrue(p.isAlive(), "o daemon não pode morrer por estado corrompido — "
+                    + "quem volta a avisar é ele:\n" + acumulado);
+            assertTrue(acumulado.toLowerCase().contains("corromp"), acumulado);
+            assertTrue(acumulado.contains("próxima volta"),
+                    "tem que dizer que vai tentar de novo: " + acumulado);
+        } finally {
+            p.destroyForcibly();
+            p.waitFor();
+        }
+    }
+
+    @Test
+    void onceSweepFailsLoudlyOnCorruptedState() throws Exception {
         Files.createDirectories(stateDir());
         Files.writeString(stateFile(), "{ nao é json", StandardCharsets.UTF_8);
 
         Process p = iniciar("--once");
-        String saida = lerTudo(p);
         int exit = p.waitFor();
+        String saida = saidaDoDaemon();
 
-        assertEquals(1, exit, "estado corrompido é erro, e o daemon encerra a execução");
+        assertEquals(1, exit, "estado corrompido é erro: " + saida);
         assertTrue(saida.toLowerCase().contains("corromp"), saida);
         assertFalse(saida.contains("Exception in thread"), "não pode estourar pilha:\n" + saida);
     }
 
     @Test
-    void lockIsReleasedAfterRun() throws Exception {
+    void theLoopHoldsTheLockWhileAlive() throws Exception {
+        // --once não trava nada por desenho, então medir "lock liberado" depois
+        // dele mede nada. O que importa é o LAÇO segurar a trava, que é o que
+        // impede duas instâncias.
         semear(prazos("permanente.com", null));
-        Process p = iniciar("--once");
-        lerTudo(p);
-        assertEquals(0, p.waitFor());
-
-        ExpirationDaemonLock lock = ExpirationDaemonLock.acquire(stateDir());
-        assertTrue(lock != null, "o lock tem que ter sido liberado com o processo");
-        lock.close();
+        Process p = iniciar("--interval", "1");
+        try {
+            Path daemonJson = ExpirationDaemonState.statePath(stateDir());
+            for (int i = 0; i < 100 && !Files.exists(daemonJson); i++) {
+                Thread.sleep(100);
+            }
+            IOException erro = assertThrows(IOException.class,
+                    () -> ExpirationDaemonLock.acquire(stateDir()),
+                    "com o daemon vivo, nenhuma outra instância pode pegar a trava");
+            assertTrue(erro.getMessage().contains("daemon de expiração rodando"), erro.getMessage());
+        } finally {
+            p.destroyForcibly();
+            p.waitFor();
+        }
     }
 
     @Test
-    void stateFilesStayOwnedByTheRealUser() throws Exception {
-        HostsFileManager.blockInFile(hosts(), tmp.resolve("hosts.backup"), tmp.resolve("hosts.lock"),
-                List.of("vencido.com"));
-        semear(prazos("vencido.com", Instant.parse("2020-01-01T00:00:00Z")));
+    void lockIsReleasedWhenTheProcessDies() throws Exception {
+        semear(prazos("permanente.com", null));
+        Process p = iniciar("--interval", "1");
+        Path daemonJson = ExpirationDaemonState.statePath(stateDir());
+        for (int i = 0; i < 100 && !Files.exists(daemonJson); i++) {
+            Thread.sleep(100);
+        }
+        p.destroyForcibly();
+        p.waitFor();
 
-        Process p = iniciar("--once");
-        lerTudo(p);
-        assertEquals(0, p.waitFor());
-
-        String dono = Files.getOwner(stateFile()).getName();
-        assertEquals(System.getProperty("user.name", ""), dono,
-                "o daemon não pode deixar o estado do root — foi o que quebrou o status sem sudo");
+        // O SO libera o FileLock na morte do processo; é o motivo de o lock ser
+        // FileLock e não "o PID existe".
+        ExpirationDaemonLock lock = ExpirationDaemonLock.acquire(stateDir());
+        assertTrue(lock != null);
+        lock.close();
     }
 
+    // ---- comandos de ciclo de vida ----
     // ---- comandos de ciclo de vida ----
 
     @Test
@@ -264,7 +351,30 @@ class DaemonCliTest {
     }
 
     @Test
-    void statusReportsNoDaemonWhenPidFileIsMissing() {
+    void staleRegistrationIsDiscardedInsteadOfBlockingForever() throws Exception {
+        // PID que não existe + registro no disco: sem isto o start recusa para
+        // sempre, e não há --force para destravar.
+        semear(prazos("permanente.com", null));
+        ExpirationDaemonState.write(stateDir(), new ExpirationDaemonState(
+                Integer.MAX_VALUE + 7, Instant.now(), stateDir().toString(), null));
+
+        assertTrue(DaemonStartCommand.descartarRegistroOrfao(stateDir()));
+        assertFalse(Files.exists(ExpirationDaemonState.statePath(stateDir())));
+    }
+
+    @Test
+    void liveRegistrationIsNeverDiscarded() throws Exception {
+        semear(prazos("permanente.com", null));
+        ExpirationDaemonState.write(stateDir(), new ExpirationDaemonState(
+                ProcessHandle.current().pid(), Instant.now(), stateDir().toString(), null));
+
+        assertFalse(DaemonStartCommand.descartarRegistroOrfao(stateDir()),
+                "registro de processo vivo não pode ser apagado");
+        assertTrue(Files.exists(ExpirationDaemonState.statePath(stateDir())));
+    }
+
+    @Test
+    void statusReportsNoDaemonWhenPidFileIsMissing() throws Exception {
         Capture saida = captureOut(() -> new DaemonStatusCommand(stateFile().toString()).call());
         assertEquals(0, saida.exit());
         assertTrue(saida.texto().contains("não está rodando"), saida.texto());
@@ -299,15 +409,15 @@ class DaemonCliTest {
     private record Capture(int exit, String texto) {
     }
 
-    private static Capture captureOut(ThrowingInt r) {
+    private static Capture captureOut(ThrowingInt r) throws Exception {
         return capture(r, false);
     }
 
-    private static Capture captureErr(ThrowingInt r) {
+    private static Capture captureErr(ThrowingInt r) throws Exception {
         return capture(r, true);
     }
 
-    private static Capture capture(ThrowingInt r, boolean stderr) {
+    private static Capture capture(ThrowingInt r, boolean stderr) throws Exception {
         PrintStream original = stderr ? System.err : System.out;
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         PrintStream fake = new PrintStream(buffer, true, StandardCharsets.UTF_8);
@@ -331,6 +441,6 @@ class DaemonCliTest {
 
     @FunctionalInterface
     private interface ThrowingInt {
-        int run();
+        int run() throws Exception;
     }
 }

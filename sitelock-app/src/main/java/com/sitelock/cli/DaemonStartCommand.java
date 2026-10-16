@@ -66,6 +66,12 @@ public class DaemonStartCommand implements Callable<Integer> {
                     + "). Use 'siteblock daemon status' para ver, ou 'daemon stop' para encerrar.");
             return 1;
         }
+        try {
+            descartarRegistroOrfao(stateDir);
+        } catch (IOException e) {
+            System.err.println("Aviso: não consegui limpar o registro antigo do daemon: "
+                    + e.getMessage());
+        }
 
         List<String> cmd = buildChildCommand(stateDir, service.getHostsPath());
         Path logFile = ExpirationDaemonState.logPath(stateDir);
@@ -167,6 +173,29 @@ public class DaemonStartCommand implements Callable<Integer> {
             cmd.add(stateFileOverride);
         }
         return cmd;
+    }
+
+    /**
+     * Descarta um registro de daemon cujo processo não existe mais.
+     *
+     * <p>Um boot antigo que morreu deixa o {@code daemon.json} para trás. Como a
+     * checagem é só "o PID está vivo" e o SO recicla PID, o registro pode passar
+     * a apontar para um processo alheio — ou simplesmente continuar lá para
+     * sempre. No primeiro caso o {@code daemon stop} mandaria um sinal para um
+     * processo que não é nosso; no segundo, o {@code daemon start} recusaria
+     * para sempre, sem haver --force para destravar.
+     *
+     * @return true se havia um registro órfão e ele foi removido
+     */
+    static boolean descartarRegistroOrfao(Path stateDir) throws IOException {
+        Optional<ExpirationDaemonState> existente = ExpirationDaemonState.read(stateDir);
+        if (existente.isEmpty() || ExpirationDaemonState.isAlive(existente.get())) {
+            return false;
+        }
+        ExpirationDaemonState.delete(stateDir);
+        System.out.println("Registro de daemon antigo (pid " + existente.get().getPid()
+                + ") descartado: o processo não está mais rodando.");
+        return true;
     }
 
     /**

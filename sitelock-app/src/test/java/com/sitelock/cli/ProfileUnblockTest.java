@@ -166,6 +166,56 @@ class ProfileUnblockTest {
     }
 
     @Test
+    void refusesWhenHostsIsNotWritable() throws Exception {
+        // Sem esta trava o pior desfecho é silencioso: o estado é gravado, a
+        // escrita no hosts falha, e o domínio fica preso sem registro em lugar
+        // nenhum — todo comando passa a dizer "não está bloqueado".
+        assertEquals(0, block(null, "tiktok.com"));
+        assertEquals(0, save("trabalho"));
+        String antes = blocks();
+
+        Path semGravacao = tmp.resolve("sem-pai/hosts");
+        int exit = new ProfileUnblockCommand("trabalho", true, semGravacao.toString(),
+                state(), "SIM").call();
+
+        assertEquals(1, exit);
+        assertEquals(antes, blocks(), "o estado não pode ser apagado se o hosts não aceitou");
+    }
+
+    @Test
+    void rollbackWhenUnblockAllFails() throws Exception {
+        assertEquals(0, block("4h", "tiktok.com"));
+        assertEquals(0, save("trabalho"));
+        String antes = blocks();
+
+        com.sitelock.blocker.SiteBlocker falho = new com.sitelock.blocker.SiteBlocker() {
+            @Override
+            public void block(String domain) {
+            }
+
+            @Override
+            public void unblock(String domain) {
+            }
+
+            @Override
+            public void blockAll(List<String> domains) {
+            }
+
+            @Override
+            public void unblockAll(List<String> domains) throws java.io.IOException {
+                throw new java.io.IOException("hosts somente leitura");
+            }
+        };
+
+        int exit = new ProfileUnblockCommand("trabalho", true, hosts().toString(),
+                state(), "SIM", falho).call();
+
+        assertEquals(1, exit);
+        assertEquals(antes, blocks(),
+                "se o hosts não aceitou, o estado tem que voltar — senão o domínio fica preso");
+    }
+
+    @Test
     void unknownProfileFails() throws Exception {
         assertEquals(1, unblock("nao-existe", true, "SIM"));
     }

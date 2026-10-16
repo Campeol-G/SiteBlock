@@ -114,6 +114,87 @@ public class BlockStore {
             return result;
     }
 
+    /**
+ * Executa uma modifica��ão do estado inteiro sob a trava do arquivo.
+ *
+ * <p>Existe porque {@code load → transforma → save} solto é um
+ * read-modify-write sem proteção: o {@code save} trava, mas o {@code load}
+ * acontece antes e fora. Com o daemon rodando a cada minuto, para sempre, a
+ * janela entre os dois não é "enquanto alguém digita" — é permanentemente
+ * aberta. O caso concreto: o daemon lê o estado, e nesse intervalo outro
+ * terminal roda {@code block reddit.com}; o daemon grava o estado que tinha
+ * lido, e o novo bloqueio simplesmente desaparece do JSON enquanto continua no
+ * {@code /etc/hosts}. O sweep varre o JSON — nunca vai limpá-lo — e o
+ * {@code status} diz que não está bloqueado. Um site preso sem registro em
+ * lugar nenhum.
+ *
+ * <p>É a mesma verificação otimista que o {@code HostsFileManager.modifyHosts}
+ * já faz contra o hosts, finalmente aplicada ao JSON.
+ *
+ * @param body recebe acesso ao estado já carregado e um {@code save} que não
+ *             trava de novo
+ */
+public <R> R inTransaction(TransactionBody<R> body) throws IOException {
+        ensureParentExists(stateFile);
+        ensureParentExists(lockFile);
+        SiteLockPaths.chownToUserIfConfigured(stateFile.getParent());
+        try (FileChannel channel = FileChannel.open(lockFile,
+                StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+             FileLock ignored = channel.lock()) {
+            SiteLockPaths.chownToUserIfConfigured(lockFile);
+            return body.apply(new Transaction() {
+                @Override
+                public Map<String, BlockEntry> load() throws IOException {
+                    // Mesma guarda de load(): arquivo inexistente é estado vazio,
+                    // não erro. Sem ela o primeiro `block` de uma máquina nova
+                    // falharia, porque ainda não há arquivo para ler.
+                    if (!Files.exists(stateFile)) {
+                        return new TreeMap<>();
+                    }
+                    return readAndParse();
+                }
+
+                @Override
+                public void save(Map<String, BlockEntry> blocks) throws IOException {
+                    writeAtomically(blocks);
+                }
+            });
+        } catch (OverlappingFileLockException e) {
+            // Outra thread da MESMA JVM. Não é erro de dado: o chamador decide.
+            throw new IOException("Outro processo/thread está escrevendo o estado agora; "
+                    + "tente de novo.", e);
+        }
+    }
+
+    /** O que se pode fazer dentro de uma transação. */
+    public interface Transaction {
+        Map<String, BlockEntry> load() throws IOException;
+
+        void save(Map<String, BlockEntry> blocks) throws IOException;
+    }
+
+    @FunctionalInterface
+    public interface TransactionBody<R> {
+        R apply(Transaction tx) throws IOException;
+    }
+
+    /** Escrita atômica sem travar de novo — só válida dentro de uma transação. */
+    private void writeAtomically(Map<String, BlockEntry> blocks) throws IOException {
+        Path tmp = stateFile.resolveSibling(stateFile.getFileName() + ".tmp");
+        String json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(blocks);
+        Files.writeString(tmp, json, StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING,
+                StandardOpenOption.WRITE);
+        try {
+            Files.move(tmp, stateFile,
+                    StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(tmp, stateFile, StandardCopyOption.REPLACE_EXISTING);
+        }
+        SiteLockPaths.chownToUserIfConfigured(stateFile);
+        SiteLockPaths.chownToUserIfConfigured(lockFile);
+    }
+
     /** Salva o estado de forma atômica. */
     public void save(Map<String, BlockEntry> blocks) throws IOException {
         ensureParentExists(stateFile);
@@ -122,19 +203,10 @@ public class BlockStore {
         try (FileChannel channel = FileChannel.open(lockFile,
                 StandardOpenOption.CREATE, StandardOpenOption.WRITE);
              FileLock ignored = channel.lock()) {
-            Path tmp = stateFile.resolveSibling(stateFile.getFileName() + ".tmp");
-            String json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(blocks);
-            Files.writeString(tmp, json, StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING,
-                    StandardOpenOption.WRITE);
-            try {
-                Files.move(tmp, stateFile,
-                        StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(tmp, stateFile, StandardCopyOption.REPLACE_EXISTING);
-            }
-            SiteLockPaths.chownToUserIfConfigured(stateFile);
-            SiteLockPaths.chownToUserIfConfigured(lockFile);
+            writeAtomically(blocks);
+        } catch (OverlappingFileLockException e) {
+            throw new IOException("Outro processo/thread está escrevendo o estado agora; "
+                    + "tente de novo.", e);
         }
     }
 

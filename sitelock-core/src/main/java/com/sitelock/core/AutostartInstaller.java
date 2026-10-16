@@ -36,9 +36,19 @@ public final class AutostartInstaller {
     /**
      * Onde vive o artefato neste SO.
      *
+     * <p>No Windows não existe arquivo: é a Tarefa do Agendador que guarda a
+     * definição, e ela não vive em lugar nenhum que se possa apontar. Por isso
+     * devolve {@code null}, e {@link #install} não escreve nada — escrever criaria
+     * uma árvore {@code C:\etc\systemd\system\} de lixo com uma unit Linux dentro,
+     * e ainda assim imprimiria "instalado".
+     *
      * @param systemRoot {@code /} em produção; raiz de teste nos testes
+     * @return o caminho do artefato, ou null se este SO não usa arquivo
      */
     public static Path artifactPath(OsType os, Path systemRoot) {
+        if (os != null && os.isWindows()) {
+            return null;
+        }
         Path root = systemRoot == null ? Path.of("/") : systemRoot;
         if (os != null && os.isMac()) {
             return root.resolve("Library/LaunchDaemons/" + AutostartArtifact.LABEL + ".plist");
@@ -70,12 +80,27 @@ public final class AutostartInstaller {
                 return false;
             }
         }
-        return Files.exists(artifactPath(os, systemRoot));
+        Path artifact = artifactPath(os, systemRoot);
+        return artifact != null && Files.exists(artifact);
     }
 
     /** Escreve o artefato e liga o agendador. */
     public InstallResult install(AutostartPaths paths) {
         Path target = artifactPath();
+        if (target == null) {
+            // Windows: a definição vive na Tarefa, não em arquivo.
+            List<String> comando = AutostartArtifact.schtasksArgs(paths);
+            try {
+                int exit = runner.run(comando);
+                if (exit != 0) {
+                    return new InstallResult(false,
+                            String.join(" ", comando) + " falhou com código " + exit);
+                }
+            } catch (IOException e) {
+                return new InstallResult(false, String.join(" ", comando) + ": " + e.getMessage());
+            }
+            return new InstallResult(true, String.join(" ", comando));
+        }
         try {
             Path parent = target.getParent();
             if (parent != null) {
@@ -90,8 +115,14 @@ public final class AutostartInstaller {
                     "Falha ao escrever " + target + ": " + e.getMessage());
         }
 
-        List<String> comando = os.isWindows() ? AutostartArtifact.schtasksArgs(paths)
-                : schedulerEnableCommand(os);
+        List<String> comando = schedulerEnableCommand(os, systemRoot);
+        try {
+            // daemon-reload antes de enable: sem ele o systemd pode responder com
+            // a unit antiga em cache e ignorar a que acabamos de escrever.
+            runner.run(List.of("systemctl", "daemon-reload"));
+        } catch (IOException ignored) {
+            // Sem systemd não há o que recarregar; o enable abaixo avisa.
+        }
         try {
             int exit = runner.run(comando);
             if (exit != 0) {
@@ -105,13 +136,16 @@ public final class AutostartInstaller {
 
     /** Remove o artefato e desliga o agendador. */
     public InstallResult disable() {
-        try {
-            Files.deleteIfExists(artifactPath());
-        } catch (IOException e) {
-            return new InstallResult(false, "Falha ao remover o artefato: " + e.getMessage());
+        Path target = artifactPath();
+        if (target != null) {
+            try {
+                Files.deleteIfExists(target);
+            } catch (IOException e) {
+                return new InstallResult(false, "Falha ao remover o artefato: " + e.getMessage());
+            }
         }
         List<String> comando = os.isWindows() ? AutostartArtifact.schtasksDeleteArgs()
-                : schedulerDisableCommand(os);
+                : schedulerDisableCommand(os, systemRoot);
         try {
             runner.run(comando);
         } catch (IOException e) {
@@ -122,18 +156,18 @@ public final class AutostartInstaller {
         return new InstallResult(true, String.join(" ", comando));
     }
 
-    static List<String> schedulerEnableCommand(OsType os) {
+    static List<String> schedulerEnableCommand(OsType os, Path systemRoot) {
         if (os != null && os.isMac()) {
             return List.of("launchctl", "bootstrap", "system",
-                    artifactPath(os, Path.of("/")).toString());
+                    String.valueOf(artifactPath(os, systemRoot)));
         }
         return List.of("systemctl", "enable", "--now", AutostartArtifact.UNIT_NAME);
     }
 
-    static List<String> schedulerDisableCommand(OsType os) {
+    static List<String> schedulerDisableCommand(OsType os, Path systemRoot) {
         if (os != null && os.isMac()) {
             return List.of("launchctl", "bootout", "system",
-                    artifactPath(os, Path.of("/")).toString());
+                    String.valueOf(artifactPath(os, systemRoot)));
         }
         return List.of("systemctl", "disable", "--now", AutostartArtifact.UNIT_NAME);
     }

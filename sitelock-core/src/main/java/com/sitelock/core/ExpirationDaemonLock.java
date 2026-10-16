@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Optional;
+import java.util.Optional;
 
 /**
  * Trava de instância única do daemon, via {@code FileLock} retido pela vida
@@ -18,15 +19,22 @@ import java.util.Optional;
  * lock por PID sobreviveria ao processo que o criou e travaria o próximo boot,
  * porque o PID gravado continuaria "vivo" na checagem.
  *
- * <p>Locks de arquivo são <b>por JVM</b>, não por canal: na mesma JVM, um
- * segundo {@code lock()} sobre o mesmo arquivo lança
- * {@link OverlappingFileLockException} (unchecked) em vez de bloquear. Por isso
- * {@link #acquire} converte essa exceção num erro com mensagem de "já existe um
- * daemon", que é o que a pessoa precisa ler.
+ * <p><b>{@code tryLock}, não {@code lock}.</b> Locks de arquivo são por JVM,
+ * não por canal: na mesma JVM, um segundo {@code lock()} lança
+ * {@link OverlappingFileLockException}. Mas entre <b>processos</b>, {@code
+ * lock()} BLOQUEIA — e foi o que a primeira versão fazia, o que transformava
+ * uma segunda instância num processo pendurado para sempre (e, com
+ * {@code Restart=always}, num processo que o systemd reporta como ativo).
+ * {@link #acquire} usa {@code tryLock} com uma espera curta e, ao não conseguir,
+ * diz quem está segurando.
  */
 public final class ExpirationDaemonLock implements AutoCloseable {
 
     public static final String LOCK_FILE_NAME = "daemon.lock";
+
+    /** Tempo total de espera antes de desistir da trava. */
+    private static final int TENTATIVAS = 20;
+    private static final long INTERVALO_MS = 250;
 
     private final FileChannel channel;
     private final FileLock lock;
@@ -43,26 +51,45 @@ public final class ExpirationDaemonLock implements AutoCloseable {
     }
 
     /**
-     * @return a trava retida, ou {@code null} se outro daemon já a tem
-     * @throws IOException se o arquivo de lock não puder ser criado
+     * @return a trava retida pela vida do processo
+     * @throws IOException se outro daemon já a tem, ou se o arquivo não puder
+     *                     ser criado
      */
     public static ExpirationDaemonLock acquire(Path stateDir) throws IOException {
         Path lockFile = lockPath(stateDir);
         Files.createDirectories(stateDir);
         FileChannel channel = FileChannel.open(lockFile,
                 StandardOpenOption.CREATE, StandardOpenOption.WRITE);
-        FileLock lock;
+        FileLock lock = null;
         try {
-            lock = channel.lock();
-        } catch (OverlappingFileLockException e) {
+            for (int tentativa = 0; tentativa < TENTATIVAS; tentativa++) {
+                try {
+                    lock = channel.tryLock();
+                } catch (OverlappingFileLockException e) {
+                    lock = null; // outra thread da MESMA JVM já tem
+                }
+                if (lock != null) {
+                    SiteLockPaths.chownToUserIfConfigured(lockFile);
+                    return new ExpirationDaemonLock(channel, lock, stateDir);
+                }
+                try {
+                    Thread.sleep(INTERVALO_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
             channel.close();
-            throw new IOException(outroRodando(stateDir), e);
+            throw new IOException(outroRodando(stateDir));
         } catch (IOException e) {
-            channel.close();
-            throw new IOException("Falha ao travar " + lockFile + ": " + e.getMessage(), e);
+            if (lock == null) {
+                try {
+                    channel.close();
+                } catch (IOException ignored) {
+                }
+            }
+            throw e;
         }
-        SiteLockPaths.chownToUserIfConfigured(lockFile);
-        return new ExpirationDaemonLock(channel, lock, stateDir);
     }
 
     private static String outroRodando(Path stateDir) {
