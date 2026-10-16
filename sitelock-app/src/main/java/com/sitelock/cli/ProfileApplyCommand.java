@@ -114,6 +114,7 @@ public class ProfileApplyCommand implements Callable<Integer> {
         List<String> paraBloquear = new ArrayList<>();
         int alterados = 0;
         int mantidos = 0;
+        boolean criouTemporario = false;
 
         for (Map.Entry<String, ProfileMerge.Decision> e : decisions.entrySet()) {
             String domain = e.getKey();
@@ -123,6 +124,9 @@ public class ProfileApplyCommand implements Callable<Integer> {
                 novoEstado.put(domain, d.entry());
                 paraBloquear.add(domain);
                 alterados++;
+                // Só o que este apply criou tem prazo novo: um RAISED para
+                // permanente não tem o que cumprir.
+                criouTemporario |= d.entry().getExpiresAt() != null;
             } else {
                 mantidos++;
             }
@@ -154,6 +158,9 @@ public class ProfileApplyCommand implements Callable<Integer> {
 
         System.out.println("Perfil '" + valid + "': " + decisions.size() + " domínio(s), "
                 + alterados + " alterados, " + mantidos + " mantidos.");
+        if (criouTemporario) {
+            CliSupport.warnIfNoDaemon(stateFileOverride);
+        }
         return 0;
     }
 

@@ -154,6 +154,9 @@ public class BlockCommand implements Callable<Integer> {
         if (failures == 0) {
             // Best-effort: não muda o exit code; só avisa se o flush falhar.
             CliSupport.flushDnsBestEffort();
+            if (forDuration != null) {
+                CliSupport.warnIfNoDaemon(stateFileOverride);
+            }
             return 0;
         }
         return 1;

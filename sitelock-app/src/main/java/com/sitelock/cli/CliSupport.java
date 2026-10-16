@@ -5,9 +5,11 @@ import com.sitelock.blocker.SiteBlocker;
 import com.sitelock.core.BlockService;
 import com.sitelock.core.BlockStore;
 import com.sitelock.core.DnsCacheFlusher;
+import com.sitelock.core.ExpirationDaemonState;
 import com.sitelock.core.PermissionAdvisor;
 import com.sitelock.core.SiteLockPaths;
 
+import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
@@ -122,6 +124,43 @@ final class CliSupport {
         }
         String args = subcommand == null || subcommand.isBlank() ? "" : " " + subcommand;
         return "sudo " + display + args;
+    }
+
+    /**
+     * Avisa quando um bloqueio com prazo não tem daemon para cumpri-lo.
+     *
+     * <p>É o aviso que fecha o ciclo. Sem ele, a feature continua invisível e o
+     * comportamento antigo — o prazo vence, o site só sai quando alguém abre o
+     * terminal — permanece sendo o que a pessoa acha que é o normal.
+     *
+     * <p>Gatilho: não há daemon vivo <b>ou</b> não há autostart instalado. Os
+     * dois são defeito do ponto de vista de quem digitou {@code --for 4h}, e
+     * mesmo com autostart instalado o daemon pode estar naquele boot atrasado.
+     *
+     * <p>Vai para stdout com {@code AVISO:} porque isto não é erro — o
+     * bloqueio foi salvo e está funcionando. Erro vai para stderr.
+     */
+    static void warnIfNoDaemon(String stateFileOverride) {
+        if (temDaemonVivo(stateFileOverride)) {
+            return;
+        }
+        System.out.println("AVISO: este bloqueio tem prazo, mas não há daemon de expiração rodando.");
+        System.out.println("       O prazo só vai ser aplicado quando você rodar outro comando do "
+                + "siteblock (ex.: 'siteblock status').");
+        System.out.println("       " + sudoCommand("daemon enable")
+                + " para isso acontecer sozinho, inclusive depois de reiniciar.");
+    }
+
+    /** true se há um daemon registrado e vivo. Sem elevação: é só leitura. */
+    static boolean temDaemonVivo(String stateFileOverride) {
+        try {
+            return ExpirationDaemonState.read(stateDirFor(stateFileOverride))
+                    .map(ExpirationDaemonState::isAlive)
+                    .orElse(false);
+        } catch (IOException e) {
+            // Não achou o registro é o mesmo que não ter daemon: o aviso serve.
+            return false;
+        }
     }
 
     /**

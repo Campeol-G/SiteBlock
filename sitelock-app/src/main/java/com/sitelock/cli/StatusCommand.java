@@ -86,6 +86,16 @@ public class StatusCommand implements Callable<Integer> {
         }
         System.out.println("Domínios bloqueados (" + lines.size() + "):");
         lines.forEach(l -> System.out.println("  " + l));
+
+        // Só fala quando há temporário ativo: bloqueio permanente não tem prazo
+        // para vencer, então não há o que avisar.
+        boolean temAtivo = state.values().stream().anyMatch(e -> e.isTemporaryAndActive(now));
+        if (temAtivo && !CliSupport.temDaemonVivo(stateFileOverride)) {
+            System.out.println("Há bloqueio com prazo e nenhum daemon rodando: o prazo só será "
+                    + "aplicado quando você rodar outro comando do siteblock.");
+            System.out.println(CliSupport.sudoCommand("daemon enable")
+                    + " para ele vencer sozinho.");
+        }
         return 0;
     }
 }
