@@ -57,7 +57,14 @@ public class DaemonRunCommand implements Callable<Integer> {
     public Integer call() {
         Path stateDir = CliSupport.stateDirFor(stateFileOverride);
         Duration maxInterval = Duration.ofSeconds(Math.max(1, intervalSeconds));
-        Duration idleInterval = Duration.ofMinutes(5);
+        // O ocioso é IGUAL ao teto, e não 5 minutos. A primeira versão da spec
+        // propunha 5 min para não "polir o disco durante a madrugada" — mas isso
+        // contradiz a outra promessa dela, a de que um bloqueio criado em outro
+        // terminal é notado em no máximo um minuto. Um polling de 60s lê um
+        // arquivo pequeno: é de graça. Já o sono de 5 min faz um bloqueio de 1
+        // minuto ficar preso por até 5 minutos depois de vencer, que é
+        // exatamente o defeito que o daemon existe para eliminar.
+        Duration idleInterval = maxInterval;
 
         if (once) {
             // Modo depuração: sem registro, sem trava e sem shutdown hook. Um
