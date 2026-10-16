@@ -22,4 +22,6 @@ if [[ -z "$JAVA_BIN" ]]; then
   exit 1
 fi
 
-exec "$JAVA_BIN" -jar "$JAR" "$@"
+# -Dsiteblock.jar: o daemon de expiracao embute esse caminho no artefato de
+# autostart, que roda sem PATH e sem este script.
+exec "$JAVA_BIN" -Dsiteblock.jar="$JAR" -jar "$JAR" "$@"

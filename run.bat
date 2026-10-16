@@ -31,4 +31,6 @@ if errorlevel 1 (
   exit /b 1
 )
 
-java -jar "%JAR%" %*
+REM -Dsiteblock.jar: o daemon de expiracao embute esse caminho no artefato de
+REM autostart, que roda sem PATH e sem este script.
+java -Dsiteblock.jar="%JAR%" -jar "%JAR%" %*

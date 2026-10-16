@@ -28,6 +28,7 @@ if [[ -z "$JAVA_BIN" ]]; then
   exit 1
 fi
 
-# Informa ao app como ele foi invocado, para que as dicas de 'sudo' mostrem
-# um comando que realmente funciona (o sudo ignora ~/.local/bin).
-exec "$JAVA_BIN" -Dsiteblock.bin="$SCRIPT" -jar "$JAR" "$@"
+# Informa ao app como ele foi invocado: as dicas de 'sudo' mostram um comando
+# que funciona (o sudo ignora ~/.local/bin), e o daemon de expiracao precisa do
+# caminho ABSOLUTO do jar — o systemd nao tem o seu PATH nem passa por aqui.
+exec "$JAVA_BIN" -Dsiteblock.bin="$SCRIPT" -Dsiteblock.jar="$JAR" -jar "$JAR" "$@"
