@@ -32,8 +32,7 @@ import java.util.concurrent.TimeUnit;
 public final class DnsCacheFlusher {
 
     /** Executa um comando e devolve o exit code (injetável para testes). */
-    public interface CommandRunner {
-        int run(List<String> command) throws IOException;
+    public interface CommandRunner extends com.sitelock.core.CommandRunner {
     }
 
     public record FlushResult(boolean success, String detail) {
