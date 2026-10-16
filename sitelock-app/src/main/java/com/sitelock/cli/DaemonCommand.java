@@ -19,6 +19,8 @@ import java.util.concurrent.Callable;
                 DaemonStartCommand.class,
                 DaemonStopCommand.class,
                 DaemonStatusCommand.class,
+                DaemonEnableCommand.class,
+                DaemonDisableCommand.class,
                 DaemonRunCommand.class})
 public class DaemonCommand implements Callable<Integer> {
 

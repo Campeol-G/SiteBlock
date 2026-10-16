@@ -1,6 +1,8 @@
 package com.sitelock.cli;
 
+import com.sitelock.core.AutostartInstaller;
 import com.sitelock.core.ExpirationDaemonState;
+import com.sitelock.core.OsType;
 import com.sitelock.core.SiteLockPaths;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -52,6 +54,8 @@ public class DaemonStatusCommand implements Callable<Integer> {
 
         if (state.isEmpty()) {
             System.out.println("Daemon de expiração: não está rodando.");
+            System.out.println("Autostart: " + (AutostartInstaller.isEnabled(OsType.detect(), Path.of("/"))
+                    ? "instalado" : "não instalado"));
             System.out.println("Estado lido de: " + stateDir);
             System.out.println("Enquanto não houver daemon, um bloqueio com prazo só é liberado "
                     + "quando você roda outro comando do siteblock.");
@@ -68,6 +72,8 @@ public class DaemonStatusCommand implements Callable<Integer> {
         System.out.println("Último sweep que liberou algo: " + (s.getLastSweepAt() == null
                 ? "nenhum desde que subiu" : HORA.format(s.getLastSweepAt())));
         System.out.println("Estado lido de: " + s.getStateDir());
+        System.out.println("Autostart: " + (AutostartInstaller.isEnabled(OsType.detect(), Path.of("/"))
+                ? "instalado" : "não instalado"));
         if (!vivo) {
             System.out.println("O PID registrado não está mais vivo. Suba com: "
                     + "sudo siteblock daemon start");
