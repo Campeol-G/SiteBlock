@@ -5,6 +5,7 @@ import com.sitelock.core.SiteLockPaths;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.List;
 
 /** Bloqueio local via arquivo hosts do sistema (ex.: /etc/hosts no Linux/macOS). */
 public class HostsFileBlocker implements SiteBlocker {
@@ -33,5 +34,15 @@ public class HostsFileBlocker implements SiteBlocker {
     @Override
     public void unblock(String domain) throws IOException {
         HostsFileManager.unblockInFile(hostsPath, backupPath, lockFile, domain);
+    }
+
+    @Override
+    public void blockAll(List<String> domains) throws IOException {
+        HostsFileManager.blockInFile(hostsPath, backupPath, lockFile, domains);
+    }
+
+    @Override
+    public void unblockAll(List<String> domains) throws IOException {
+        HostsFileManager.unblockInFile(hostsPath, backupPath, lockFile, domains);
     }
 }

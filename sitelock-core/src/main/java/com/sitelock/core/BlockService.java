@@ -29,6 +29,18 @@ public class BlockService {
         this.hostsPath = hostsPath;
     }
 
+    /**
+     * Resultado de uma varredura.
+     *
+     * @param removed domínios efetivamente liberados do hosts e do estado
+     * @param failures mantido por compatibilidade de assinatura; com o
+     *                 desbloqueio em lote a operação é atômica, então ou
+     *                 tudo sai ou nada sai — este campo não tem mais caminho
+     *                 que o preencha. Os chamadores só leem {@code removed}.
+     * @param skippedDueToPermission true quando o hosts não está gravável e nada
+     *                 foi tentado
+     * @param state o estado depois da varredura
+     */
     public record SweepResult(List<String> removed, List<String> failures,
                               boolean skippedDueToPermission, Map<String, BlockEntry> state) {
     }
@@ -53,24 +65,24 @@ public class BlockService {
         if (!isHostsWritable()) {
             return new SweepResult(List.of(), List.of(), true, state);
         }
-        List<String> removed = new ArrayList<>();
-        List<String> failures = new ArrayList<>();
-        for (String domain : expired) {
-            try {
-                blocker.unblock(domain);
-                state.remove(domain);
-                removed.add(domain);
-            } catch (IOException e) {
+        try {
+            blocker.unblockAll(expired);
+        } catch (IOException e) {
+            // O lote é atômico: ou o hosts inteiro foi reescrito, ou nada foi.
+            // Por isso o estado não é tocado — a próxima varredura tenta os
+            // mesmos domínios de novo. O caminho antigo removia do estado o que
+            // já tinha dado certo e deixava o resto para a próxima volta, o que
+            // é melhor quando dá errado só no meio; já o inverso — estado sem
+            // linha no hosts — deixa um domínio preso sem como recuperá-lo.
+            List<String> failures = new ArrayList<>();
+            for (String domain : expired) {
                 failures.add(domain + ": " + e.getMessage());
             }
+            throw new IOException("Falha ao limpar expirados do hosts: " + String.join("; ", failures), e);
         }
-        if (!removed.isEmpty()) {
-            store.save(state);
-        }
-        if (!failures.isEmpty()) {
-            throw new IOException("Falha ao limpar expirados do hosts: " + String.join("; ", failures));
-        }
-        return new SweepResult(List.copyOf(removed), List.of(), false, state);
+        state.keySet().removeAll(expired);
+        store.save(state);
+        return new SweepResult(List.copyOf(expired), List.of(), false, state);
     }
 
     public boolean isHostsWritable() {
