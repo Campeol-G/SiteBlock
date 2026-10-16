@@ -670,7 +670,8 @@ git commit -m "CLI: daemon start/stop/status e o laço de expiração"
   - `CommandRunner` (top-level): `int run(List<String> command) throws IOException` — e `DnsCacheFlusher.CommandRunner extends CommandRunner`, sem breaking change
   - `record AutostartPaths(Path stateDir, Path hostsFile, String javaBin, String jarPath, String classpath, String realUserName, OsType os)`
   - `AutostartArtifact.systemdUnit(AutostartPaths) -> String`, `.launchdPlist(AutostartPaths) -> String`, `.schtasksCommand(AutostartPaths) -> String`
-  - `AutostartInstaller(OsType os, Path systemRoot, CommandRunner runner)`: `artifactPath()`, `isEnabled()`, `install(AutostartPaths) -> InstallResult`, `disable() -> InstallResult`; `record InstallResult(boolean success, String detail)`
+  - `AutostartInstaller(OsType os, Path systemRoot, CommandRunner runner)`: `artifactPath()`, `install(AutostartPaths) -> InstallResult`, `disable() -> InstallResult`; `record InstallResult(boolean success, String detail)`
+  - `static boolean AutostartInstaller.isEnabled(OsType os, Path systemRoot)` — estático de propósito: `CliSupport.warnIfNoDaemon` (Task 13) consulta sem ter um `CommandRunner` em mãos
 
 - [ ] **Step 1: Escreva o teste que falha**
 
