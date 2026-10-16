@@ -287,15 +287,52 @@ public final class HostsFileManager {
     /** Aplica bloqueio no arquivo com backup, lock e escrita atômica. */
     public static void blockInFile(Path hostsPath, Path backupPath, Path lockFile, String domain)
             throws IOException {
-        modifyHosts(hostsPath, backupPath, lockFile, addDomain(readHostsLocked(hostsPath, lockFile), domain),
-                readHostsLocked(hostsPath, lockFile));
+        blockInFile(hostsPath, backupPath, lockFile, List.of(domain));
+    }
+
+    /**
+     * Aplica o bloqueio de vários domínios numa única leitura e uma única escrita.
+     *
+     * <p>O caminho por domínio custa três locks e três leituras do hosts por
+     * domínio ({@code readHostsLocked} duas vezes, mais a releitura dentro de
+     * {@code modifyHosts}). Em um {@code profile apply} de 40 domínios isso
+     * significa 120 travadas do arquivo — e, pior, a verificação de concorrência
+     * de {@code modifyHosts} compara o conteúdo contra o que foi lido
+     * milissegundos antes: se qualquer um dos 40 passos ver o arquivo mudado, a
+     * operação morre no meio, com estado parcial. Por isso o lote existe, e por
+     * isso a transformação composta acontece em memória antes do lock de escrita.
+     */
+    public static void blockInFile(Path hostsPath, Path backupPath, Path lockFile, List<String> domains)
+            throws IOException {
+        if (domains == null || domains.isEmpty()) {
+            return;
+        }
+        String current = readHostsLocked(hostsPath, lockFile);
+        String updated = current;
+        for (String domain : domains) {
+            updated = addDomain(updated, domain);
+        }
+        modifyHosts(hostsPath, backupPath, lockFile, updated, current);
     }
 
     /** Remove bloqueio no arquivo. */
     public static void unblockInFile(Path hostsPath, Path backupPath, Path lockFile, String domain)
             throws IOException {
+        unblockInFile(hostsPath, backupPath, lockFile, List.of(domain));
+    }
+
+    /** Remove vários domínios numa única leitura e uma única escrita. */
+    public static void unblockInFile(Path hostsPath, Path backupPath, Path lockFile, List<String> domains)
+            throws IOException {
+        if (domains == null || domains.isEmpty()) {
+            return;
+        }
         String current = readHostsLocked(hostsPath, lockFile);
-        modifyHosts(hostsPath, backupPath, lockFile, removeDomain(current, domain), current);
+        String updated = current;
+        for (String domain : domains) {
+            updated = removeDomain(updated, domain);
+        }
+        modifyHosts(hostsPath, backupPath, lockFile, updated, current);
     }
 
     private static String readHostsLocked(Path hostsPath, Path lockFile) throws IOException {
