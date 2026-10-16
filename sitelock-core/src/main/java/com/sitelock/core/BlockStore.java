@@ -118,7 +118,7 @@ public class BlockStore {
     public void save(Map<String, BlockEntry> blocks) throws IOException {
         ensureParentExists(stateFile);
         ensureParentExists(lockFile);
-        SiteLockPaths.chownToRealUserIfSudo(stateFile.getParent());
+        SiteLockPaths.chownToUserIfConfigured(stateFile.getParent());
         try (FileChannel channel = FileChannel.open(lockFile,
                 StandardOpenOption.CREATE, StandardOpenOption.WRITE);
              FileLock ignored = channel.lock()) {
@@ -133,8 +133,8 @@ public class BlockStore {
             } catch (AtomicMoveNotSupportedException e) {
                 Files.move(tmp, stateFile, StandardCopyOption.REPLACE_EXISTING);
             }
-            SiteLockPaths.chownToRealUserIfSudo(stateFile);
-            SiteLockPaths.chownToRealUserIfSudo(lockFile);
+            SiteLockPaths.chownToUserIfConfigured(stateFile);
+            SiteLockPaths.chownToUserIfConfigured(lockFile);
         }
     }
 

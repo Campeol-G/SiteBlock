@@ -85,16 +85,43 @@ public final class SiteLockPaths {
         if (realUser.isEmpty()) {
             return;
         }
+        chownTo(path, realUser.get());
+    }
+
+    /**
+     * Devolve a posse ao usuário nomeado na property {@code sitelock.user},
+     * caindo no comportamento de sempre ({@code SUDO_USER}) quando ela não
+     * existir.
+     *
+     * <p>Existe porque um daemon iniciado por autostart roda como root
+     * <b>sem</b> {@code SUDO_USER}: um unit de sistema do systemd e uma
+     * LaunchDaemon não têm {@code User=}, e o {@code SiteLockPaths} só descobre
+     * o usuário real a partir dessa variável. Sem esta property, o primeiro
+     * sweep deixaria o {@code blocks.json} do root — a escrita atômica troca o
+     * inode — e o próprio {@code status}, que a spec promete que roda sem
+     * elevação, passaria a depender de root para ler.
+     */
+    public static void chownToUserIfConfigured(Path path) {
+        String configured = System.getProperty("sitelock.user");
+        if (configured != null && !configured.isBlank() && !"root".equals(configured.strip())) {
+            chownTo(path, configured.strip());
+            return;
+        }
+        chownToRealUserIfSudo(path);
+    }
+
+    /** Aplica posse e grupo ao usuário, best-effort. */
+    private static void chownTo(Path path, String user) {
         try {
             if (!Files.exists(path)) {
                 return;
             }
             UserPrincipalLookupService lookup =
                     path.getFileSystem().getUserPrincipalLookupService();
-            UserPrincipal user = lookup.lookupPrincipalByName(realUser.get());
-            Files.setOwner(path, user);
+            UserPrincipal userPrincipal = lookup.lookupPrincipalByName(user);
+            Files.setOwner(path, userPrincipal);
             try {
-                GroupPrincipal group = lookup.lookupPrincipalByGroupName(realUser.get());
+                GroupPrincipal group = lookup.lookupPrincipalByGroupName(user);
                 PosixFileAttributeView view =
                         Files.getFileAttributeView(path, PosixFileAttributeView.class);
                 if (view != null) {
