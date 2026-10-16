@@ -82,6 +82,19 @@ sudo ./run.sh unblock tiktok.com --force
 sudo ./run.sh dns start      # bloqueia também no celular/tablet/console
 ./run.sh dns status
 sudo ./run.sh dns stop
+
+# Conjuntos de domínios com nome
+sudo ./run.sh profile save trabalho      # guarda o que está bloqueado agora
+./run.sh profile list
+./run.sh profile apply trabalho         # recarrega sem nunca encurtar o prazo
+sudo ./run.sh profile unblock trabalho --force
+
+# Daemon de expiração (o prazo vence sozinho)
+sudo ./run.sh daemon enable             # instala para subir a cada boot
+./run.sh daemon status                  # responde sem sudo
+sudo ./run.sh daemon start              # sobe agora, em background
+sudo ./run.sh daemon stop
+sudo ./run.sh daemon disable
 ```
 
 Durações aceitas: `30m`, `2h`, `1h30m`, `1d`, `1d2h30m`. Só minúsculo, sem
@@ -101,6 +114,8 @@ Em `~/.sitelock/`:
 | `blocks.json` | o que está bloqueado e até quando |
 | `hosts.backup` | cópia do hosts original, criada uma vez |
 | `dns-server.json` | estado do servidor DNS |
+| `profiles.json` | os conjuntos de domínios salvos com nome |
+| `daemon.json` | o daemon de expiração está rodando (pid, último sweep) |
 
 O arquivo de hosts do sistema só é alterado no bloco delimitado por
 marcadores, entre uma linha original sua e o resto do arquivo. Nunca
@@ -117,9 +132,11 @@ Coisas que **não** funcionam, e é bom saber antes:
 - **App com DNS próprio ou IP fixo fura.** Alguns apps (principalmente Android
   e Electron) resolvem por conta própria e ignoram o hosts.
 - **Modo anônimo, extensões e alguns navegadores** podem ignorar o hosts.
-- **Expirado não sai sozinho.** O prazo vence, mas o site só é liberado quando
-  você roda outro comando do siteblock — `status` já resolve. Se você deixa o
-  computador ligado e não abre o terminal, o site fica bloqueado além do prazo.
+- **Expirado só sai sozinho se o daemon estiver ligado.** Com
+  `sudo siteblock daemon enable` instalado, o prazo vence sem você abrir o
+  terminal — inclusive depois de reiniciar. Sem ele, o site só é liberado
+  quando você roda outro comando do siteblock (`status` já resolve), e o
+  `block --for` avisa na hora que o daemon não está cobrindo.
 - **Não é à prova de você mesmo.** Você é dono da máquina e pode editar o
   `/etc/hosts` com `sudo`. O siteblock é uma trava de HPV contra distraído, não
   de segurança.
@@ -146,6 +163,29 @@ Quando você bloqueia, o prazo é gravado como um horário exato no `blocks.json
 não como "4 horas a partir de agora". Por isso o bloqueio sobrevive a
 reiniciar ou desligar o computador: se você bloqueou 4 horas, usou 2 horas e
 desligou, quando voltar ainda restam 1h30m.
+
+O `daemon` existe para fechar o outro lado dessa mesma conta: sozinho, ele
+acorda, vê o que venceu e tira do `/etc/hosts`. Ele **só remove** — bloquear
+continua sendo coisa do `block` e do `profile apply` — e escreve o resultado em
+`daemon.json` para o `daemon status` mostrar quando foi a última vez que algo
+expirou por conta própria.
+
+Os `perfis` guardam um conjunto de domínios com nome para não remontar a
+mesma lista todo dia. O que fica gravado é o **prazo restante** no momento do
+save, nunca o horário original: um perfil é uma receita, não um histórico.
+Aplicar um perfil **só aumenta** prazo, nunca encurta — repetir `profile apply`
+várias vezes no dia é seguro.
+
+Para instalar o autostart (o passo recomendado depois de instalar):
+
+```bash
+sudo siteblock daemon enable     # Linux: unit systemd · macOS: LaunchDaemon · Windows: tarefa
+siteblock daemon status          # sem sudo: responde se está ligado
+```
+
+O daemon roda como root, porque precisa escrever no `/etc/hosts`. Ele grava os
+caminhos no artefato de inicialização e devolve a posse dos arquivos que escreve
+para o seu usuário, para que `status` funcione sem elevação.
 
 O modo DNS é separado: ele roda um servidor que responde no seu IP, e os
 aparelhos da rede precisam apontar para ele. Cobre mais aparelhos do que o
