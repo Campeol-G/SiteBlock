@@ -43,6 +43,22 @@ final class CliSupport {
     }
 
     /**
+     * Diretório de estado considerando o override de {@code --state-file}.
+     *
+     * <p>Sem isto, um comando leria o {@code daemon.json} do {@code ~/.sitelock}
+     * real enquanto operava no arquivo de teste — ou, pior, na máquina de quem
+     * está testando. Mesmo raciocínio de {@link DnsDaemonState#stateDirFor(String)}.
+     */
+    static java.nio.file.Path stateDirFor(String stateFileOverride) {
+        if (stateFileOverride != null && !stateFileOverride.isBlank()) {
+            java.nio.file.Path sf = Paths.get(stateFileOverride);
+            java.nio.file.Path parent = sf.getParent();
+            return parent != null ? parent : Paths.get(".");
+        }
+        return SiteLockPaths.getStateDir();
+    }
+
+    /**
      * Onde mora o {@code profiles.json}: irmão do {@code blocks.json}, pelo mesmo
      * motivo do {@code hosts.backup} e do {@code hosts.lock} — o {@code --state-file}
      * dos testes aponta o diretório inteiro, sem precisar de uma flag nova.
