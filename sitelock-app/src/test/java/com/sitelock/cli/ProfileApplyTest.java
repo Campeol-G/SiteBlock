@@ -135,8 +135,12 @@ class ProfileApplyTest {
 
     @Test
     void rollbackWhenBlockAllFails() throws Exception {
-        block("tiktok.com");
+        // A receita precisa oferecer MAIS que o estado atual, senão a decisão é
+        // KEPT e o blockAll nem é chamado — e não há rollback para provar. É o
+        // mesmo cenário de applyRaisesShortBlock: salva com 4h, encolhe para 30m.
+        assertEquals(0, new BlockCommand(List.of("tiktok.com"), "4h", hosts().toString(), state()).call());
         assertEquals(0, save("trabalho"));
+        assertEquals(0, new BlockCommand(List.of("tiktok.com"), "30m", hosts().toString(), state()).call());
         String antes = blocksJson();
 
         SiteBlocker falho = new SiteBlocker() {
