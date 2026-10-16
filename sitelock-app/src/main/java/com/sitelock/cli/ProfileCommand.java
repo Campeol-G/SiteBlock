@@ -19,7 +19,8 @@ import java.util.concurrent.Callable;
                 ProfileSaveCommand.class,
                 ProfileListCommand.class,
                 ProfileShowCommand.class,
-                ProfileDeleteCommand.class})
+                ProfileDeleteCommand.class,
+                ProfileApplyCommand.class})
 public class ProfileCommand implements Callable<Integer> {
 
     @Override

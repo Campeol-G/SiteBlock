@@ -1,6 +1,7 @@
 package com.sitelock.cli;
 
 import com.sitelock.blocker.HostsFileBlocker;
+import com.sitelock.blocker.SiteBlocker;
 import com.sitelock.core.BlockService;
 import com.sitelock.core.BlockStore;
 import com.sitelock.core.DnsCacheFlusher;
@@ -61,6 +62,17 @@ final class CliSupport {
         BlockStore store = new BlockStore(stateFile);
         HostsFileBlocker blocker = new HostsFileBlocker(hostsPath, backupFile, hostsLock);
         return new BlockService(store, blocker, Clock.systemUTC(), hostsPath);
+    }
+
+    /**
+     * Com o blocker injetado, para os testes que precisam que a escrita no hosts
+     * falhe — é o único jeito de provar que o rollback do {@code profile apply}
+     * acontece, já que ninguém vai tornar o {@code /etc/hosts} ilegível no teste.
+     */
+    static BlockService newService(String hostsOverride, String stateOverride, SiteBlocker blocker) {
+        Path stateFile = resolveStateFile(stateOverride);
+        return new BlockService(new BlockStore(stateFile), blocker, Clock.systemUTC(),
+                resolveHostsPath(hostsOverride));
     }
 
     /**

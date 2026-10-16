@@ -18,11 +18,16 @@ class ProfileCommandsTest {
     @TempDir
     Path tmp;
 
+    /** Criar uma vez: reescrever apagaria os bloqueios que o teste acabou de fazer. */
     private Path hosts() throws Exception {
-        Path h = tmp.resolve("hosts");
-        Files.writeString(h, "127.0.0.1 localhost\n", StandardCharsets.UTF_8);
-        return h;
+        if (hosts == null) {
+            hosts = tmp.resolve("hosts");
+            Files.writeString(hosts, "127.0.0.1 localhost\n", StandardCharsets.UTF_8);
+        }
+        return hosts;
     }
+
+    private Path hosts;
 
     private String state() {
         return tmp.resolve("state/blocks.json").toString();
