@@ -1,5 +1,6 @@
 package com.sitelock.cli;
 
+import com.sitelock.core.DaemonCommandLine;
 import com.sitelock.core.ExpirationDaemonState;
 import com.sitelock.core.SiteLockPaths;
 import picocli.CommandLine.Command;
@@ -141,38 +142,42 @@ public class DaemonStartCommand implements Callable<Integer> {
      * O mesmo desenho de fork do {@code dns start}, com uma diferença que a
      * feature depende: as duas properties de caminho são repassadas ao filho.
      * Sem elas, o {@code start} e o {@code enable} leriam arquivos diferentes.
+     *
+     * <p>A forma da linha é a mesma do {@code daemon enable}, e sai da mesma
+     * fonte: {@link DaemonCommandLine}. A diferença entre os dois caminhos é
+     * que o {@code enable} roda sob o agendador e o {@code start} roda aqui — mas
+     * a JVM que executa o daemon é a mesma, e a linha que a constrói tem que
+     * ser a mesma. Quando as duas eram montadas à mão, o {@code enable} deixava
+     * o nome da classe depois do {@code -jar} e o {@code start} deixava as
+     * properties depois do {@code -jar}: nenhuma das duas invocações subia, e
+     * nenhuma das duas dizia por quê.
      */
     List<String> buildChildCommand(Path stateDir, Path hostsPath) {
         String javaHome = System.getProperty("java.home", "");
         Path javaBin = Paths.get(javaHome, "bin", "java");
         String javaCmd = Files.isExecutable(javaBin) ? javaBin.toString() : "java";
 
-        List<String> cmd = new ArrayList<>();
-        cmd.add(javaCmd);
+        List<String> properties = new ArrayList<>();
         String binProp = System.getProperty("siteblock.bin");
         if (binProp != null && !binProp.isBlank()) {
-            cmd.add("-Dsiteblock.bin=" + binProp);
+            properties.add("-Dsiteblock.bin=" + binProp);
         }
-        String jarProp = System.getProperty("siteblock.jar");
-        if (jarProp != null && !jarProp.isBlank()) {
-            cmd.add("-jar");
-            cmd.add(jarProp);
-        } else {
-            cmd.add("-cp");
-            cmd.add(System.getProperty("java.class.path", "."));
-        }
-        cmd.add("-Dsitelock.stateDir=" + stateDir.toAbsolutePath());
-        cmd.add("-Dsitelock.hostsFile=" + hostsPath.toAbsolutePath());
-        cmd.add("com.sitelock.SiteLockApplication");
-        cmd.add("daemon");
-        cmd.add("__run-daemon");
-        cmd.add("--interval");
-        cmd.add(intervalSeconds);
+        properties.add("-Dsitelock.stateDir=" + stateDir.toAbsolutePath());
+        properties.add("-Dsitelock.hostsFile=" + hostsPath.toAbsolutePath());
+        // O filho herda o SUDO_USER do pai, mas e se o pai roda como root sem
+        // sudo (su, container)? Aí ninguém saberia a quem devolver a posse dos
+        // arquivos que o daemon escreve — e o status passaria a pedir elevação.
+        SiteLockPaths.realUserName().ifPresent(u -> properties.add("-Dsitelock.user=" + u));
+
+        List<String> appArgs = new ArrayList<>(
+                List.of("daemon", "__run-daemon", "--interval", intervalSeconds));
         if (stateFileOverride != null && !stateFileOverride.isBlank()) {
-            cmd.add("--state-file");
-            cmd.add(stateFileOverride);
+            appArgs.add("--state-file");
+            appArgs.add(stateFileOverride);
         }
-        return cmd;
+
+        return DaemonCommandLine.build(javaCmd, System.getProperty("siteblock.jar"),
+                System.getProperty("java.class.path", "."), properties, appArgs);
     }
 
     /**

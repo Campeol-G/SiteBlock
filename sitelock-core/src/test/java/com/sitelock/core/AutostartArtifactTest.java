@@ -124,6 +124,37 @@ class AutostartArtifactTest {
     }
 
     @Test
+    void commandLineWithJarDoesNotRepeatTheMainClass() {
+        // Com -jar, a JVM lê o Main-Class do manifest: repetir o nome da classe
+        // aqui entrega um argumento órfão ao picocli, e o daemon morre com
+        // código 2 antes de varrer qualquer coisa.
+        List<String> cmd = AutostartArtifact.commandLine(caminhos(OsType.LINUX));
+        assertFalse(cmd.contains("com.sitelock.SiteLockApplication"),
+                "com -jar o nome da classe é redundante e quebra o daemon: " + cmd);
+    }
+
+    @Test
+    void jvmPropertiesComeBeforeTheJar() {
+        // Depois do -jar a JVM para de ler opções: o que vier ali é argumento do
+        // programa, e o picocli recusa com "Unknown options".
+        List<String> cmd = AutostartArtifact.commandLine(caminhos(OsType.LINUX));
+        int prop = cmd.indexOf("-Dsitelock.stateDir=" + STATE_DIR);
+        int jar = cmd.indexOf("-jar");
+        assertTrue(prop >= 0 && jar >= 0 && prop < jar,
+                "a property da JVM tem que vir antes do -jar: " + cmd);
+    }
+
+    @Test
+    void commandLineWithClasspathKeepsTheMainClass() {
+        // Sem -jar não há manifest: a JVM precisa do nome da classe.
+        List<String> cmd = AutostartArtifact.commandLine(caminhos(OsType.LINUX, null));
+        assertTrue(cmd.contains("com.sitelock.SiteLockApplication"),
+                "sem -jar o nome da classe é obrigatório: " + cmd);
+        assertTrue(cmd.indexOf("-cp") < cmd.indexOf("com.sitelock.SiteLockApplication"),
+                "o classpath tem que vir antes da classe: " + cmd);
+    }
+
+    @Test
     void artifactPathPerOs() {
         assertEquals(Path.of("/etc/systemd/system/sitelock-sweeper.service"),
                 AutostartInstaller.artifactPath(OsType.LINUX, Path.of("/")));

@@ -31,28 +31,21 @@ public final class AutostartArtifact {
      * <p>Compartilhado pelos três artefatos — é a lista que vira o ExecStart, o
      * ProgramArguments ou o {@code /tr}. Manter uma só fonte é o que impede o
      * caso em que o macOS recebe o caminho certo e o Linux recebe o errado.
+     *
+     * <p>A forma da linha é montada por {@link DaemonCommandLine}, que é também
+     * o que o fork do {@code daemon start} usa: a unit e o fork precisam
+     * Produzir a <b>mesma</b> invocação, senão um caminho sobe e o outro não.
      */
     public static List<String> commandLine(AutostartPaths p) {
-        List<String> cmd = new ArrayList<>();
-        cmd.add(p.javaBin());
-        cmd.add("-Dsitelock.stateDir=" + p.stateDir().toAbsolutePath());
-        cmd.add("-Dsitelock.hostsFile=" + p.hostsFile().toAbsolutePath());
+        List<String> properties = new ArrayList<>();
+        properties.add("-Dsitelock.stateDir=" + p.stateDir().toAbsolutePath());
+        properties.add("-Dsitelock.hostsFile=" + p.hostsFile().toAbsolutePath());
         if (p.realUserName() != null && !p.realUserName().isBlank()) {
-            cmd.add("-Dsitelock.user=" + p.realUserName());
+            properties.add("-Dsitelock.user=" + p.realUserName());
         }
-        if (p.jarPath() != null && !p.jarPath().isBlank()) {
-            cmd.add("-jar");
-            cmd.add(p.jarPath());
-        } else {
-            cmd.add("-cp");
-            cmd.add(p.classpath());
-        }
-        cmd.add("com.sitelock.SiteLockApplication");
-        cmd.add("daemon");
-        cmd.add("__run-daemon");
-        cmd.add("--interval");
-        cmd.add(String.valueOf(DEFAULT_INTERVAL_SECONDS));
-        return cmd;
+        return DaemonCommandLine.build(p.javaBin(), p.jarPath(), p.classpath(), properties,
+                List.of("daemon", "__run-daemon", "--interval",
+                        String.valueOf(DEFAULT_INTERVAL_SECONDS)));
     }
 
     /** Unit do systemd, para {@code /etc/systemd/system/sitelock-sweeper.service}. */
