@@ -89,6 +89,11 @@ sudo ./run.sh profile save trabalho      # guarda o que está bloqueado agora
 ./run.sh profile apply trabalho         # recarrega sem nunca encurtar o prazo
 sudo ./run.sh profile unblock trabalho --force
 
+# Editar a receita de um perfil que já existe
+./run.sh profile trabalho add tiktok.com            # entra permanente
+./run.sh profile trabalho add tiktok.com --for 4h   # entra com 4h de prazo
+./run.sh profile trabalho remove tiktok.com          # só sai da receita
+
 # Daemon de expiração (o prazo vence sozinho)
 sudo ./run.sh daemon enable             # instala para subir a cada boot
 ./run.sh daemon status                  # responde sem sudo
@@ -175,6 +180,13 @@ mesma lista todo dia. O que fica gravado é o **prazo restante** no momento do
 save, nunca o horário original: um perfil é uma receita, não um histórico.
 Aplicar um perfil **só aumenta** prazo, nunca encurta — repetir `profile apply`
 várias vezes no dia é seguro.
+
+`profile add` e `profile remove` editam a receita de um perfil que já existe,
+sem passar pelo `block`: o `add` grava o domínio com o prazo pedido (ou
+permanente, sem `--for`) e o `remove` tira o domínio da receita. Nenhum dos
+dois toca no `/etc/hosts` — o que está bloqueado continua bloqueado, e o
+`remove` avisa quando o domínio que saiu da receita continua preso, porque o
+`profile unblock` só alcança o que ainda está no perfil.
 
 Para instalar o autostart (o passo recomendado depois de instalar):
 
