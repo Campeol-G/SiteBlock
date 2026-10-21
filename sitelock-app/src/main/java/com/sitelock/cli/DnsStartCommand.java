@@ -4,7 +4,9 @@ import com.sitelock.core.BlockEntry;
 import com.sitelock.core.BlockStore;
 import com.sitelock.core.DurationParser;
 import com.sitelock.core.PermissionAdvisor;
+import com.sitelock.core.SiteLockPaths;
 import com.sitelock.dns.DnsDaemonState;
+import com.sitelock.dns.DnsServer;
 import com.sitelock.dns.NetworkUtils;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -51,6 +53,10 @@ public class DnsStartCommand implements Callable<Integer> {
             description = "Desliga sozinho após a duração. Ex.: 30m, 2h, 1d. Omitido = até 'dns stop'.")
     String forDuration;
 
+    @Option(names = "--allow-from", paramLabel = "<lista>",
+            description = "Origens liberadas além das locais (IP ou CIDR, separados por vírgula).")
+    String allowFrom;
+
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
 
     public DnsStartCommand() {
@@ -96,6 +102,15 @@ public class DnsStartCommand implements Callable<Integer> {
             String retry = "dns start" + (forDuration != null ? " --for " + forDuration : "");
             System.err.println("Erro: " + new PermissionAdvisor().privilegedPortHint(port, retry));
             return 1;
+        }
+
+        // Valida antes de forkar: erro de digitação no --allow-from não pode
+        // aparecer só depois que o daemon já subiu.
+        try {
+            DnsServer.parseAllowFrom(allowFrom);
+        } catch (IllegalArgumentException e) {
+            System.err.println("Erro: " + e.getMessage());
+            return 2;
         }
 
         Path stateDir = DnsDaemonState.stateDirFor(stateFileOverride);
@@ -152,7 +167,8 @@ public class DnsStartCommand implements Callable<Integer> {
         }
 
         // Dá até ~3s para o filho fazer bind; se morrer, mostra o motivo do log.
-        boolean alive = false;
+        boolean vivo = false;
+        boolean escutando = false;
         for (int i = 0; i < 6; i++) {
             try {
                 Thread.sleep(500);
@@ -160,18 +176,32 @@ public class DnsStartCommand implements Callable<Integer> {
                 Thread.currentThread().interrupt();
                 break;
             }
-            if (ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)) {
-                alive = true;
-                if (logShowsListening(logFile)) {
-                    break;
-                }
-            } else {
-                alive = false;
+            if (!ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)) {
+                vivo = false;
+                break;
+            }
+            vivo = true;
+            if (logShowsListening(logFile)) {
+                escutando = true;
                 break;
             }
         }
-        if (!alive) {
+        if (!vivo) {
             System.err.println("Erro: o servidor DNS não subiu (pid " + pid + " encerrou).");
+            printLogTail(logFile);
+            try {
+                DnsDaemonState.delete(stateDir);
+            } catch (IOException ignored) {
+            }
+            return 1;
+        }
+        // O processo vivo não é o mesmo que servidor escutando: o daemon pode
+        // estar vivo e nunca abrir a porta (o watchdog dormia e tentava de novo,
+        // para sempre). Só a marca no log prova que está atendendo.
+        if (!escutando) {
+            System.err.println("Erro: o servidor DNS não subiu: o processo (pid " + pid
+                    + ") está vivo, mas não anunciou que está escutando.");
+            process.destroyForcibly();
             printLogTail(logFile);
             try {
                 DnsDaemonState.delete(stateDir);
@@ -208,6 +238,19 @@ public class DnsStartCommand implements Callable<Integer> {
         if (binProp != null && !binProp.isBlank()) {
             cmd.add("-Dsiteblock.bin=" + binProp);
         }
+        // O filho tem que enxergar o MESMO estado do pai. Sem estas properties,
+        // um daemon iniciado como root sem SUDO_USER (autostart) opera em
+        // /root/.sitelock enquanto o `dns status` olha ~/.sitelock: o status
+        // diz "PARADO" com o servidor no ar, e o `dns stop` não o encerra.
+        cmd.add("-Dsitelock.stateDir="
+                + DnsDaemonState.stateDirFor(stateFileOverride).toAbsolutePath());
+        String usuario = System.getProperty("sitelock.user");
+        if (usuario == null || usuario.isBlank()) {
+            usuario = SiteLockPaths.realUserName().orElse(null);
+        }
+        if (usuario != null && !usuario.isBlank()) {
+            cmd.add("-Dsitelock.user=" + usuario);
+        }
         cmd.add("-cp");
         cmd.add(classpath);
         cmd.add("com.sitelock.SiteLockApplication");
@@ -220,6 +263,10 @@ public class DnsStartCommand implements Callable<Integer> {
         if (forDuration != null) {
             cmd.add("--for");
             cmd.add(forDuration);
+        }
+        if (allowFrom != null && !allowFrom.isBlank()) {
+            cmd.add("--allow-from");
+            cmd.add(allowFrom);
         }
         if (stateFileOverride != null && !stateFileOverride.isBlank()) {
             cmd.add("--state-file");

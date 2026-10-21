@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Arrays;
@@ -114,6 +115,20 @@ public class DnsResolver {
 
     /** Porta do DNS upstream (fixa: serviço DNS padrão). */
     public static final int UPSTREAM_PORT = 53;
+
+    /**
+     * Sorteio do ID enviado ao upstream.
+     *
+     * <p>POR QUE: o ID do cliente trafega em claro na LAN; usá-lo no upstream
+     * expõe a transação. Um ID próprio, sorteado por consulta, fecha a porta
+     * para quem tenta forjar resposta.
+     */
+    private static final SecureRandom SORTEIO = new SecureRandom();
+
+    /** Sorteia um ID de 16 bits para a transação com o upstream. */
+    static int sorteiaId() {
+        return SORTEIO.nextInt(0x10000);
+    }
 
     private final BlockStore store;
     private final Clock clock;
@@ -234,29 +249,177 @@ public class DnsResolver {
     /**
      * Encaminha os bytes da consulta ao upstream e aguarda a resposta.
      *
-     * <p>Os bytes são enviados <b>intactos</b> (mesmo Transaction ID do cliente), então a
-     * resposta do upstream já carrega o ID original e pode ser retransmitida as-is ao
-     * dispositivo — o que cumpre o requisito de preservar o Transaction ID sem reescrita.
-     * Cada chamada usa seu próprio socket efêmero, logo consultas concorrentes com o mesmo
-     * ID não colidem entre si.
+     * <p><b>Transporte:</b> o socket é <b>conectado</b> ao upstream, então o
+     * kernel descarta o que vier de outro endereço — sem isso, qualquer pacote
+     * UDP que acerte a porta efêmera entrava como se fosse a resposta.
      *
-     * @param request   pacote original do cliente
-     * @param requestLen bytes válidos em {@code request}
-     * @param upstream  endereço do DNS público (ex.: 1.1.1.1)
-     * @param timeoutMs limite de espera (ex.: 2000); estoura
-     *                  {@link java.net.SocketTimeoutException} em vez de travar a thread
-     * @return bytes exatos da resposta do upstream
+     * <p><b>ID:</b> o upstream recebe um ID <b>próprio</b>, sorteado a cada
+     * consulta. O ID do cliente trafega em claro na LAN; repassá-lo ao upstream
+     * expõe a transação a quem escute o caminho. A resposta volta com o ID do
+     * cliente, reescrito — o cliente continua vendo o ID que mandou.
+     *
+     * <p><b>Validação:</b> a resposta só é repassada se for mesmo uma resposta
+     * (QR=1), tiver o ID que foi enviado e a pergunta que foi perguntada.
+     * Qualquer outra coisa vira falha (SERVFAIL ao cliente), não dado falso.
+     *
+     * @param request      pacote original do cliente
+     * @param requestLen   bytes válidos em {@code request}
+     * @param upstream     endereço do DNS público (ex.: 1.1.1.1)
+     * @param upstreamPort porta do upstream (53 no DNS público)
+     * @param timeoutMs    limite de espera (ex.: 2000); estoura
+     *                     {@link java.net.SocketTimeoutException} em vez de travar a thread
+     * @return bytes exatos da resposta do upstream, com o ID do cliente
+     */
+    public static byte[] forwardRaw(byte[] request, int requestLen,
+                                    InetAddress upstream, int upstreamPort, int timeoutMs)
+            throws IOException {
+        try (UpstreamClient client = new UpstreamClient(upstream, upstreamPort, timeoutMs, 1)) {
+            return client.encaminhar(request, requestLen);
+        }
+    }
+
+    /**
+     * Encaminha para o upstream padrão (porta 53).
+     *
+     * @see #forwardRaw(byte[], int, InetAddress, int, int)
      */
     public static byte[] forwardRaw(byte[] request, int requestLen,
                                     InetAddress upstream, int timeoutMs) throws IOException {
-        try (DatagramSocket sock = new DatagramSocket()) {
-            sock.setSoTimeout(timeoutMs);
-            DatagramPacket out = new DatagramPacket(request, requestLen, upstream, UPSTREAM_PORT);
-            sock.send(out);
+        return forwardRaw(request, requestLen, upstream, UPSTREAM_PORT, timeoutMs);
+    }
+
+    /**
+     * Confere que a resposta do upstream é mesmo a resposta da nossa consulta.
+     *
+     * @throws IOException se a resposta não serve (ID trocado, pacote que não é
+     *                     resposta ou pergunta diferente)
+     */
+    static void validarResposta(byte[] resposta, int idEsperado,
+                                 byte[] consulta, int consultaLen) throws IOException {
+        if (resposta == null || resposta.length < 12) {
+            throw new IOException("resposta do upstream curta demais: "
+                    + (resposta == null ? 0 : resposta.length) + " bytes");
+        }
+        int id = u16(resposta, 0);
+        if (id != idEsperado) {
+            throw new IOException("ID do upstream não confere (" + id + " != "
+                    + idEsperado + "): resposta descartada");
+        }
+        int flags = u16(resposta, 2);
+        if ((flags & 0x8000) == 0) {
+            throw new IOException("pacote do upstream não é resposta (QR=0): descartado");
+        }
+        final DnsQuery query;
+        try {
+            query = DnsPacketParser.parse(consulta, consultaLen);
+        } catch (DnsParseException e) {
+            // Consulta que não parseia não chega aqui (o servidor já a descartou).
+            return;
+        }
+        byte[] pergunta = query.questionSection();
+        if (resposta.length < 12 + pergunta.length) {
+            throw new IOException("resposta do upstream sem a pergunta: descartada");
+        }
+        for (int i = 0; i < pergunta.length; i++) {
+            if (resposta[12 + i] != pergunta[i]) {
+                throw new IOException(
+                        "a pergunta do upstream não é a que foi enviada: resposta descartada");
+            }
+        }
+    }
+
+    private static int u16(byte[] data, int off) {
+        return ((data[off] & 0xFF) << 8) | (data[off + 1] & 0xFF);
+    }
+}
+
+/**
+ * Cliente do upstream: um punhado de sockets conectados, reaproveitados.
+ *
+ * <p>POR QUE: um socket novo por consulta esgota as portas efêmeras do SO
+ * (uma rajada de algumas centenas de consultas já estoura o intervalo) e
+ * multiplica os sockets abertos. Os sockets aqui são <b>conectados</b> — é o
+ * que faz o kernel descartar resposta de origem errada — e são reaproveitados
+ * por todas as consultas.
+ *
+ * <p>Cada socket é usado por uma requisição por vez (um lock por socket): o
+ * par send/receive tem que ser da mesma transação, e o ID sorteado por
+ * consulta é o que amarra a resposta à consulta.
+ */
+final class UpstreamClient implements AutoCloseable {
+
+    private final InetAddress upstream;
+    private final int porta;
+    private final int timeoutMs;
+    private final DatagramSocket[] sockets;
+    private final Object[] locks;
+    private final java.util.concurrent.atomic.AtomicInteger proximo =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    /**
+     * @param quantidade quantos sockets conectar (1 = um só, em série)
+     */
+    UpstreamClient(InetAddress upstream, int porta, int timeoutMs, int quantidade)
+            throws IOException {
+        if (quantidade < 1) {
+            throw new IllegalArgumentException("quantidade de sockets inválida: " + quantidade);
+        }
+        this.upstream = upstream;
+        this.porta = porta;
+        this.timeoutMs = timeoutMs;
+        this.sockets = new DatagramSocket[quantidade];
+        this.locks = new Object[quantidade];
+        try {
+            for (int i = 0; i < quantidade; i++) {
+                DatagramSocket sock = new DatagramSocket();
+                // ATENÇÃO: conectar é o que faz o kernel filtrar por origem.
+                sock.connect(upstream, porta);
+                sock.setSoTimeout(timeoutMs);
+                sockets[i] = sock;
+                locks[i] = new Object();
+            }
+        } catch (IOException e) {
+            close();
+            throw e;
+        }
+    }
+
+    /** Encaminha a consulta e devolve a resposta com o ID do cliente. */
+    byte[] encaminhar(byte[] request, int requestLen) throws IOException {
+        if (request == null || requestLen < 2 || requestLen > request.length) {
+            throw new IOException("consulta inválida para encaminhar");
+        }
+        int indice = Math.floorMod(proximo.getAndIncrement(), sockets.length);
+        DatagramSocket sock = sockets[indice];
+        synchronized (locks[indice]) {
+            int idCliente = ((request[0] & 0xFF) << 8) | (request[1] & 0xFF);
+            int idUpstream = DnsResolver.sorteiaId();
+            byte[] enviado = Arrays.copyOf(request, requestLen);
+            enviado[0] = (byte) (idUpstream >>> 8);
+            enviado[1] = (byte) idUpstream;
+            sock.send(new DatagramPacket(enviado, requestLen));
             byte[] buf = new byte[DnsServer.MAX_PACKET_BYTES];
             DatagramPacket in = new DatagramPacket(buf, buf.length);
             sock.receive(in);
-            return Arrays.copyOf(in.getData(), in.getLength());
+            byte[] resposta = Arrays.copyOf(in.getData(), in.getLength());
+            DnsResolver.validarResposta(resposta, idUpstream, request, requestLen);
+            // O cliente precisa ver o ID dele: o ID do upstream é nosso, não dele.
+            resposta[0] = (byte) (idCliente >>> 8);
+            resposta[1] = (byte) idCliente;
+            return resposta;
+        }
+    }
+
+    @Override
+    public void close() {
+        for (DatagramSocket sock : sockets) {
+            if (sock != null) {
+                try {
+                    sock.close();
+                } catch (RuntimeException ignored) {
+                    // já fechando
+                }
+            }
         }
     }
 }
