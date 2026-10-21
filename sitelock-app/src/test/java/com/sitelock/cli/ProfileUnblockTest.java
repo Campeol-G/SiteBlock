@@ -152,7 +152,9 @@ class ProfileUnblockTest {
 
     @Test
     void emptyTargetListDoesNotAskAnything() throws Exception {
-        assertEquals(0, save("vazio") == 1 ? 0 : 1); // save sem bloqueio ativo falha
+        // Um perfil sem nada bloqueado não existe: o save recusa.
+        assertEquals(1, save("vazio"),
+                "sem bloqueio ativo não há o que salvar: o save tem que falhar");
         assertEquals(0, block(null, "tiktok.com"));
         assertEquals(0, save("so-tiktok"));
 
@@ -161,6 +163,8 @@ class ProfileUnblockTest {
         String saida = capture(() -> unblock("so-tiktok", false, null));
 
         assertFalse(saida.contains("digite SIM"), "lista vazia não pergunta nada: " + saida);
+        assertTrue(saida.contains("Nada a fazer"),
+                "lista vazia tem que dizer que não há o que fazer: " + saida);
         assertEquals(0, unblock("so-tiktok", false, null),
                 "e sem --force também, porque não há nada a perder");
     }
@@ -217,7 +221,11 @@ class ProfileUnblockTest {
 
     @Test
     void unknownProfileFails() throws Exception {
+        String saida = capture(() -> unblock("nao-existe", true, "SIM"));
+
         assertEquals(1, unblock("nao-existe", true, "SIM"));
+        assertTrue(saida.contains("não existe"),
+                "a recusa tem que dizer que o perfil não existe: " + saida);
     }
 
     /** Troca o expiresAt do domínio por um instante já vencido. */
@@ -242,14 +250,18 @@ class ProfileUnblockTest {
         return n;
     }
 
+    /** Captura stdout e stderr: as recusas do comando saem no stderr. */
     private static String capture(ThrowingRunnable r) throws Exception {
         PrintStream original = System.out;
+        PrintStream originalErr = System.err;
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         System.setOut(new PrintStream(buffer, true, StandardCharsets.UTF_8));
+        System.setErr(new PrintStream(buffer, true, StandardCharsets.UTF_8));
         try {
             r.run();
         } finally {
             System.setOut(original);
+            System.setErr(originalErr);
         }
         return buffer.toString(StandardCharsets.UTF_8);
     }

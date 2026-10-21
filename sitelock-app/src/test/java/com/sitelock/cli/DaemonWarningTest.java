@@ -101,6 +101,9 @@ class DaemonWarningTest {
         Resultado r = rodar(() -> new BlockCommand(List.of("tiktok.com"), null,
                 hosts().toString(), state()).call());
 
+        // O bloqueio tem que ter acontecido: sem isso a ausência do aviso
+        // seria verdade por acidente, e não por o bloqueio ser permanente.
+        assertTrue(r.texto().contains("Bloqueado tiktok.com"), r.texto());
         assertFalse(r.texto().contains("AVISO:"),
                 "bloqueio permanente não tem prazo para vencer: " + r.texto());
     }
@@ -112,6 +115,7 @@ class DaemonWarningTest {
         Resultado r = rodar(() -> new BlockCommand(List.of("tiktok.com"), "30m",
                 hosts().toString(), state()).call());
 
+        assertTrue(r.texto().contains("Bloqueado tiktok.com"), r.texto());
         assertFalse(r.texto().contains("AVISO:"),
                 "com daemon vivo e este teste sem autostart real, o aviso seria ruido: " + r.texto());
     }
@@ -134,7 +138,8 @@ class DaemonWarningTest {
 
         Resultado r = rodar(() -> new StatusCommand(hosts().toString(), state()).call());
 
-        assertTrue(r.texto().contains("daemon"), r.texto());
+        assertTrue(r.texto().contains("daemon enable"),
+                "o status tem que dizer o comando que liga o daemon: " + r.texto());
     }
 
     @Test
@@ -143,6 +148,8 @@ class DaemonWarningTest {
 
         Resultado r = rodar(() -> new StatusCommand(hosts().toString(), state()).call());
 
+        assertTrue(r.texto().contains("Domínios bloqueados (1):"),
+                "o bloqueio tem que estar listado: " + r.texto());
         assertFalse(r.texto().contains("daemon enable"),
                 "sem temporário ativo não há o que avisar: " + r.texto());
     }
@@ -156,6 +163,8 @@ class DaemonWarningTest {
 
         Resultado r = rodar(() -> new StatusCommand(hosts().toString(), state()).call());
 
+        assertTrue(r.texto().contains("Domínios bloqueados (1):"),
+                "o bloqueio tem que estar listado: " + r.texto());
         assertFalse(r.texto().contains("daemon enable"), r.texto());
     }
 }
