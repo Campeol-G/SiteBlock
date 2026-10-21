@@ -25,12 +25,15 @@ jobs:
           - os: ubuntu-latest
             mvn: ./mvnw
             shell: bash
+            script: ./run.sh
           - os: macos-latest
             mvn: ./mvnw
             shell: bash
+            script: ./run.sh
           - os: windows-latest
             mvn: mvnw.cmd
             shell: cmd
+            script: cmd /c run.bat
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -81,3 +84,9 @@ jobs:
           grep -q '^picocli/CommandLine.class$' "$tmp/entries.txt"
           grep -q '^com/sitelock/SiteLockApplication.class$' "$tmp/entries.txt"
           echo "Conteudo do fat-jar: OK"
+
+      # O script de execucao tambem e parte do que o usuario instala: um
+      # macOS < 12.3 nao tem 'readlink -f' e o script achava o jar errado.
+      - name: Smoke test do script de execução
+        shell: bash
+        run: ${{ matrix.script }} --version
