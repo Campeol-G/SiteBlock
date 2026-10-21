@@ -246,33 +246,45 @@ public class DnsServer {
         System.out.println("SITELOCK_DNS_LISTENING port=" + port);
         try {
             while (!stopRequested) {
-                byte[] buf = new byte[MAX_PACKET_BYTES];
-                DatagramPacket packet = new DatagramPacket(buf, buf.length);
                 try {
-                    ds.receive(packet);
+                    aguardaEDespacha(ds);
                 } catch (SocketException e) {
                     if (stopRequested || ds.isClosed()) {
                         break; // stop() fechou o socket para destravar o receive
                     }
                     log("erro no socket de escuta: " + e.getMessage() + " (continuando)");
-                    continue;
                 } catch (IOException e) {
                     log("erro de I/O na escuta: " + e.getMessage() + " (continuando)");
-                    continue;
-                }
-                byte[] data = Arrays.copyOf(packet.getData(), packet.getLength());
-                InetAddress client = packet.getAddress();
-                int clientPort = packet.getPort();
-                try {
-                    pool.execute(() -> handlePacket(data, client, clientPort));
-                } catch (RejectedExecutionException e) {
-                    // Pool cheio ou encerrando: descarta a consulta (o cliente retransmite).
                 }
             }
         } finally {
             closeQuietly(ds);
             closeQuietly(tcp);
             cliente.close();
+            // POR QUE: sem derrubar o pool aqui, uma queda no meio do loop
+            // deixava o pool antigo órfão — threads daemon com keepalive de
+            // 60s — e o watchdog criava outro pool por cima.
+            shutdown(pool);
+            shutdown(tcpPool);
+        }
+    }
+
+    /**
+     * Espera um pacote e despacha o atendimento para o pool.
+     *
+     * <p>Package-private para o teste poder simular a queda do loop.
+     */
+    void aguardaEDespacha(DatagramSocket ds) throws IOException {
+        byte[] buf = new byte[MAX_PACKET_BYTES];
+        DatagramPacket packet = new DatagramPacket(buf, buf.length);
+        ds.receive(packet);
+        byte[] data = Arrays.copyOf(packet.getData(), packet.getLength());
+        InetAddress client = packet.getAddress();
+        int clientPort = packet.getPort();
+        try {
+            pool.execute(() -> handlePacket(data, client, clientPort));
+        } catch (RejectedExecutionException e) {
+            // Pool cheio ou encerrando: descarta a consulta (o cliente retransmite).
         }
     }
 
