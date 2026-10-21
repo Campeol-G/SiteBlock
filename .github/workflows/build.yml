@@ -17,4 +17,43 @@ jobs:
           distribution: temurin
           java-version: "26"
           cache: maven
-      - run: mvn -B test
+      # 'clean' é obrigatório: sem ele o shade re-sombreia o fat-jar anterior
+      # e o artefato final deixa de ser reproduzível.
+      - name: Build (gera o fat-jar distribuível)
+        run: mvn -B clean package
+      - name: Verifica o fat-jar
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # O passo ja roda no diretorio do workspace: nao depende de 'cd' com
+          # caminho do Windows, que o bash do Git for Windows nao entende igual.
+          JAR=""
+          for candidate in sitelock-app/target/siteblock-*.jar; do
+            case "$candidate" in
+              *-sources.jar|*-javadoc.jar) continue ;;
+            esac
+            JAR="$candidate"
+            break
+          done
+          if [ -z "$JAR" ] || [ ! -f "$JAR" ]; then
+            echo "::error::fat-jar nao encontrado em sitelock-app/target/siteblock-*.jar"
+            exit 1
+          fi
+          echo "Artefato: $JAR"
+
+          # O jar precisa responder: Main-Class ausente ou errado quebra 'java -jar'.
+          java -jar "$JAR" --version
+
+          # O manifest precisa apontar o Main-Class.
+          tmp="$(mktemp -d)"
+          cp "$JAR" "$tmp/app.jar"
+          (cd "$tmp" && jar xf app.jar META-INF/MANIFEST.MF)
+          grep -q '^Main-Class: com.sitelock.SiteLockApplication' "$tmp/META-INF/MANIFEST.MF"
+          echo "Main-Class: OK"
+
+          # O shade tem que ter rodado: sem as dependencias dentro, nao e o fat-jar.
+          (cd "$tmp" && jar tf app.jar > entries.txt)
+          grep -q '^picocli/CommandLine.class$' "$tmp/entries.txt"
+          grep -q '^com/sitelock/SiteLockApplication.class$' "$tmp/entries.txt"
+          echo "Conteudo do fat-jar: OK"
