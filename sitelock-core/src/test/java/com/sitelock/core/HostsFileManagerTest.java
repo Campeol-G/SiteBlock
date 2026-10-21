@@ -2,6 +2,8 @@ package com.sitelock.core;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Testa add/remove do bloco em memória. */
@@ -90,6 +92,133 @@ class HostsFileManagerTest {
     void removeHandlesNullGracefully() {
         assertDoesNotThrow(() -> HostsFileManager.removeDomain(null, "a.com"));
         assertDoesNotThrow(() -> HostsFileManager.addDomain(null, "a.com"));
+    }
+
+    @Test
+    void removeKeepsUserLinesOutsideTheBlock() {
+        String content = "127.0.0.1 tiktok.com\n"
+                + "10.0.0.5 intranet.local\n"
+                + "# SITELOCK-START\n"
+                + "127.0.0.1 youtube.com\n"
+                + "::1 youtube.com\n"
+                + "# SITELOCK-END\n";
+
+        String out = HostsFileManager.removeDomain(content, "tiktok.com");
+
+        assertTrue(out.contains("127.0.0.1 tiktok.com"),
+                "linha do usuário fora do bloco não pode ser apagada: " + out);
+        assertTrue(out.contains("10.0.0.5 intranet.local"), out);
+        assertTrue(out.contains("127.0.0.1 youtube.com"), out);
+    }
+
+    @Test
+    void removeDoesNotRewriteUserLinesOutsideTheBlock() {
+        String content = "127.0.0.1 tiktok.com intranet.local\n"
+                + "# SITELOCK-START\n"
+                + "127.0.0.1 youtube.com\n"
+                + "# SITELOCK-END\n";
+
+        String out = HostsFileManager.removeDomain(content, "tiktok.com");
+
+        assertTrue(out.contains("127.0.0.1 tiktok.com intranet.local"),
+                "linha do usuário fora do bloco não pode ser reescrita: " + out);
+    }
+
+    @Test
+    void removeDeletesDomainFromSharedLineInsideBlock() {
+        String content = "# SITELOCK-START\n"
+                + "127.0.0.1 tiktok.com www.tiktok.com\n"
+                + "# SITELOCK-END\n";
+
+        String out = HostsFileManager.removeDomain(content, "tiktok.com");
+
+        assertFalse(out.contains("tiktok.com"), out);
+    }
+
+    @Test
+    void removeKeepsCommentsInsideBlock() {
+        String content = "# SITELOCK-START\n"
+                + "# bloqueio manual\n"
+                + "127.0.0.1 youtube.com\n"
+                + "127.0.0.1 tiktok.com\n"
+                + "# SITELOCK-END\n";
+
+        String out = HostsFileManager.removeDomain(content, "tiktok.com");
+
+        assertTrue(out.contains("# bloqueio manual"), out);
+        assertTrue(out.contains("127.0.0.1 youtube.com"), out);
+        assertFalse(out.contains("127.0.0.1 tiktok.com"), out);
+    }
+
+    @Test
+    void addDoesNotDuplicateBlockWhenEndMarkerIsMissing() {
+        String content = "# SITELOCK-START\n127.0.0.1 x.com\n";
+
+        String out = HostsFileManager.addDomain(content, "y.com");
+
+        assertEquals(1, countOccurrences(out, HostsFileManager.START_MARKER), out);
+        assertEquals(1, countOccurrences(out, HostsFileManager.END_MARKER), out);
+        assertTrue(out.contains("127.0.0.1 x.com"), out);
+        assertTrue(out.contains("127.0.0.1 y.com"), out);
+    }
+
+    @Test
+    void removeWorksWhenEndMarkerIsMissing() {
+        String content = "# SITELOCK-START\n"
+                + "127.0.0.1 x.com\n"
+                + "127.0.0.1 y.com\n";
+
+        String out = HostsFileManager.removeDomain(content, "y.com");
+
+        assertFalse(out.contains("y.com"), out);
+        assertTrue(out.contains("127.0.0.1 x.com"), out);
+    }
+
+    @Test
+    void removeWorksWhenBlockWasDuplicated() {
+        String content = "# SITELOCK-START\n"
+                + "127.0.0.1 x.com\n"
+                + "# SITELOCK-START\n"
+                + "127.0.0.1 y.com\n"
+                + "127.0.0.1 www.y.com\n"
+                + "::1 y.com\n"
+                + "::1 www.y.com\n"
+                + "# SITELOCK-END\n";
+
+        String out = HostsFileManager.removeDomain(content, "y.com");
+
+        assertFalse(out.contains("y.com"), out);
+        assertTrue(out.contains("127.0.0.1 x.com"), out);
+        assertEquals(1, countOccurrences(out, HostsFileManager.START_MARKER), out);
+        assertEquals(1, countOccurrences(out, HostsFileManager.END_MARKER), out);
+    }
+
+    @Test
+    void addNeverGeneratesWwwWww() {
+        String out = HostsFileManager.addDomain("", "www.tiktok.com");
+
+        assertFalse(out.contains("www.www."), out);
+        assertTrue(out.contains("127.0.0.1 www.tiktok.com"), out);
+        assertTrue(out.contains("::1 www.tiktok.com"), out);
+    }
+
+    @Test
+    void managedHostsNeverRepeatWwwPrefix() {
+        assertEquals(List.of("tiktok.com", "www.tiktok.com"),
+                HostsFileManager.managedHosts("www.tiktok.com"));
+        assertEquals(List.of("tiktok.com", "www.tiktok.com"),
+                HostsFileManager.managedHosts("tiktok.com"));
+    }
+
+    @Test
+    void addWwwPrefixedTldCoversDomainAndWwwVariant() {
+        String out = HostsFileManager.addDomain(BASE_HOSTS, "www.com");
+
+        assertTrue(out.contains("127.0.0.1 com"), out);
+        assertTrue(out.contains("127.0.0.1 www.com"), out);
+        assertTrue(out.contains("::1 com"), out);
+        assertTrue(out.contains("::1 www.com"), out);
+        assertFalse(out.contains("www.www."), out);
     }
 
     private static int countOccurrences(String haystack, String needle) {

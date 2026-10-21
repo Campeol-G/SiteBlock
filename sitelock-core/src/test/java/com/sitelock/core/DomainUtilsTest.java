@@ -49,6 +49,15 @@ class DomainUtilsTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"www.com", "www.dev", "www.ai", "www.io", "www.app", "www.net", "www.org"})
+    void acceptsWwwPrefixedTldDomains(String input) {
+        DomainUtils.NormalizationResult r = DomainUtils.normalize(input);
+        assertEquals(input, r.domain(),
+                "'" + input + "' é domínio legítimo: não pode ser rejeitado como inválido");
+        assertTrue(DomainUtils.isValid(r.domain()), "'" + r.domain() + "' tem que ser um domínio válido");
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"", "   ", "tik tok.com", "https://", "www", ".com",
             "com", "localhost", "192.168.0.1", "exemplo.c", "exemplo.123",
             "-bad.com", "bad-.com", "a..b.com", "site_cool.com"})

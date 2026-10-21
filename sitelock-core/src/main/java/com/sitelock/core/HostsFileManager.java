@@ -51,18 +51,31 @@ public final class HostsFileManager {
 
     /** As quatro linhas gerenciadas para um domínio (IPv4 + IPv6, com e sem www). */
     public static List<String> managedLines(String domain) {
-        String d = domain.toLowerCase(Locale.ROOT);
+        String base = baseDomain(domain);
         return List.of(
-                REDIRECT_IP + " " + d,
-                REDIRECT_IP + " www." + d,
-                REDIRECT_IPV6 + " " + d,
-                REDIRECT_IPV6 + " www." + d);
+                REDIRECT_IP + " " + base,
+                REDIRECT_IP + " www." + base,
+                REDIRECT_IPV6 + " " + base,
+                REDIRECT_IPV6 + " www." + base);
     }
 
     /** Os dois hostnames gerenciados para um domínio. */
     public static List<String> managedHosts(String domain) {
+        String base = baseDomain(domain);
+        return List.of(base, "www." + base);
+    }
+
+    /**
+     * Domínio sem o prefixo "www.".
+     * POR QUE: o bloqueio é o mesmo com ou sem o prefixo, e "www." + "www.x.com"
+     * seria "www.www.x.com" — um host que não existe.
+     */
+    private static String baseDomain(String domain) {
         String d = domain.toLowerCase(Locale.ROOT);
-        return List.of(d, "www." + d);
+        while (d.startsWith("www.") && d.length() > "www.".length()) {
+            d = d.substring("www.".length());
+        }
+        return d;
     }
 
     /** Insere o domínio no bloco. Idempotente, nunca duplica linhas nem marcadores. */
@@ -71,42 +84,18 @@ public final class HostsFileManager {
         List<String> lines = managedLines(domain);
         List<String> hosts = managedHosts(domain);
 
-        int start = content.indexOf(START_MARKER);
-        int end = content.indexOf(END_MARKER);
+        List<String> all = splitLines(content);
+        int start = indexOfMarker(all, START_MARKER, 0);
+        if (start < 0) {
+            return joinLines(appendBlock(all, lines), true);
+        }
+        int end = indexOfMarker(all, END_MARKER, start + 1);
 
-        if (start >= 0 && end > start) {
-            String before = content.substring(0, end);
-            String after = content.substring(end);
-            String block = content.substring(start, end);
-            StringBuilder insert = new StringBuilder();
-            if (!containsHostWithIp(block, REDIRECT_IP, hosts.get(0))) {
-                insert.append(lines.get(0)).append("\n");
-            }
-            if (!containsHostWithIp(block, REDIRECT_IPV6, hosts.get(0))) {
-                insert.append(lines.get(2)).append("\n");
-            }
-            if (!containsHostWithIp(block, REDIRECT_IP, hosts.get(1))) {
-                insert.append(lines.get(1)).append("\n");
-            }
-            if (!containsHostWithIp(block, REDIRECT_IPV6, hosts.get(1))) {
-                insert.append(lines.get(3)).append("\n");
-            }
-            if (insert.length() == 0) {
-                return content;
-            }
-            return before + insert + after;
-        }
-
-        StringBuilder sb = new StringBuilder(content);
-        if (sb.length() > 0 && sb.charAt(sb.length() - 1) != '\n') {
-            sb.append('\n');
-        }
-        sb.append(START_MARKER).append('\n');
-        for (String line : lines) {
-            sb.append(line).append('\n');
-        }
-        sb.append(END_MARKER).append('\n');
-        return sb.toString();
+        List<String> body = blockBody(all, start, end);
+        body.addAll(missingLines(body, lines, hosts));
+        // Bloco sem marcador final é fechado aqui: o arquivo passa a terminar em "\n".
+        boolean terminaComQuebra = end >= 0 ? endsWithNewline(content) : true;
+        return joinLines(rebuild(all, start, end, body), terminaComQuebra);
     }
 
     /** Remove o domínio do bloco. Bloco sem entradas é removido por inteiro. */
@@ -114,53 +103,135 @@ public final class HostsFileManager {
         String content = hostsContent == null ? "" : hostsContent;
         List<String> hosts = managedHosts(domain);
 
-        int start = content.indexOf(START_MARKER);
-        int end = content.indexOf(END_MARKER);
+        List<String> all = splitLines(content);
+        int start = indexOfMarker(all, START_MARKER, 0);
+        if (start < 0) {
+            // POR QUE: o SiteBlock só reescreve o bloco que ele mesmo escreveu.
+            // Linha do usuário fora dele é intocável, mesmo que cite o domínio.
+            return content;
+        }
+        int end = indexOfMarker(all, END_MARKER, start + 1);
 
-        if (start >= 0 && end > start) {
-            String head = content.substring(0, start);
-            String block = content.substring(start, end);
-            String tail = content.substring(end + END_MARKER.length());
-
-            List<String> blockLines = new ArrayList<>(Arrays.asList(block.split("\n", -1)));
-            List<String> kept = new ArrayList<>();
-            for (String line : blockLines) {
-                if (line.contains(START_MARKER)) {
-                    kept.add(line);
-                    continue;
-                }
-                String stripped = stripHostnames(line, hosts);
-                if (stripped != null) {
-                    if (!stripped.isEmpty() || isCommentOrBlank(line)) {
-                        kept.add(line);
-                    } else if (!stripped.equals(line)) {
-                        if (!stripped.isBlank()) {
-                            kept.add(stripped);
-                        }
-                    } else {
-                        kept.add(line);
-                    }
-                }
+        List<String> kept = new ArrayList<>();
+        for (String line : blockBody(all, start, end)) {
+            String stripped = stripHostnames(line, hosts);
+            if (stripped == null) {
+                continue;
             }
-
-            while (!kept.isEmpty() && kept.get(kept.size() - 1).isEmpty()) {
-                kept.remove(kept.size() - 1);
+            if (stripped.equals(line)) {
+                kept.add(line);
+            } else if (!stripped.isEmpty()) {
+                kept.add(stripped);
             }
-
-            boolean hasEntry = kept.stream().anyMatch(HostsFileManager::isEntryLine);
-            String newBlock;
-            if (!hasEntry) {
-                newBlock = "";
-            } else {
-                newBlock = String.join("\n", kept) + "\n" + END_MARKER;
-            }
-
-            String result = head + newBlock + tail;
-            result = removeOrphanLines(result, hosts);
-            return tidyBlankLines(result);
+        }
+        while (!kept.isEmpty() && kept.get(kept.size() - 1).isEmpty()) {
+            kept.remove(kept.size() - 1);
         }
 
-        return tidyBlankLines(removeOrphanLines(content, hosts));
+        if (!kept.stream().anyMatch(HostsFileManager::isEntryLine)) {
+            // Bloco sem entradas: some inteiro, e só ele.
+            int regionEnd = end >= 0 ? end : all.size() - 1;
+            List<String> out = new ArrayList<>(all.subList(0, start));
+            out.addAll(all.subList(regionEnd + 1, all.size()));
+            return joinLines(out, endsWithNewline(content));
+        }
+        // Bloco sem marcador final é fechado aqui: o arquivo passa a terminar em "\n".
+        boolean terminaComQuebra = end >= 0 ? endsWithNewline(content) : true;
+        return joinLines(rebuild(all, start, end, kept), terminaComQuebra);
+    }
+
+    /**
+     * Linhas entre os marcadores. Marcador repetido dentro da região é descartado:
+     * POR QUE: um arquivo com dois blocos deixa o segundo invisível para a remoção.
+     */
+    private static List<String> blockBody(List<String> all, int start, int end) {
+        int to = end >= 0 ? end : all.size();
+        List<String> body = new ArrayList<>();
+        for (int i = start + 1; i < to; i++) {
+            String line = all.get(i);
+            if (line.contains(START_MARKER) || line.contains(END_MARKER)) {
+                continue;
+            }
+            body.add(line);
+        }
+        return body;
+    }
+
+    /**
+     * Recria o arquivo com o bloco remontado. O que está fora do bloco é copiado
+     * como está: é conteúdo do usuário.
+     */
+    private static List<String> rebuild(List<String> all, int start, int end, List<String> body) {
+        List<String> out = new ArrayList<>(all.subList(0, start + 1));
+        out.addAll(body);
+        if (end >= 0) {
+            out.add(all.get(end));
+            out.addAll(all.subList(end + 1, all.size()));
+        } else {
+            // Bloco sem marcador final: fecha o bloco para o arquivo ficar bem formado.
+            out.add(END_MARKER);
+        }
+        return out;
+    }
+
+    /** Acrescenta um bloco novo no fim do arquivo (quando ainda não existe nenhum). */
+    private static List<String> appendBlock(List<String> all, List<String> lines) {
+        List<String> out = new ArrayList<>(all);
+        out.add(START_MARKER);
+        out.addAll(lines);
+        out.add(END_MARKER);
+        return out;
+    }
+
+    /** Linhas que faltam para o domínio ficar completo no bloco (reparo automático). */
+    private static List<String> missingLines(List<String> body, List<String> lines, List<String> hosts) {
+        String block = String.join("\n", body);
+        List<String> insert = new ArrayList<>();
+        if (!containsHostWithIp(block, REDIRECT_IP, hosts.get(0))) {
+            insert.add(lines.get(0));
+        }
+        if (!containsHostWithIp(block, REDIRECT_IP, hosts.get(1))) {
+            insert.add(lines.get(1));
+        }
+        if (!containsHostWithIp(block, REDIRECT_IPV6, hosts.get(0))) {
+            insert.add(lines.get(2));
+        }
+        if (!containsHostWithIp(block, REDIRECT_IPV6, hosts.get(1))) {
+            insert.add(lines.get(3));
+        }
+        return insert;
+    }
+
+    /** Linhas do arquivo, sem o terminador final: quem remontar decide se ele volta. */
+    private static List<String> splitLines(String content) {
+        if (content.isEmpty()) {
+            return new ArrayList<>();
+        }
+        List<String> lines = new ArrayList<>(Arrays.asList(content.split("\n", -1)));
+        if (lines.get(lines.size() - 1).isEmpty()) {
+            lines.remove(lines.size() - 1);
+        }
+        return lines;
+    }
+
+    private static String joinLines(List<String> lines, boolean endsWithNewline) {
+        if (lines.isEmpty()) {
+            return "";
+        }
+        return String.join("\n", lines) + (endsWithNewline ? "\n" : "");
+    }
+
+    private static boolean endsWithNewline(String content) {
+        return !content.isEmpty() && content.endsWith("\n");
+    }
+
+    private static int indexOfMarker(List<String> lines, String marker, int from) {
+        for (int i = from; i < lines.size(); i++) {
+            if (lines.get(i).contains(marker)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private static boolean containsHostWithIp(String block, String ip, String host) {
@@ -227,37 +298,12 @@ public final class HostsFileManager {
         return String.join(" ", remaining);
     }
 
-    private static boolean isCommentOrBlank(String line) {
-        String t = line.strip();
-        return t.isEmpty() || t.startsWith("#");
-    }
-
     private static boolean isEntryLine(String line) {
         String t = line.strip();
         if (t.isEmpty() || t.startsWith("#")) {
             return false;
         }
         return t.split("\\s+").length >= 2;
-    }
-
-    private static String removeOrphanLines(String content, List<String> hosts) {
-        String[] lines = content.split("\n", -1);
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < lines.length; i++) {
-            String rewritten = stripHostnames(lines[i], hosts);
-            if (rewritten == null) {
-                continue;
-            }
-            sb.append(rewritten);
-            if (i < lines.length - 1) {
-                sb.append('\n');
-            }
-        }
-        return sb.toString();
-    }
-
-    private static String tidyBlankLines(String s) {
-        return s.replaceAll("\n{3,}", "\n\n");
     }
 
     public static boolean isWritable(Path hostsPath) {
