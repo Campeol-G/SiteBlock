@@ -1,5 +1,6 @@
 package com.sitelock.core;
 
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -90,13 +91,24 @@ class BlockStoreTest {
 
         Path lock = stateFile.resolveSibling("blocks.json.lock");
         assertTrue(Files.exists(lock));
-        try {
-            Set<PosixFilePermission> readOnly = Set.of(
-                    PosixFilePermission.OWNER_READ, PosixFilePermission.GROUP_READ,
-                    PosixFilePermission.OTHERS_READ);
-            Files.setPosixFilePermissions(lock, readOnly);
-        } catch (UnsupportedOperationException e) {
-        }
+        // ATENÇÃO: o lock em modo somente-leitura é comportamento POSIX. No
+        // Windows a permissão não existe e o teste passaria sem verificar nada.
+        Set<PosixFilePermission> readOnly = Set.of(
+                PosixFilePermission.OWNER_READ, PosixFilePermission.GROUP_READ,
+                PosixFilePermission.OTHERS_READ);
+        Assumptions.assumeTrue(suportaPosix(lock),
+                "o filesystem não suporta permissão POSIX");
+        Files.setPosixFilePermissions(lock, readOnly);
         assertEquals(1, new BlockStore(stateFile).load().size());
+    }
+
+    /** true se o filesystem aceita permissão POSIX. */
+    private static boolean suportaPosix(Path path) {
+        try {
+            Files.setPosixFilePermissions(path, Files.getPosixFilePermissions(path));
+            return true;
+        } catch (UnsupportedOperationException | java.io.IOException e) {
+            return false;
+        }
     }
 }

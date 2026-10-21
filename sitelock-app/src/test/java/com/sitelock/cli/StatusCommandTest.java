@@ -3,6 +3,8 @@ package com.sitelock.cli;
 import com.sitelock.core.BlockEntry;
 import com.sitelock.core.BlockStore;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayOutputStream;
@@ -149,16 +151,21 @@ class StatusCommandTest {
                 "o www e o dominio são o mesmo bloqueio: " + r.texto());
     }
 
+    /**
+     * Sem permissão de leitura no hosts, o status avisa e não vira erro.
+     *
+     * <p>ATENÇÃO: o teste depende de permissão POSIX — no Windows o
+     * {@code setPosixFilePermissions} não existe, o arquivo continua legível e
+     * a asserção quebra. Sem {@code @EnabledOnOs}, a perna Windows da CI fica
+     * VERMELHA.
+     */
     @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
     void hostsSemLeituraNaoViraErro() throws Exception {
         gravarEstado("tiktok.com", null);
         Path hostsSemLeitura = tmp.resolve("hosts-sem-leitura");
         Files.writeString(hostsSemLeitura, "127.0.0.1 localhost\n", StandardCharsets.UTF_8);
-        try {
-            Files.setPosixFilePermissions(hostsSemLeitura, Set.of(PosixFilePermission.OWNER_WRITE));
-        } catch (UnsupportedOperationException e) {
-            // sem permissão POSIX: o teste de leitura não se aplica
-        }
+        Files.setPosixFilePermissions(hostsSemLeitura, Set.of(PosixFilePermission.OWNER_WRITE));
 
         Resultado r = rodar(() -> new StatusCommand(hostsSemLeitura.toString(), state()).call());
 
