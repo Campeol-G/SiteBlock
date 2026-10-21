@@ -27,14 +27,9 @@
       <groupId>info.picocli</groupId>
       <artifactId>picocli</artifactId>
     </dependency>
-    <dependency>
-      <groupId>com.fasterxml.jackson.core</groupId>
-      <artifactId>jackson-databind</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>com.fasterxml.jackson.datatype</groupId>
-      <artifactId>jackson-datatype-jsr310</artifactId>
-    </dependency>
+    <!-- NOTA: nem jackson-databind nem jackson-datatype-jsr310 sao declarados
+         aqui. Nenhum arquivo deste modulo importa Jackson (grep confirma) e as
+         duas chegam transitivas pelo sitelock-core, que e quem as usa. -->
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
