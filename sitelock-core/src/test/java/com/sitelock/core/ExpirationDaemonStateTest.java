@@ -1,5 +1,6 @@
 package com.sitelock.core;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -9,6 +10,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.GroupPrincipal;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFileAttributes;
+import java.nio.file.attribute.UserPrincipalLookupService;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.CyclicBarrier;
@@ -266,30 +271,143 @@ class ExpirationDaemonStateTest {
     @Test
     void chownToUserIfConfiguredFollowsTheProperty() throws Exception {
         String usuarioAtual = System.getProperty("user.name", "");
-        if ("root".equals(usuarioAtual)) {
-            return; // rodando como root, chown para si mesmo não prova nada
-        }
+        Assumptions.assumeFalse(usuarioAtual.isBlank(), "o SO não disse quem é o usuário");
+        Assumptions.assumeFalse("root".equals(usuarioAtual),
+                "rodando como root, chown para si mesmo não prova nada");
+
         Path arquivo = tmp.resolve("estado.json");
         Files.writeString(arquivo, "{}", StandardCharsets.UTF_8);
+
+        UserPrincipalLookupService lookup = arquivo.getFileSystem().getUserPrincipalLookupService();
+        Assumptions.assumeTrue(Files.getFileAttributeView(arquivo, PosixFileAttributeView.class) != null,
+                "sem POSIX não há grupo para verificar");
+        String grupoDoUsuario = nomeDoGrupoDoUsuario(usuarioAtual, lookup);
+        Assumptions.assumeTrue(grupoDoUsuario != null,
+                "o usuário não tem grupo com o mesmo nome: o chown não troca o grupo");
+        String grupoSecundario = grupoSecundarioDoUsuario(usuarioAtual, grupoDoUsuario);
+        Assumptions.assumeTrue(grupoSecundario != null,
+                "o usuário não tem grupo secundário: não há como distinguir o chown de um no-op");
+
+        Assumptions.assumeTrue(trocaGrupo(arquivo, lookup, grupoSecundario),
+                "não deu para trocar o grupo do arquivo de teste");
+        assertEquals(grupoSecundario, nomeDoGrupo(arquivo),
+                "pré-condição: o arquivo tem que começar com o grupo trocado");
 
         System.setProperty("sitelock.user", usuarioAtual);
         SiteLockPaths.chownToUserIfConfigured(arquivo);
 
-        String dono = Files.getOwner(arquivo).getName();
-        assertEquals(usuarioAtual, dono,
+        assertEquals(usuarioAtual, Files.getOwner(arquivo).getName(),
                 "com -Dsitelock.user o daemon devolve o arquivo ao dono mesmo sem SUDO_USER");
+        assertEquals(grupoDoUsuario, nomeDoGrupo(arquivo),
+                "o chown tem que devolver o grupo ao do usuário: com o chown virado em no-op "
+                        + "o arquivo fica com o grupo trocado");
     }
 
     @Test
     void chownToUserIfConfiguredWithoutPropertyDoesNothing() throws Exception {
-        System.clearProperty("sitelock.user");
+        String usuarioAtual = System.getProperty("user.name", "");
+        Assumptions.assumeFalse(usuarioAtual.isBlank(), "o SO não disse quem é o usuário");
+        String sudoUser = System.getenv("SUDO_USER");
+        Assumptions.assumeTrue(sudoUser == null || sudoUser.isBlank()
+                        || "root".equals(sudoUser.strip()),
+                "sob sudo o caminho sem property é outro: quem devolve a posse é o SUDO_USER");
+
         Path arquivo = tmp.resolve("sem-property.json");
         Files.writeString(arquivo, "{}", StandardCharsets.UTF_8);
-        String antes = Files.getOwner(arquivo).getName();
 
+        UserPrincipalLookupService lookup = arquivo.getFileSystem().getUserPrincipalLookupService();
+        Assumptions.assumeTrue(Files.getFileAttributeView(arquivo, PosixFileAttributeView.class) != null,
+                "sem POSIX não há grupo para verificar");
+        String grupoDoUsuario = nomeDoGrupoDoUsuario(usuarioAtual, lookup);
+        Assumptions.assumeTrue(grupoDoUsuario != null,
+                "o usuário não tem grupo com o mesmo nome: o chown não troca o grupo");
+        String grupoSecundario = grupoSecundarioDoUsuario(usuarioAtual, grupoDoUsuario);
+        Assumptions.assumeTrue(grupoSecundario != null,
+                "o usuário não tem grupo secundário: não há como distinguir o chown de um no-op");
+        Assumptions.assumeTrue(trocaGrupo(arquivo, lookup, grupoSecundario),
+                "não deu para trocar o grupo do arquivo de teste");
+
+        System.clearProperty("sitelock.user");
         SiteLockPaths.chownToUserIfConfigured(arquivo);
 
-        assertEquals(antes, Files.getOwner(arquivo).getName(),
+        assertEquals(grupoSecundario, nomeDoGrupo(arquivo),
+                "sem a property o chown não pode rodar: o grupo tem que continuar como estava");
+        assertEquals(usuarioAtual, Files.getOwner(arquivo).getName(),
                 "sem a property, o comportamento é o de sempre: só SUDO_USER devolve a posse");
+    }
+
+    /**
+     * A property não pode vazar para o resto da suíte.
+     *
+     * <p>POR QUE: a property vive na JVM do surefire (uma por módulo). Se ela
+     * ficar de pé depois de uma falha, todo save seguinte do core passa pelo
+     * caminho do chown — e a ordem de execução dos testes passa a importar.
+     */
+    @AfterEach
+    void limpaAPropertyDoUsuario() {
+        System.clearProperty("sitelock.user");
+    }
+
+    /**
+     * O grupo do usuário — é o que o chown aplica no arquivo.
+     *
+     * <p>ATENÇÃO: nem todo sistema tem grupo com o mesmo nome do usuário (no
+     * macOS o grupo principal se chama "staff"). Sem esse grupo o chown não
+     * troca o grupo, e o teste não teria o que verificar.
+     */
+    private static String nomeDoGrupoDoUsuario(String usuario, UserPrincipalLookupService lookup) {
+        try {
+            GroupPrincipal grupo = lookup.lookupPrincipalByGroupName(usuario);
+            return grupo.getName();
+        } catch (IOException | IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Um grupo do usuário que não seja o do chown.
+     *
+     * <p>POR QUE: sem um grupo diferente, não dá para trocar o grupo do
+     * arquivo — e o grupo é a única diferença observável entre "o chown rodou"
+     * e "o chown foi um no-op".
+     */
+    private static String grupoSecundarioDoUsuario(String usuario, String grupoDoChown) {
+        Path arquivoDeGrupos = Path.of("/etc/group");
+        if (!Files.isReadable(arquivoDeGrupos)) {
+            return null;
+        }
+        try {
+            for (String linha : Files.readAllLines(arquivoDeGrupos, StandardCharsets.UTF_8)) {
+                String[] partes = linha.split(":");
+                if (partes.length < 4 || partes[0].equals(grupoDoChown)) {
+                    continue;
+                }
+                for (String membro : partes[3].split(",")) {
+                    if (usuario.equals(membro.strip())) {
+                        return partes[0];
+                    }
+                }
+            }
+        } catch (IOException e) {
+            return null;
+        }
+        return null;
+    }
+
+    /** Troca o grupo do arquivo (o dono pode mudar para um grupo seu). */
+    private static boolean trocaGrupo(Path arquivo, UserPrincipalLookupService lookup, String grupo) {
+        try {
+            PosixFileAttributeView posix =
+                    Files.getFileAttributeView(arquivo, PosixFileAttributeView.class);
+            posix.setGroup(lookup.lookupPrincipalByGroupName(grupo));
+            return true;
+        } catch (IOException | IllegalArgumentException | UnsupportedOperationException e) {
+            return false;
+        }
+    }
+
+    /** O grupo do arquivo, pelo nome. */
+    private static String nomeDoGrupo(Path arquivo) throws IOException {
+        return Files.readAttributes(arquivo, PosixFileAttributes.class).group().getName();
     }
 }
