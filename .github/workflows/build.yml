@@ -4,9 +4,16 @@ on:
   push:
   pull_request:
 
+# Push repetido cancela o build anterior: sem isso, a fila de jobs so cresce.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    # Sem teto, um daemon travado segura o job por 6 horas (tempo padrão).
+    timeout-minutes: 30
     strategy:
       # macOS entrou na matriz porque o README promete suporte a ele: o caminho
       # do LaunchDaemon/launchctl nunca era exercitado por build nenhum.
