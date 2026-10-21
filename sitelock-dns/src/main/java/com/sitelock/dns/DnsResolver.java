@@ -123,7 +123,17 @@ public class DnsResolver {
         } catch (IOException e) {
             return Decision.FORWARD;
         }
-        return decide(domain, qtype, state, Instant.now(clock));
+        Decision decision = decide(domain, qtype, state, Instant.now(clock));
+        if (decision == Decision.BLOCK_NODATA) {
+            // POR QUE: o operador precisa saber que o cliente pediu um tipo ≠ A/AAAA
+            // de um nome bloqueado — é o indício de um app contornando o bloqueio.
+            log("BLOQUEADO (nodata) " + domain + " tipo=" + qtype);
+        }
+        return decision;
+    }
+
+    private static void log(String message) {
+        System.out.println("[sitelock-dns] " + message);
     }
 
     /**
