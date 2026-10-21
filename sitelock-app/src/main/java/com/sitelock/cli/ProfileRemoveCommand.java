@@ -175,7 +175,7 @@ public class ProfileRemoveCommand implements Callable<Integer> {
         }
         if (!continuam.isEmpty()) {
             System.out.println("       Tirar da receita não solta o bloqueio. Para liberar: "
-                    + "sudo siteblock unblock " + String.join(" ", continuam) + " --force");
+                    + CliSupport.elevatedCommand("unblock " + String.join(" ", continuam) + " --force"));
         }
     }
 

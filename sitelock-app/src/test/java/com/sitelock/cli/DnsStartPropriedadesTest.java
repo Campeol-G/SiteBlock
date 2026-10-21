@@ -83,9 +83,7 @@ class DnsStartPropriedadesTest {
     private void encerrar(Path estado) {
         try {
             DnsDaemonState.read(estado).ifPresent(state -> {
-                if (state.getPid() > 0) {
-                    ProcessHandle.of(state.getPid()).ifPresent(ProcessHandle::destroyForcibly);
-                }
+                ProcessosDeTeste.matarPid(state.getPid());
             });
         } catch (IOException ignored) {
             // o teste só precisa que o processo não fique pendurado

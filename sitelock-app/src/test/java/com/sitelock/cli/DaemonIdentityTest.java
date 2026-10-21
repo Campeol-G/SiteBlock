@@ -50,7 +50,7 @@ class DaemonIdentityTest {
             assertTrue(ExpirationDaemonState.isAlive(state),
                     "quem lê de outro processo tem que reconhecer o daemon como vivo");
         } finally {
-            daemon.destroyForcibly();
+            ProcessosDeTeste.matar(daemon);
             daemon.waitFor();
         }
     }

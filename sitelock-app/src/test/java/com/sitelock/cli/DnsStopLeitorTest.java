@@ -61,7 +61,7 @@ class DnsStopLeitorTest {
             assertEquals("RESTO", resto,
                     "a linha seguinte não pode ter sido engolida pelo leitor da confirmação");
         } finally {
-            alvo.destroyForcibly();
+            ProcessosDeTeste.matar(alvo);
             alvo.waitFor();
         }
     }

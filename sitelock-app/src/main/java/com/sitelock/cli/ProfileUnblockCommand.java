@@ -216,7 +216,7 @@ public class ProfileUnblockCommand implements Callable<Integer> {
                         + e.getSuppressed()[0].getMessage());
                 System.err.println("Os domínios " + String.join(", ", alvos)
                         + " podem ter ficado no arquivo hosts sem registro. "
-                        + "Rode: sudo siteblock unblock " + alvos.get(0) + " --force");
+                        + "Rode: " + CliSupport.elevatedCommand("unblock " + alvos.get(0) + " --force"));
             }
             System.err.println("Erro ao remover os domínios do hosts: " + e.getMessage());
             System.err.println("Nada foi alterado.");

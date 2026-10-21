@@ -44,7 +44,7 @@ class DaemonStopIdentityTest {
             assertTrue(alvo.isAlive(),
                     "o daemon stop não pode mandar sinal num processo que não é o daemon");
         } finally {
-            alvo.destroyForcibly();
+            ProcessosDeTeste.matar(alvo);
             alvo.waitFor();
         }
 

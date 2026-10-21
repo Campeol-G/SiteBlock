@@ -86,7 +86,7 @@ class DnsStartCommandTest {
         try {
             Optional<DnsDaemonState> state = DnsDaemonState.read(estado);
             if (state.isPresent() && state.get().getPid() > 0) {
-                ProcessHandle.of(state.get().getPid()).ifPresent(ProcessHandle::destroyForcibly);
+                ProcessHandle.of(state.get().getPid()).ifPresent(ProcessosDeTeste::matar);
             }
         } catch (IOException ignored) {
             // o teste só precisa que o processo não fique pendurado

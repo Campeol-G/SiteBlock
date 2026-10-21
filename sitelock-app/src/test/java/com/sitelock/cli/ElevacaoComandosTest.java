@@ -197,7 +197,7 @@ class ElevacaoComandosTest {
     private static void matarDaemon(Path estado) {
         try {
             ExpirationDaemonState.read(estado).ifPresent(state -> {
-                ProcessHandle.of(state.getPid()).ifPresent(ProcessHandle::destroyForcibly);
+                ProcessHandle.of(state.getPid()).ifPresent(ProcessosDeTeste::matar);
             });
         } catch (Exception e) {
             // o teste que importa é o texto da elevação
