@@ -102,6 +102,19 @@ public class BlockService {
         return parent == null || Files.isWritable(parent);
     }
 
+    /**
+     * O conteúdo do hosts.
+     *
+     * <p>POR QUE: o {@code status} roda sem elevação e precisa conferir o
+     * hosts contra o estado. {@link #isHostsWritable()} fala de GRAVAR, não
+     * de LER: os dois são coisas diferentes, e só a leitura interessa aqui.
+     *
+     * @throws IOException se o hosts não pôde ser lido
+     */
+    public String readHostsContent() throws IOException {
+        return HostsFileManager.readHosts(hostsPath);
+    }
+
     public BlockStore getStore() {
         return store;
     }
