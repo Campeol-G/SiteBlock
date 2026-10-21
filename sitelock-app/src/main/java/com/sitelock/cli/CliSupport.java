@@ -6,6 +6,7 @@ import com.sitelock.core.BlockService;
 import com.sitelock.core.BlockStore;
 import com.sitelock.core.DnsCacheFlusher;
 import com.sitelock.core.ExpirationDaemonState;
+import com.sitelock.core.OsType;
 import com.sitelock.core.PermissionAdvisor;
 import com.sitelock.core.SiteLockPaths;
 
@@ -113,7 +114,33 @@ final class CliSupport {
      * No Windows instrui "Executar como administrador"; no Unix, "sudo".
      */
     static String elevationHint(String subcommand) {
-        return new PermissionAdvisor().elevationHint(SiteLockPaths.getHostsPath(), subcommand);
+        return new PermissionAdvisor(osType()).elevationHint(SiteLockPaths.getHostsPath(), subcommand);
+    }
+
+    /**
+     * O comando de elevação, no vocabulário de cada SO.
+     *
+     * <p>Unix: sudo com o caminho real do binário, porque o {@code ~/.local/bin}
+     * costuma ficar fora do {@code secure_path} do sudo. Windows: sudo não
+     * existe lá — quem eleva é o terminal, e o texto é o do
+     * {@link PermissionAdvisor}.
+     */
+    static String elevatedCommand(String subcommand) {
+        if (osType().isWindows()) {
+            return elevationHint(subcommand);
+        }
+        return sudoCommand(subcommand);
+    }
+
+    /**
+     * O SO dos textos de elevação.
+     *
+     * <p>ATENÇÃO: o binário é o mesmo nos três SOs, e o texto muda. Um
+     * "sudo siteblock daemon enable" no Windows é um comando que não existe na
+     * máquina de quem está lendo.
+     */
+    static OsType osType() {
+        return OsType.detect();
     }
 
     /**
@@ -162,8 +189,8 @@ final class CliSupport {
         System.out.println("AVISO: este bloqueio tem prazo, mas não há daemon de expiração rodando.");
         System.out.println("       O prazo só vai ser aplicado quando você rodar outro comando do "
                 + "siteblock (ex.: 'siteblock status').");
-        System.out.println("       " + sudoCommand("daemon enable")
-                + " para isso acontecer sozinho, inclusive depois de reiniciar.");
+        System.out.println("       Para o daemon passar a rodar sozinho, inclusive depois de reiniciar:");
+        System.out.println("       " + elevatedCommand("daemon enable"));
     }
 
     /** true se há um daemon registrado e vivo. Sem elevação: é só leitura. */
