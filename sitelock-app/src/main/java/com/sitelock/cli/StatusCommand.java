@@ -101,7 +101,7 @@ public class StatusCommand implements Callable<Integer> {
         if (temAtivo && !CliSupport.temDaemonVivo(stateFileOverride)) {
             System.out.println("Há bloqueio com prazo e nenhum daemon rodando: o prazo só será "
                     + "aplicado quando você rodar outro comando do siteblock.");
-            System.out.println(CliSupport.sudoCommand("daemon enable")
+            System.out.println(CliSupport.elevatedCommand("daemon enable")
                     + " para ele vencer sozinho.");
         }
         return 0;
@@ -164,8 +164,8 @@ public class StatusCommand implements Callable<Integer> {
                     + " o registro (o site fica bloqueado para sempre).");
             // O unblock só sabe tirar o que está no estado: sem registro, ele
             // diria que o domínio não está bloqueado e não tocaria no hosts.
-            System.out.println("    Resolva com: " + CliSupport.sudoCommand("block " + dominio)
-                    + " e depois " + CliSupport.sudoCommand("unblock " + dominio));
+            System.out.println("    Resolva com: " + CliSupport.elevatedCommand("block " + dominio)
+                    + " e depois " + CliSupport.elevatedCommand("unblock " + dominio));
         }
     }
 

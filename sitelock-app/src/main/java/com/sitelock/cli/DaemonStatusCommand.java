@@ -79,12 +79,12 @@ public class DaemonStatusCommand implements Callable<Integer> {
                 // esta linha, o sintoma é "o daemon não sobe" e a pessoa não
                 // tem por onde começar.
                 System.out.println("O jar do daemon não existe mais. Reinstale com: "
-                        + CliSupport.sudoCommand("daemon enable"));
+                        + CliSupport.elevatedCommand("daemon enable"));
             }
             System.out.println("Enquanto não houver daemon, um bloqueio com prazo só é liberado "
                     + "quando você roda outro comando do siteblock.");
             System.out.println("Para subir sozinho a cada boot: "
-                    + CliSupport.sudoCommand("daemon enable"));
+                    + CliSupport.elevatedCommand("daemon enable"));
             return 0;
         }
 
@@ -103,12 +103,12 @@ public class DaemonStatusCommand implements Callable<Integer> {
                     + (jarExiste ? "" : "  ← NÃO EXISTE"));
             if (!jarExiste) {
                 System.out.println("O jar do daemon não existe mais — é por isso que ele não sobe. "
-                        + "Reinstale com: " + CliSupport.sudoCommand("daemon enable"));
+                        + "Reinstale com: " + CliSupport.elevatedCommand("daemon enable"));
             }
         }
         if (!vivo) {
             System.out.println("O PID registrado não está mais vivo. Suba com: "
-                    + CliSupport.sudoCommand("daemon start"));
+                    + CliSupport.elevatedCommand("daemon start"));
         }
         return 0;
     }
