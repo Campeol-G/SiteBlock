@@ -2,6 +2,8 @@ package com.sitelock.core;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Testa add/remove do bloco em memória. */
@@ -189,6 +191,34 @@ class HostsFileManagerTest {
         assertTrue(out.contains("127.0.0.1 x.com"), out);
         assertEquals(1, countOccurrences(out, HostsFileManager.START_MARKER), out);
         assertEquals(1, countOccurrences(out, HostsFileManager.END_MARKER), out);
+    }
+
+    @Test
+    void addNeverGeneratesWwwWww() {
+        String out = HostsFileManager.addDomain("", "www.tiktok.com");
+
+        assertFalse(out.contains("www.www."), out);
+        assertTrue(out.contains("127.0.0.1 www.tiktok.com"), out);
+        assertTrue(out.contains("::1 www.tiktok.com"), out);
+    }
+
+    @Test
+    void managedHostsNeverRepeatWwwPrefix() {
+        assertEquals(List.of("tiktok.com", "www.tiktok.com"),
+                HostsFileManager.managedHosts("www.tiktok.com"));
+        assertEquals(List.of("tiktok.com", "www.tiktok.com"),
+                HostsFileManager.managedHosts("tiktok.com"));
+    }
+
+    @Test
+    void addWwwPrefixedTldCoversDomainAndWwwVariant() {
+        String out = HostsFileManager.addDomain(BASE_HOSTS, "www.com");
+
+        assertTrue(out.contains("127.0.0.1 com"), out);
+        assertTrue(out.contains("127.0.0.1 www.com"), out);
+        assertTrue(out.contains("::1 com"), out);
+        assertTrue(out.contains("::1 www.com"), out);
+        assertFalse(out.contains("www.www."), out);
     }
 
     private static int countOccurrences(String haystack, String needle) {

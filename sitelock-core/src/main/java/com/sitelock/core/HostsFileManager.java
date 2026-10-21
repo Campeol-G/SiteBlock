@@ -51,18 +51,31 @@ public final class HostsFileManager {
 
     /** As quatro linhas gerenciadas para um domínio (IPv4 + IPv6, com e sem www). */
     public static List<String> managedLines(String domain) {
-        String d = domain.toLowerCase(Locale.ROOT);
+        String base = baseDomain(domain);
         return List.of(
-                REDIRECT_IP + " " + d,
-                REDIRECT_IP + " www." + d,
-                REDIRECT_IPV6 + " " + d,
-                REDIRECT_IPV6 + " www." + d);
+                REDIRECT_IP + " " + base,
+                REDIRECT_IP + " www." + base,
+                REDIRECT_IPV6 + " " + base,
+                REDIRECT_IPV6 + " www." + base);
     }
 
     /** Os dois hostnames gerenciados para um domínio. */
     public static List<String> managedHosts(String domain) {
+        String base = baseDomain(domain);
+        return List.of(base, "www." + base);
+    }
+
+    /**
+     * Domínio sem o prefixo "www.".
+     * POR QUE: o bloqueio é o mesmo com ou sem o prefixo, e "www." + "www.x.com"
+     * seria "www.www.x.com" — um host que não existe.
+     */
+    private static String baseDomain(String domain) {
         String d = domain.toLowerCase(Locale.ROOT);
-        return List.of(d, "www." + d);
+        while (d.startsWith("www.") && d.length() > "www.".length()) {
+            d = d.substring("www.".length());
+        }
+        return d;
     }
 
     /** Insere o domínio no bloco. Idempotente, nunca duplica linhas nem marcadores. */
@@ -80,7 +93,9 @@ public final class HostsFileManager {
 
         List<String> body = blockBody(all, start, end);
         body.addAll(missingLines(body, lines, hosts));
-        return joinLines(rebuild(all, start, end, body), end >= 0 ? endsWithNewline(content) : true);
+        // Bloco sem marcador final é fechado aqui: o arquivo passa a terminar em "\n".
+        boolean terminaComQuebra = end >= 0 ? endsWithNewline(content) : true;
+        return joinLines(rebuild(all, start, end, body), terminaComQuebra);
     }
 
     /** Remove o domínio do bloco. Bloco sem entradas é removido por inteiro. */
@@ -120,7 +135,9 @@ public final class HostsFileManager {
             out.addAll(all.subList(regionEnd + 1, all.size()));
             return joinLines(out, endsWithNewline(content));
         }
-        return joinLines(rebuild(all, start, end, kept), end >= 0 ? endsWithNewline(content) : true);
+        // Bloco sem marcador final é fechado aqui: o arquivo passa a terminar em "\n".
+        boolean terminaComQuebra = end >= 0 ? endsWithNewline(content) : true;
+        return joinLines(rebuild(all, start, end, kept), terminaComQuebra);
     }
 
     /**
