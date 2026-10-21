@@ -464,10 +464,15 @@ public class DnsServer {
             if (response == null) {
                 return;
             }
+            // ATENÇÃO: tamanho e corpo num buffer só. Escrever o tamanho em
+            // separado deixa o cliente receber a mensagem em duas partes, e
+            // quem lê "os 2 bytes do tamanho" num recv() só pega o primeiro.
+            byte[] mensagem = new byte[2 + response.length];
+            mensagem[0] = (byte) (response.length >>> 8);
+            mensagem[1] = (byte) response.length;
+            System.arraycopy(response, 0, mensagem, 2, response.length);
             OutputStream out = socket.getOutputStream();
-            out.write((response.length >>> 8) & 0xFF);
-            out.write(response.length & 0xFF);
-            out.write(response);
+            out.write(mensagem);
             out.flush();
         } catch (SocketTimeoutException e) {
             log("conexão TCP sem consulta completa de " + client.getHostAddress() + " (timeout)");
