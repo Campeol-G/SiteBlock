@@ -9,11 +9,17 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Estado do daemon de expiração em {@code ~/.sitelock/daemon.json}.
@@ -41,6 +47,15 @@ public class ExpirationDaemonState {
     private String stateDir;
     private Instant lastSweepAt;
 
+    /**
+     * Instante de início do PROCESSO registrado.
+     *
+     * <p>É o que prova a identidade do PID: o SO recicla números, e um PID
+     * vivo não é necessariamente o daemon. Nulo = registro escrito por uma
+     * versão antiga, que não tinha o campo.
+     */
+    private Instant processStartedAt;
+
     /** Construtor para o Jackson. */
     @JsonCreator
     public ExpirationDaemonState(
@@ -48,10 +63,16 @@ public class ExpirationDaemonState {
             @JsonProperty("startedAt") Instant startedAt,
             @JsonProperty("stateDir") String stateDir,
             @JsonProperty("lastSweepAt") Instant lastSweepAt) {
+        this(pid, startedAt, stateDir, lastSweepAt, null);
+    }
+
+    public ExpirationDaemonState(long pid, Instant startedAt, String stateDir, Instant lastSweepAt,
+            Instant processStartedAt) {
         this.pid = pid;
         this.startedAt = startedAt;
         this.stateDir = stateDir;
         this.lastSweepAt = lastSweepAt;
+        this.processStartedAt = processStartedAt;
     }
 
     public ExpirationDaemonState() {
@@ -90,10 +111,29 @@ public class ExpirationDaemonState {
         this.lastSweepAt = lastSweepAt;
     }
 
+    /** Instante de início do processo que o registro descreve. */
+    public Instant getProcessStartedAt() {
+        return processStartedAt;
+    }
+
+    public void setProcessStartedAt(Instant processStartedAt) {
+        this.processStartedAt = processStartedAt;
+    }
+
     // ---- arquivos ----
 
     public static final String STATE_FILE_NAME = "daemon.json";
     public static final String LOG_FILE_NAME = "daemon.log";
+    public static final String LOCK_FILE_NAME = "daemon.json.lock";
+
+    /**
+     * Serializa as escritas dentro da MESMA JVM.
+     *
+     * <p>Lock de arquivo é por JVM, não por canal: na mesma JVM um segundo
+     * {@code lock()} estoura. A trava local é o que evita isso; o lock de
+     * arquivo é o que serializa contra os OUTROS processos.
+     */
+    private static final ReentrantLock TRAVA_DA_JVM = new ReentrantLock();
 
     public static Path statePath(Path stateDir) {
         return stateDir.resolve(STATE_FILE_NAME);
@@ -101,6 +141,10 @@ public class ExpirationDaemonState {
 
     public static Path logPath(Path stateDir) {
         return stateDir.resolve(LOG_FILE_NAME);
+    }
+
+    public static Path lockPath(Path stateDir) {
+        return stateDir.resolve(LOCK_FILE_NAME);
     }
 
     static ObjectMapper mapper() {
@@ -112,11 +156,66 @@ public class ExpirationDaemonState {
     }
 
     public static void write(Path stateDir, ExpirationDaemonState state) throws IOException {
+        comTrava(stateDir, () -> escreverRegistro(stateDir, state));
+    }
+
+    /** A escrita do registro em si, sem a trava: só válida dentro da trava. */
+    private static void escreverRegistro(Path stateDir, ExpirationDaemonState state)
+            throws IOException {
         Files.createDirectories(stateDir);
         Path target = statePath(stateDir);
-        Files.writeString(target, mapper().writerWithDefaultPrettyPrinter().writeValueAsString(state),
-                StandardCharsets.UTF_8);
+        Path tmp = target.resolveSibling(target.getFileName() + ".tmp");
+        registrarInstanteDoProcesso(state);
+        Files.writeString(tmp, mapper().writerWithDefaultPrettyPrinter().writeValueAsString(state),
+                StandardCharsets.UTF_8, StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+        try {
+            Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+        }
         SiteLockPaths.chownToUserIfConfigured(target);
+        SiteLockPaths.chownToUserIfConfigured(lockPath(stateDir));
+    }
+
+    /** Executa a ação com o registro travado contra os outros processos. */
+    private static void comTrava(Path stateDir, Acao acao) throws IOException {
+        Files.createDirectories(stateDir);
+        TRAVA_DA_JVM.lock();
+        try (FileChannel canal = FileChannel.open(lockPath(stateDir),
+                StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+             FileLock ignorado = canal.lock()) {
+            acao.executar();
+        } finally {
+            TRAVA_DA_JVM.unlock();
+        }
+    }
+
+    /** Uma ação que pode falhar com IOException. */
+    private interface Acao {
+        void executar() throws IOException;
+    }
+
+    /**
+     * Grava o instante de início do processo, quando o registro é sobre este
+     * processo.
+     *
+     * <p>Só quem é o processo sabe o próprio instante de início — e é esse
+     * instante que prova, depois, que o PID ainda é o nosso. Um registro escrito
+     * por uma versão antiga (sem o campo) é completado na próxima escrita.
+     */
+    private static void registrarInstanteDoProcesso(ExpirationDaemonState state) {
+        if (state.getProcessStartedAt() != null || state.getPid() != ProcessHandle.current().pid()) {
+            return;
+        }
+        Optional<Instant> inicio = ProcessHandle.current().info().startInstant();
+        if (inicio.isEmpty()) {
+            return;
+        }
+        state.setProcessStartedAt(inicio.get());
+        // O "Subiu em:" tem que ser o instante em que o processo subiu, e não
+        // o instante em que o registro foi escrito.
+        state.setStartedAt(inicio.get());
     }
 
     public static Optional<ExpirationDaemonState> read(Path stateDir) throws IOException {
@@ -142,22 +241,50 @@ public class ExpirationDaemonState {
         Files.deleteIfExists(statePath(stateDir));
     }
 
-    /** Atualiza só o último sweep, preservando o resto do registro. */
+    /**
+     * Atualiza só o último sweep, preservando o resto do registro.
+     *
+     * <p>Read-modify-write: sem a trava, ele lê o registro, e nesse intervalo
+     * outra escrita grava o PID novo — e o updateLastSweep devolve o registro
+     * velho por cima. O PID do daemon some, e o {@code daemon status} diz que
+     * não há daemon com ele rodando.
+     */
     public static void updateLastSweep(Path stateDir, Instant at) throws IOException {
-        Optional<ExpirationDaemonState> current = read(stateDir);
-        if (current.isEmpty()) {
-            return;
-        }
-        ExpirationDaemonState state = current.get();
-        state.setLastSweepAt(at);
-        write(stateDir, state);
+        comTrava(stateDir, () -> {
+            Optional<ExpirationDaemonState> current = read(stateDir);
+            if (current.isEmpty()) {
+                return;
+            }
+            ExpirationDaemonState state = current.get();
+            state.setLastSweepAt(at);
+            escreverRegistro(stateDir, state);
+        });
     }
 
-    /** true se o PID registrado ainda corresponde a um processo vivo. */
+    /**
+     * true se o PID registrado ainda for o processo que o registro descreve.
+     *
+     * <p>O SO recicla PID: o daemon morreu e o número foi dado a outro
+     * processo. "O PID existe" mente, e o {@code daemon stop} manda um SIGTERM
+     * num processo que não é o SiteLock. A prova de identidade é o instante de
+     * início do processo: dois processos não começam no mesmo instante.
+     *
+     * <p>Registro sem o instante de início (escrito por uma versão antiga)
+     * continua valendo pelo PID.
+     */
     public static boolean isAlive(ExpirationDaemonState state) {
         if (state == null || state.getPid() <= 0) {
             return false;
         }
-        return ProcessHandle.of(state.getPid()).map(ProcessHandle::isAlive).orElse(false);
+        Optional<ProcessHandle> handle = ProcessHandle.of(state.getPid());
+        if (handle.isEmpty() || !handle.get().isAlive()) {
+            return false;
+        }
+        Instant registrado = state.getProcessStartedAt();
+        if (registrado == null) {
+            return true;
+        }
+        Optional<Instant> inicio = handle.get().info().startInstant();
+        return inicio.isPresent() && inicio.get().equals(registrado);
     }
 }

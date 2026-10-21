@@ -1,5 +1,6 @@
 package com.sitelock.core;
 
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -7,12 +8,20 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -72,9 +81,144 @@ class ExpirationDaemonStateTest {
         assertEquals(tmp.toString(), state.getStateDir());
     }
 
+    /**
+     * A escrita do registro tem que ser atômica.
+     *
+     * <p>Um {@code Files.writeString} trunca o arquivo antes de escrever: entre
+     * o truncate e o write o {@code daemon.json} fica vazio, e quem lê nesse
+     * instante (o {@code daemon status}, o {@code daemon stop}) recebe "não
+     * há daemon" com o daemon rodando. A escrita atômica troca o arquivo
+     * inteiro: o leitor vê o estado velho ou o novo, nunca um estado pela
+     * metade.
+     */
     @Test
-    void deleteRemovesTheStateFile() throws Exception {
+    void aEscritaSubstituiOArquivoEmVezDeTruncar() throws Exception {
+        Path alvo = ExpirationDaemonState.statePath(tmp);
         ExpirationDaemonState.write(tmp, new ExpirationDaemonState(1, NOW, tmp.toString(), null));
+        String antes = identidadeDoArquivo(alvo);
+        ExpirationDaemonState.write(tmp, new ExpirationDaemonState(2, NOW, tmp.toString(), null));
+        String depois = identidadeDoArquivo(alvo);
+
+        Assumptions.assumeFalse(antes.isEmpty(), "este SO não expõe a identidade do arquivo");
+        assertNotEquals(antes, depois,
+                "a escrita tem que ser atômica: um arquivo novo substitui o antigo, "
+                        + "senão quem lê no meio da escrita vê o registro truncado");
+        assertFalse(Files.exists(alvo.resolveSibling(alvo.getFileName() + ".tmp")),
+                "o arquivo temporário tem que sumir depois da troca");
+    }
+
+    /** Identidade do arquivo: dois arquivos com a mesma identidade são o mesmo. */
+    private static String identidadeDoArquivo(Path arquivo) throws IOException {
+        Object chave = Files.readAttributes(arquivo, BasicFileAttributes.class).fileKey();
+        if (chave != null) {
+            return chave.toString();
+        }
+        try {
+            return Files.getAttribute(arquivo, "unix:ino").toString();
+        } catch (UnsupportedOperationException | IOException e) {
+            return "";
+        }
+    }
+
+    /**
+     * O SO recicla PID: o daemon morreu e o número foi dado a outro
+     * processo. Um "o PID existe" mente, e o {@code daemon stop} manda um
+     * SIGTERM num processo que não é o SiteLock.
+     */
+    @Test
+    void umPidRecicladoNaoPassaPorDaemonVivo() {
+        ExpirationDaemonState reciclado = new ExpirationDaemonState(
+                ProcessHandle.current().pid(), NOW, "/x", null, NOW);
+
+        assertFalse(ExpirationDaemonState.isAlive(reciclado),
+                "o PID existe, mas não é o processo que o registro descreve");
+    }
+
+    @Test
+    void oProcessoQueGravouORegistroEstaVivo() {
+        Instant inicio = ProcessHandle.current().info().startInstant().orElseThrow();
+        ExpirationDaemonState state = new ExpirationDaemonState(
+                ProcessHandle.current().pid(), inicio, "/x", null, inicio);
+
+        assertTrue(ExpirationDaemonState.isAlive(state),
+                "o processo que escreveu o registro tem que ser reconhecido como vivo");
+    }
+
+    @Test
+    void registroAntigoSemOInstanteContinuaFuncionando() throws Exception {
+        // Um daemon.json escrito por uma versão antiga não tem o instante de
+        // início: sem ele, sobra a checagem do PID.
+        Files.writeString(ExpirationDaemonState.statePath(tmp),
+                "{\"pid\":" + ProcessHandle.current().pid()
+                        + ",\"startedAt\":\"2026-10-15T12:00:00Z\",\"stateDir\":\"/x\"}",
+                StandardCharsets.UTF_8);
+
+        ExpirationDaemonState state = ExpirationDaemonState.read(tmp).orElseThrow();
+
+        assertNull(state.getProcessStartedAt(), "o registro antigo não tem o campo novo");
+        assertTrue(ExpirationDaemonState.isAlive(state),
+                "um registro antigo tem que continuar funcionando: só a checagem do PID");
+    }
+
+    @Test
+    void aEscritaGravaOInstanteDeInicioDoProcesso() throws Exception {
+        ExpirationDaemonState state = new ExpirationDaemonState(
+                ProcessHandle.current().pid(), NOW, tmp.toString(), null);
+
+        ExpirationDaemonState.write(tmp, state);
+
+        ExpirationDaemonState lido = ExpirationDaemonState.read(tmp).orElseThrow();
+        assertEquals(ProcessHandle.current().info().startInstant().orElseThrow(),
+                lido.getProcessStartedAt(),
+                "o registro tem que guardar o instante de início do PROCESSO");
+        assertEquals(lido.getProcessStartedAt(), lido.getStartedAt(),
+                "o 'Subiu em:' tem que mostrar o instante de início do processo");
+    }
+
+    /**
+     * O registro não pode voltar atrás por causa de uma escrita concorrente.
+     *
+     * <p>{@code updateLastSweep} é read-modify-write: sem trava, ele lê o
+     * registro, e nesse intervalo outra escrita grava o PID novo — e o
+     * updateLastSweep devolve o registro velho por cima. O PID do daemon
+     * some, e o {@code daemon status} diz que não há daemon com ele rodando.
+     */
+    @Test
+    void escritasConcorrentesNaoRevertemOPid() throws Exception {
+        ExpirationDaemonState.write(tmp, new ExpirationDaemonState(1, NOW, tmp.toString(), null));
+
+        int voltas = 300;
+        CyclicBarrier largada = new CyclicBarrier(2);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> quemGrava = pool.submit(() -> {
+                largada.await();
+                for (int i = 0; i < voltas; i++) {
+                    ExpirationDaemonState.write(tmp,
+                            new ExpirationDaemonState(1000 + i, NOW, tmp.toString(), null));
+                }
+                return null;
+            });
+            Future<?> quemAtualiza = pool.submit(() -> {
+                largada.await();
+                for (int i = 0; i < voltas; i++) {
+                    ExpirationDaemonState.updateLastSweep(tmp, NOW.plusSeconds(i));
+                }
+                return null;
+            });
+            quemGrava.get(60, TimeUnit.SECONDS);
+            quemAtualiza.get(60, TimeUnit.SECONDS);
+        } finally {
+            pool.shutdownNow();
+        }
+
+        ExpirationDaemonState state = ExpirationDaemonState.read(tmp).orElseThrow();
+        assertEquals(1000 + voltas - 1, state.getPid(),
+                "o PID não pode voltar atrás: um updateLastSweep devolveu o registro antigo");
+    }
+
+    @Test
+    void deleteRemovesTheStateFile() throws Exception {        ExpirationDaemonState.write(tmp, new ExpirationDaemonState(1, NOW, tmp.toString(), null));
         ExpirationDaemonState.delete(tmp);
         assertFalse(Files.exists(ExpirationDaemonState.statePath(tmp)));
     }

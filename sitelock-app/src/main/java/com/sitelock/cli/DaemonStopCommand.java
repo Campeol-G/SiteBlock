@@ -51,7 +51,11 @@ public class DaemonStopCommand implements Callable<Integer> {
             return 1;
         }
 
-        handle.get().destroy();
+        try {
+            encerrar(handle.get());
+        } catch (SecurityException e) {
+            return semPermissaoParaEncerrar(pid);
+        }
         for (int i = 0; i < 50; i++) {
             if (!handle.get().isAlive()) {
                 System.out.println("Daemon de expiração encerrado (pid " + pid + ").");
@@ -64,9 +68,34 @@ public class DaemonStopCommand implements Callable<Integer> {
                 break;
             }
         }
-        handle.get().destroyForcibly();
+        try {
+            handle.get().destroyForcibly();
+        } catch (SecurityException e) {
+            return semPermissaoParaEncerrar(pid);
+        }
         System.out.println("Daemon de expiração encerrado à força (pid " + pid
                 + "); não respondeu ao pedido de saída.");
         return 0;
+    }
+
+    /**
+     * O daemon roda como root e o comando roda como usuário: o SO recusa o
+     * sinal. Sem esta mensagem, o picocli imprime a pilha da exceção.
+     */
+    private int semPermissaoParaEncerrar(long pid) {
+        System.err.println("Erro: sem permissão para encerrar o pid " + pid
+                + " (daemon iniciado elevado?). " + CliSupport.elevationHint("daemon stop"));
+        return 1;
+    }
+
+    /**
+     * Sinal de encerramento do daemon.
+     *
+     * <p>Separado do {@code call} para o teste poder simular a recusa do SO: a
+     * {@code SecurityException} de verdade só acontece quando o daemon roda
+     * como root e o comando roda como usuário comum.
+     */
+    void encerrar(ProcessHandle handle) {
+        handle.destroy();
     }
 }

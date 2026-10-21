@@ -7,10 +7,15 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Callable;
@@ -79,6 +84,10 @@ public class DaemonStartCommand implements Callable<Integer> {
         final Process process;
         try {
             Files.createDirectories(stateDir);
+            // O log é do filho, mas nasce do pai: rotacionar aqui é o que
+            // garante que o tail mostre o erro desta execução, e não o da
+            // última.
+            prepararLog(logFile);
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
             pb.redirectErrorStream(true);
@@ -178,6 +187,77 @@ public class DaemonStartCommand implements Callable<Integer> {
 
         return DaemonCommandLine.build(javaCmd, System.getProperty("siteblock.jar"),
                 System.getProperty("java.class.path", "."), properties, appArgs);
+    }
+
+    /** Teto de cada geração do log do daemon. */
+    static final long LOG_MAX_BYTES = 64 * 1024;
+
+    /**
+     * Prepara o log do daemon para uma execução nova.
+     *
+     * <p>Sem isto o log só cresce: o {@code appendTo} do filho mantém o que já
+     * estava no arquivo, e o {@code printLogTail} — que existe para mostrar o
+     * erro de AGORA — mostraria a cauda de uma execução antiga. O conteúdo
+     * anterior vai para {@code daemon.log.1}, aparado no teto, e o
+     * {@code daemon.log} recomeça vazio.
+     *
+     * <p>A posse volta para o usuário real: o pai roda como root, e um log que
+     * só o root lê quebra a promessa de que o {@code daemon status} funciona
+     * sem elevação.
+     */
+    static void prepararLog(Path logFile) throws IOException {
+        Path anterior = logFile.resolveSibling(logFile.getFileName() + ".1");
+        if (Files.exists(logFile) && Files.size(logFile) > 0) {
+            guardarGeracaoAnterior(logFile, anterior);
+        }
+        Path pai = logFile.getParent();
+        if (pai != null) {
+            Files.createDirectories(pai);
+        }
+        // TRUNCATE_EXISTING no mesmo inode: o arquivo continua sendo o mesmo
+        // (com a mesma posse e permissões) — só o conteúdo é zerado.
+        Files.writeString(logFile, "", StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING,
+                StandardOpenOption.WRITE);
+        SiteLockPaths.chownToUserIfConfigured(logFile);
+        SiteLockPaths.chownToUserIfConfigured(anterior);
+    }
+
+    /** Guarda a cauda do log anterior no arquivo rotacionado. */
+    private static void guardarGeracaoAnterior(Path origem, Path destino) throws IOException {
+        byte[] cauda = lerCauda(origem, LOG_MAX_BYTES);
+        Files.write(destino, cauda, StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+    }
+
+    /** Os últimos {@code max} bytes do arquivo, sem a linha cortada no meio. */
+    private static byte[] lerCauda(Path arquivo, long max) throws IOException {
+        try (SeekableByteChannel canal = Files.newByteChannel(arquivo, StandardOpenOption.READ)) {
+            long tamanho = canal.size();
+            long inicio = Math.max(0, tamanho - max);
+            canal.position(inicio);
+            ByteBuffer buffer = ByteBuffer.allocate((int) (tamanho - inicio));
+            while (buffer.hasRemaining() && canal.read(buffer) > 0) {
+                // leitura até o fim do arquivo
+            }
+            byte[] cauda = buffer.array();
+            if (inicio == 0) {
+                return cauda; // o arquivo inteiro coube: nada foi cortado
+            }
+            // A cauda começa no meio de uma linha: ela vai fora.
+            int quebra = primeiraLinha(cauda);
+            return quebra < 0 ? cauda : Arrays.copyOfRange(cauda, quebra + 1, cauda.length);
+        }
+    }
+
+    /** Índice da primeira quebra de linha, ou -1. */
+    private static int primeiraLinha(byte[] bytes) {
+        for (int i = 0; i < bytes.length; i++) {
+            if (bytes[i] == '\n') {
+                return i;
+            }
+        }
+        return -1;
     }
 
     /**

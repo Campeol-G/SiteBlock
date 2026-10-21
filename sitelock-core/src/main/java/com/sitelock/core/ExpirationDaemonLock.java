@@ -8,7 +8,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Optional;
-import java.util.Optional;
 
 /**
  * Trava de instância única do daemon, via {@code FileLock} retido pela vida
