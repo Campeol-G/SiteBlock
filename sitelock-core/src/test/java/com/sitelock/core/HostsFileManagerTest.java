@@ -148,6 +148,49 @@ class HostsFileManagerTest {
         assertFalse(out.contains("127.0.0.1 tiktok.com"), out);
     }
 
+    @Test
+    void addDoesNotDuplicateBlockWhenEndMarkerIsMissing() {
+        String content = "# SITELOCK-START\n127.0.0.1 x.com\n";
+
+        String out = HostsFileManager.addDomain(content, "y.com");
+
+        assertEquals(1, countOccurrences(out, HostsFileManager.START_MARKER), out);
+        assertEquals(1, countOccurrences(out, HostsFileManager.END_MARKER), out);
+        assertTrue(out.contains("127.0.0.1 x.com"), out);
+        assertTrue(out.contains("127.0.0.1 y.com"), out);
+    }
+
+    @Test
+    void removeWorksWhenEndMarkerIsMissing() {
+        String content = "# SITELOCK-START\n"
+                + "127.0.0.1 x.com\n"
+                + "127.0.0.1 y.com\n";
+
+        String out = HostsFileManager.removeDomain(content, "y.com");
+
+        assertFalse(out.contains("y.com"), out);
+        assertTrue(out.contains("127.0.0.1 x.com"), out);
+    }
+
+    @Test
+    void removeWorksWhenBlockWasDuplicated() {
+        String content = "# SITELOCK-START\n"
+                + "127.0.0.1 x.com\n"
+                + "# SITELOCK-START\n"
+                + "127.0.0.1 y.com\n"
+                + "127.0.0.1 www.y.com\n"
+                + "::1 y.com\n"
+                + "::1 www.y.com\n"
+                + "# SITELOCK-END\n";
+
+        String out = HostsFileManager.removeDomain(content, "y.com");
+
+        assertFalse(out.contains("y.com"), out);
+        assertTrue(out.contains("127.0.0.1 x.com"), out);
+        assertEquals(1, countOccurrences(out, HostsFileManager.START_MARKER), out);
+        assertEquals(1, countOccurrences(out, HostsFileManager.END_MARKER), out);
+    }
+
     private static int countOccurrences(String haystack, String needle) {
         int count = 0;
         int idx = 0;
