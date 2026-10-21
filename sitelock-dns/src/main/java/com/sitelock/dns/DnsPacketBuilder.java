@@ -35,9 +35,11 @@ public final class DnsPacketBuilder {
     }
 
     /**
-     * Monta a resposta de bloqueio para a consulta (só A e AAAA são bloqueáveis).
+     * Monta a resposta de bloqueio para a consulta: sinkhole (0.0.0.0 / ::) nos tipos
+     * A/AAAA e NODATA nos demais tipos.
      *
-     * @throws IllegalArgumentException se o tipo não for A/AAAA (esses devem ser encaminhados)
+     * <p>Um nome bloqueado nunca é encaminhado ao upstream: a resposta real do domínio
+     * bloqueado chegaria ao cliente (e o provedor de DNS veria a consulta).
      */
     public static byte[] buildBlockedResponse(DnsQuery query) {
         if (query.type() == DnsQuery.TYPE_A) {
@@ -46,8 +48,37 @@ public final class DnsPacketBuilder {
         if (query.type() == DnsQuery.TYPE_AAAA) {
             return buildAnswer(query, DnsQuery.TYPE_AAAA, SINKHOLE_V6);
         }
-        throw new IllegalArgumentException(
-                "tipo " + query.type() + " não é bloqueável (deve ser encaminhado ao upstream)");
+        return buildNoDataResponse(query);
+    }
+
+    /**
+     * Monta a resposta NODATA: RCODE 0, ANCOUNT 0 e nenhuma answer — "o nome existe,
+     * mas não tem dados desse tipo".
+     *
+     * <p>É a resposta de um nome bloqueado para tipos diferentes de A/AAAA (MX, TXT,
+     * CNAME, ANY, SVCB, HTTPS…), a mesma semântica do Pi-hole/AdGuard.
+     */
+    public static byte[] buildNoDataResponse(DnsQuery query) {
+        byte[] question = query.questionSection();
+        byte[] out = new byte[12 + question.length];
+        writeHeader(out, query, 0, 0);
+        System.arraycopy(question, 0, out, 12, question.length);
+        return out;
+    }
+
+    /**
+     * Monta a resposta local correspondente à decisão (sinkhole em BLOCK, NODATA em
+     * BLOCK_NODATA). Atalho para o servidor não errar o tipo de resposta.
+     *
+     * @throws IllegalArgumentException se a decisão for FORWARD (não gera resposta local)
+     */
+    public static byte[] buildResponse(DnsQuery query, DnsResolver.Decision decision) {
+        return switch (decision) {
+            case BLOCK -> buildBlockedResponse(query);
+            case BLOCK_NODATA -> buildNoDataResponse(query);
+            case FORWARD -> throw new IllegalArgumentException(
+                    "decisão FORWARD não gera resposta local");
+        };
     }
 
     /**

@@ -77,10 +77,38 @@ class DnsPacketBuilderTest {
     }
 
     @Test
-    void tipoNaoBloqueavelRejeitado() throws Exception {
+    void tipoNaoBloqueavelRespondeNodata() throws Exception {
         DnsQuery q = query(0x1234, "tiktok.com", 15); // MX
+        byte[] resp = DnsPacketBuilder.buildBlockedResponse(q);
+        assertEquals(0, u16(resp, 6), "ANCOUNT deve ser 0 (NODATA)");
+        assertEquals(0, u16(resp, 2) & 0x000F, "RCODE deve ser 0");
+    }
+
+    @Test
+    void respostaNodataTemRcodeZeroEAncountZero() throws Exception {
+        DnsQuery q = query(0x1111, "youtube.com", 15); // MX de um nome bloqueado
+        byte[] resp = DnsPacketBuilder.buildNoDataResponse(q);
+
+        assertEquals(12 + q.questionSection().length, resp.length);
+        assertEquals(0x1111, u16(resp, 0));
+        int flags = u16(resp, 2);
+        assertTrue((flags & 0x8000) != 0, "QR deve ser 1");
+        assertEquals(0, flags & 0x000F, "RCODE deve ser 0");
+        assertEquals(1, u16(resp, 4), "QDCOUNT deve ser 1");
+        assertEquals(0, u16(resp, 6), "ANCOUNT deve ser 0");
+        assertEquals(0, u16(resp, 8), "NSCOUNT deve ser 0");
+    }
+
+    @Test
+    void buildResponseEscolheSinkholeOuNodata() throws Exception {
+        DnsQuery a = query(0x2222, "tiktok.com", 1);
+        assertEquals(1, u16(DnsPacketBuilder.buildResponse(a, DnsResolver.Decision.BLOCK), 6),
+                "BLOCK tem 1 answer (sinkhole)");
+        DnsQuery mx = query(0x2223, "tiktok.com", 15);
+        assertEquals(0, u16(DnsPacketBuilder.buildResponse(mx, DnsResolver.Decision.BLOCK_NODATA), 6),
+                "BLOCK_NODATA tem 0 answer");
         assertThrows(IllegalArgumentException.class,
-                () -> DnsPacketBuilder.buildBlockedResponse(q));
+                () -> DnsPacketBuilder.buildResponse(a, DnsResolver.Decision.FORWARD));
     }
 
     @Test
