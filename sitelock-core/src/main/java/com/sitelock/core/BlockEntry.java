@@ -25,7 +25,10 @@ public class BlockEntry {
             @JsonProperty("createdAt") Instant createdAt,
             @JsonProperty("expiresAt") Instant expiresAt) {
         this.domain = Objects.requireNonNull(domain, "domain");
-        this.createdAt = createdAt != null ? createdAt : Instant.now();
+        // POR QUE: createdAt nulo é "desconhecido" (arquivo escrito à mão ou
+        // por uma versão antiga). Inventar "agora" mudaria a semântica sem
+        // erro visível — e a data exibida mentiria.
+        this.createdAt = createdAt;
         this.expiresAt = expiresAt;
     }
 

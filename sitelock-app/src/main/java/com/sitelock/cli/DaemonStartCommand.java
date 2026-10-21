@@ -263,12 +263,15 @@ public class DaemonStartCommand implements Callable<Integer> {
     /**
      * Descarta um registro de daemon cujo processo não existe mais.
      *
-     * <p>Um boot antigo que morreu deixa o {@code daemon.json} para trás. Como a
-     * checagem é só "o PID está vivo" e o SO recicla PID, o registro pode passar
-     * a apontar para um processo alheio — ou simplesmente continuar lá para
-     * sempre. No primeiro caso o {@code daemon stop} mandaria um sinal para um
-     * processo que não é nosso; no segundo, o {@code daemon start} recusaria
-     * para sempre, sem haver --force para destravar.
+     * <p>Um boot antigo que morreu deixa o {@code daemon.json} para trás. A
+     * checagem de identidade não é só "o PID está vivo": o registro guarda o
+     * instante de início do processo, e é ele que prova que o PID vivo ainda é
+     * o nosso — o SO recicla números de PID, e o registro pode passar a apontar
+     * para um processo alheio. Registro escrito por uma versão antiga, sem o
+     * instante de início, ainda vale pelo PID. Quando o processo já morreu, o
+     * registro é órfão: o {@code daemon stop} mandaria um sinal para um
+     * processo que não é nosso, e o {@code daemon start} recusaria para
+     * sempre, sem haver --force para destravar.
      *
      * @return true se havia um registro órfão e ele foi removido
      */
