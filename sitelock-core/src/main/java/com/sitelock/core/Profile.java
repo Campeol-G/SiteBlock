@@ -6,6 +6,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.time.Instant;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 
 /**
@@ -66,6 +67,24 @@ public class Profile {
 
     public int size() {
         return entries.size();
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof Profile other)) {
+            return false;
+        }
+        return Objects.equals(createdAt, other.createdAt)
+                && Objects.equals(updatedAt, other.updatedAt)
+                && Objects.equals(entries, other.entries);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(createdAt, updatedAt, entries);
     }
 
     @Override

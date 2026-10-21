@@ -16,7 +16,6 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -178,33 +177,43 @@ public class ProfileUnblockCommand implements Callable<Integer> {
         System.out.print("Para confirmar, digite SIM e pressione Enter (qualquer outra coisa cancela): ");
         System.out.flush();
 
-        String resposta = answer != null ? answer : ProfileDeleteCommand.readLine();
+        String resposta = answer != null ? answer : CliSupport.readLine();
         if (resposta == null || !resposta.trim().equalsIgnoreCase("SIM")) {
             System.out.println("Desbloqueio CANCELADO. Todos continuam bloqueados.");
             return 3;
         }
 
-        Map<String, BlockEntry> semOsAlvos = new HashMap<>(state);
-        for (String domain : alvos) {
-            semOsAlvos.remove(domain);
-        }
+        // POR QUE: a transação é o único ponto de entrada que grava estado —
+        // o load e o save na mesma trava, e o hosts escrito dentro dela. Fora
+        // daqui, o block de outro terminal some do JSON e o domínio fica
+        // preso no hosts sem registro.
+        //
+        // A ordem é Estado → hosts: se o hosts falhar, o estado volta.
+        final boolean[] chegouNoHosts = {false};
         try {
-            service.getStore().save(semOsAlvos);
+            service.inTransaction(
+                    (estado, tx) -> {
+                        for (String domain : alvos) {
+                            estado.remove(domain);
+                        }
+                        tx.save(estado);
+                        return null;
+                    },
+                    (resultado, estado, tx) -> {
+                        chegouNoHosts[0] = true;
+                        service.getBlocker().unblockAll(alvos);
+                    });
         } catch (IOException e) {
-            System.err.println("Erro ao salvar o estado: " + e.getMessage());
-            return 1;
-        }
-        try {
-            service.getBlocker().unblockAll(alvos);
-        } catch (IOException e) {
-            // O hosts não aceitou: o estado tem que voltar. Sem este rollback o
-            // dominio fica preso no hosts sem registro, e nada no projeto
-            // consegue mais limpa-lo.
-            try {
-                service.getStore().save(state);
-            } catch (IOException rollback) {
+            if (!chegouNoHosts[0]) {
+                System.err.println("Erro ao salvar o estado: " + e.getMessage());
+                return 1;
+            }
+            // A transação já devolveu o estado ao que era. Se a devolução
+            // falhou, o estado mente sobre o hosts — e o domínio fica preso
+            // sem registro, que é o que ninguém no projeto consegue limpar.
+            if (e.getSuppressed().length > 0) {
                 System.err.println("Erro CRÍTICO: falha no hosts E ao reverter o estado: "
-                        + rollback.getMessage());
+                        + e.getSuppressed()[0].getMessage());
                 System.err.println("Os domínios " + String.join(", ", alvos)
                         + " podem ter ficado no arquivo hosts sem registro. "
                         + "Rode: sudo siteblock unblock " + alvos.get(0) + " --force");

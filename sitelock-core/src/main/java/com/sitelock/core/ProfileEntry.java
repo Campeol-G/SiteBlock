@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.Objects;
+
 /**
  * Um domínio dentro de um perfil.
  *
@@ -42,6 +44,22 @@ public class ProfileEntry {
     /** Espelha {@link BlockEntry#isTemporaryAndActive(Instant)}: true se tem prazo. */
     public boolean isTemporary() {
         return durationMillis != null;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof ProfileEntry other)) {
+            return false;
+        }
+        return Objects.equals(durationMillis, other.durationMillis);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(durationMillis);
     }
 
     @Override

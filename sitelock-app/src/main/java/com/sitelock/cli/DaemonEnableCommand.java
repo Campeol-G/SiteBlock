@@ -77,7 +77,7 @@ public class DaemonEnableCommand implements Callable<Integer> {
             System.err.println("Não encontrei " + nomeDoAgendador(os) + " nesta máquina.");
             System.err.println("Sem ele não dá para subir o daemon automaticamente. "
                     + "Você ainda pode rodar o daemon na mão, em outro terminal:");
-            System.err.println("  " + CliSupport.sudoCommand("daemon start"));
+            System.err.println("  " + CliSupport.elevatedCommand("daemon start"));
             System.err.println("Ele libera os expirados enquanto estiver aberto — mas fechar "
                     + "o terminal encerra o daemon.");
             return 1;
@@ -132,7 +132,7 @@ public class DaemonEnableCommand implements Callable<Integer> {
             System.out.println(aviso);
         }
         System.out.println("Depois de recompilar (mvn package), rode de novo: "
-                + CliSupport.sudoCommand("daemon enable"));
+                + CliSupport.elevatedCommand("daemon enable"));
         return 0;
     }
 

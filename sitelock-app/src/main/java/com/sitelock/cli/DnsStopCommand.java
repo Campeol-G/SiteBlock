@@ -12,7 +12,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
-import java.util.Scanner;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -86,7 +85,7 @@ public class DnsStopCommand implements Callable<Integer> {
             System.out.println("Dispositivos com DNS apontado para cá podem ficar sem proteção.");
             System.out.print("Para confirmar, digite SIM e pressione Enter (qualquer outra coisa cancela): ");
             System.out.flush();
-            String answer = readLine();
+            String answer = CliSupport.readLine();
             if (answer == null || !answer.trim().equalsIgnoreCase("SIM")) {
                 System.out.println("Parada antecipada CANCELADA. Servidor continua rodando.");
                 return 3;
@@ -128,17 +127,5 @@ public class DnsStopCommand implements Callable<Integer> {
         System.out.println("Lembrete: volte o DNS dos dispositivos para automático/DHCP, "
                 + "senão eles continuam sem resolver nada.");
         return 0;
-    }
-
-    private static String readLine() {
-        try {
-            Scanner scanner = new Scanner(System.in);
-            if (!scanner.hasNextLine()) {
-                return null;
-            }
-            return scanner.nextLine();
-        } catch (Exception e) {
-            return null;
-        }
     }
 }

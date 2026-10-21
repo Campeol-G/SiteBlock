@@ -308,7 +308,7 @@ public class DaemonStartCommand implements Callable<Integer> {
         }
         return "Aviso: o daemon roda como root e executa o jar em " + p
                 + ", que você pode trocar. Para evitar isso, rode: "
-                + CliSupport.sudoCommand("daemon enable");
+                + CliSupport.elevatedCommand("daemon enable");
     }
 
     private static void printLogTail(Path logFile) {
