@@ -82,12 +82,14 @@ sudo ./run.sh unblock tiktok.com --force
 sudo ./run.sh dns start      # bloqueia também no celular/tablet/console
 ./run.sh dns status
 sudo ./run.sh dns stop
+sudo ./run.sh dns stop --force  # encerra antes do prazo, com confirmação
 
 # Conjuntos de domínios com nome
 sudo ./run.sh profile save trabalho      # guarda o que está bloqueado agora
 ./run.sh profile list
 ./run.sh profile apply trabalho         # recarrega sem nunca encurtar o prazo
 sudo ./run.sh profile unblock trabalho --force
+./run.sh profile delete trabalho         # apaga a receita (pede confirmação)
 
 # Editar a receita de um perfil que já existe
 ./run.sh profile trabalho add tiktok.com            # entra permanente
@@ -105,10 +107,25 @@ sudo ./run.sh daemon disable
 Durações aceitas: `30m`, `2h`, `1h30m`, `1d`, `1d2h30m`. Só minúsculo, sem
 espaço.
 
+### Códigos de saída
+
+Todo comando devolve um código, para quem quiser montar script em cima:
+
+| Código | Quando |
+|---|---|
+| `0` | deu certo |
+| `1` | erro (não conseguiu ler ou gravar o arquivo, perfil que não existe) |
+| `2` | uso errado (falta argumento, valor inválido, comando desconhecido) |
+| `3` | recusado ou cancelado (recusou parar antes do prazo, cancelou a confirmação) |
+
 ### Por que precisa de sudo
 
 Editar o arquivo de hosts exige permissão de administrador nos três sistemas.
-Só `block`, `unblock` e `dns start` pedem. `status` e `reset` não.
+`block`, `unblock`, `profile apply`, `profile unblock` e `dns start` pedem.
+`status`, `reset`, `profile list` e `daemon status` não.
+
+Os comandos de daemon (`enable`, `start`, `stop`, `disable`) mexem no sistema
+— autostart, serviço, processo do root — e também pedem elevação.
 
 ## Onde ficam as coisas
 
@@ -117,10 +134,16 @@ Em `~/.sitelock/`:
 | Arquivo | O que é |
 |---|---|
 | `blocks.json` | o que está bloqueado e até quando |
+| `blocks.json.lock` | lock: serializa processos que mexem no estado ao mesmo tempo |
 | `hosts.backup` | cópia do hosts original, criada uma vez |
+| `hosts.lock` | lock: serializa as escritas no arquivo de hosts |
 | `dns-server.json` | estado do servidor DNS |
+| `dns-server.log` | log do servidor DNS (consultas, upstream, decisões) |
 | `profiles.json` | os conjuntos de domínios salvos com nome |
+| `profiles.json.lock` | lock: serializa as escritas dos perfis |
 | `daemon.json` | o daemon de expiração está rodando (pid, último sweep) |
+| `daemon.lock` | lock: garante um daemon só, mesmo com dois `daemon start` |
+| `daemon.log` | log do daemon de expiração (o que ele liberou, erros) |
 
 O arquivo de hosts do sistema só é alterado no bloco delimitado por
 marcadores, entre uma linha original sua e o resto do arquivo. Nunca
@@ -132,8 +155,15 @@ Coisas que **não** funcionam, e é bom saber antes:
 
 - **Não bloqueia por app.** Bloqueia por domínio. Se o tiktok abre pelo `app.net`,
   passa.
-- **Não cobre subdomínio.** `tiktok.com` não cobre `vm.tiktok.com`. Liste os
-  subdomínios que você usa.
+- **No modo hosts, não cobre subdomínio.** `tiktok.com` cobre `tiktok.com` e
+  `www.tiktok.com`, mas não `vm.tiktok.com`. Liste os subdomínios que você
+  usa. No modo DNS a cobertura é outra: o servidor responde por todos os
+  subdomínios de um domínio bloqueado, sem precisar listar um por um.
+- **O modo DNS escuta em todas as interfaces.** O servidor fica em
+  `0.0.0.0:53` e repassa para o DNS de cima o que não está bloqueado. É assim
+  que ele alcança a rede local — e é assim que ele vira um resolver aberto se
+  o roteador deixar a porta 53 passar para a internet. **Não exponha a porta
+  53 para fora da sua rede.**
 - **App com DNS próprio ou IP fixo fura.** Alguns apps (principalmente Android
   e Electron) resolvem por conta própria e ignoram o hosts.
 - **Modo anônimo, extensões e alguns navegadores** podem ignorar o hosts.
@@ -223,9 +253,13 @@ hosts, ao custo de configurar cada dispositivo.
 ## Desenvolvimento
 
 ```bash
-mvn test          # testes (roda em Linux e Windows no CI)
+mvn test          # testes (roda em Linux, macOS e Windows no CI)
 mvn package       # gera o jar
 ```
+
+O repositório traz um `./mvnw` (e `mvnw.cmd` no Windows) com o Maven 3.9.16
+fixado: é o que a CI usa, e evita o "funciona na minha máquina" de versão de
+Maven e de plugin.
 
 Três módulos Maven:
 
