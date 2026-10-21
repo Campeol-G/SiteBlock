@@ -144,6 +144,23 @@ class DnsPacketBuilderTest {
     }
 
     @Test
+    void questionSectionPublicoDevolveCopia() throws Exception {
+        DnsQuery q = query(0x1, "www.tiktok.com", 1);
+        byte[] primeira = q.questionSection();
+        byte[] segunda = q.questionSection();
+        assertNotSame(primeira, segunda, "o accessor publico deve devolver uma copia");
+        primeira[0] = 0x7F; // mexer na cópia não pode alterar a consulta
+        assertNotEquals(0x7F, q.questionSection()[0] & 0xFF);
+    }
+
+    @Test
+    void questionSectionInternoNaoClona() throws Exception {
+        DnsQuery q = query(0x2, "www.tiktok.com", 1);
+        assertSame(q.questionSectionInternal(), q.questionSectionInternal(),
+                "o accessor interno nao deve clonar: a resposta usa o array direto");
+    }
+
+    @Test
     void respostaIncluiOptMinimoDoEdns() throws Exception {
         DnsQuery q = query(0x7777, "youtube.com", 15);
         byte[] resp = DnsPacketBuilder.buildNoDataResponse(q);

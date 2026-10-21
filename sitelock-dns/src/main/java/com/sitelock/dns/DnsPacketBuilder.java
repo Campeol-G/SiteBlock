@@ -68,7 +68,7 @@ public final class DnsPacketBuilder {
      * CNAME, ANY, SVCB, HTTPS…), a mesma semântica do Pi-hole/AdGuard.
      */
     public static byte[] buildNoDataResponse(DnsQuery query) {
-        byte[] question = query.questionSection();
+        byte[] question = query.questionSectionInternal();
         byte[] out = new byte[12 + question.length + OPT_LEN];
         writeHeader(out, query, 0, 0, true);
         System.arraycopy(question, 0, out, 12, question.length);
@@ -100,7 +100,7 @@ public final class DnsPacketBuilder {
         if (rcode < 0 || rcode > 15) {
             throw new IllegalArgumentException("rcode fora de 0-15: " + rcode);
         }
-        byte[] question = query.questionSection();
+        byte[] question = query.questionSectionInternal();
         byte[] out = new byte[12 + question.length + OPT_LEN];
         writeHeader(out, query, rcode, 0, false);
         System.arraycopy(question, 0, out, 12, question.length);
@@ -109,7 +109,7 @@ public final class DnsPacketBuilder {
     }
 
     private static byte[] buildAnswer(DnsQuery query, int type, byte[] rdata) {
-        byte[] question = query.questionSection();
+        byte[] question = query.questionSectionInternal();
         // 12 (header) + question + 12 (answer fixo: ptr+type+class+ttl+rdlen) + rdata + OPT
         byte[] out = new byte[12 + question.length + 12 + rdata.length + OPT_LEN];
         writeHeader(out, query, 0, 1, true);
