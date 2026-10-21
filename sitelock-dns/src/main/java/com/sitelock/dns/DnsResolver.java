@@ -78,7 +78,15 @@ public class DnsResolver {
      *       upstream e retransmitir a resposta.</li>
      * </ul>
      * <p>Use {@link #isBlocked()} para decidir "respondo local ou encaminho?" sem
-     * listar os casos bloqueados.
+     * listar os casos bloqueados. No servidor:
+     * <pre>
+     *   if (decision.isBlocked()) {
+     *       byte[] resposta = DnsPacketBuilder.buildResponse(query, decision);
+     *       enviar(resposta);
+     *       return;                 // nome bloqueado nunca vai ao upstream
+     *   }
+     *   // só um nome não bloqueado chega aqui
+     * </pre>
      */
     public enum Decision {
         /** Responder localmente com o sinkhole (0.0.0.0 / ::). */
