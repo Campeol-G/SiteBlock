@@ -177,6 +177,36 @@ class DaemonEnableTest {
     }
 
     @Test
+    void theOutputNeverRepeatsSudo() throws Exception {
+        // O sudoCommand() já traz o "sudo"; prefixar de novo produzia
+        // "sudo sudo siteblock daemon enable", que é o comando que não existe.
+        Resultado r = rodar(enable(OsType.LINUX, jarDeExemplo().toString())::call);
+
+        assertFalse(r.texto().contains("sudo sudo"),
+                "a saída não pode repetir o sudo:\n" + r.texto());
+        assertTrue(r.texto().contains("sudo siteblock daemon enable"),
+                "a saída tem que mostrar o comando:\n" + r.texto());
+    }
+
+    @Test
+    void theOutputIsShort() throws Exception {
+        // Três linhas: o que aconteceu, onde ficou o jar, e o que fazer depois
+        // de recompilar. O caminho do artefato é interno e não ajuda ninguém.
+        Resultado r = rodar(enable(OsType.LINUX, jarDeExemplo().toString())::call);
+
+        // O aviso do dono do diretório é condicional: em produção o /opt/sitelock
+        // é criado pelo root e ele não aparece. Nos testes o diretório é do
+        // usuário, então ele aparece — e por isso fica de fora da contagem.
+        long linhas = r.texto().strip().lines()
+                .filter(l -> !l.startsWith("Aviso:"))
+                .count();
+        assertTrue(linhas <= 3,
+                "a saída do enable não deve ter mais que 3 linhas:\n" + r.texto());
+        assertFalse(r.texto().contains("Artefato:"),
+                "o caminho do artefato é interno:\n" + r.texto());
+    }
+
+    @Test
     void enableFailsClearlyWhenTheSourceJarIsMissing() {
         Resultado r = rodar(enable(OsType.LINUX, tmp.resolve("nao-existe.jar").toString())::call);
 

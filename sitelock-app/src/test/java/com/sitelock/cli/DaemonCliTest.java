@@ -388,22 +388,36 @@ class DaemonCliTest {
         // mais. Sem esta linha, o status só diria "não está rodando" e a
         // pessoa não teria por onde começar.
         semear(prazos("permanente.com", null));
-        Path jar = AutostartInstaller.installJarPath(OsType.detect(), Path.of("/"));
-        boolean havia = Files.exists(jar);
-        if (havia) {
-            Files.move(jar, jar.resolveSibling("siteblock.jar.bak"));
-        }
+        // Raiz temporária: o teste não pode mexer no /opt de verdade, que é do
+        // root — e o diretório de instalação nem existe aí.
+        Path raiz = tmp.resolve("sys");
+        Path jar = AutostartInstaller.installJarPath(OsType.LINUX, raiz);
+        Files.createDirectories(jar.getParent());
+        Files.writeString(jar, "jar");
+        Files.delete(jar);
+        // A unit precisa existir: o aviso do jar só aparece quando o autostart
+        // está instalado — senão não há daemon para reclamar.
+        Path unit = AutostartInstaller.artifactPath(OsType.LINUX, raiz);
+        Files.createDirectories(unit.getParent());
+        Files.writeString(unit, "[Unit]\n");
         try {
-            Capture r = captureOut(() -> new DaemonStatusCommand(stateFile().toString()).call());
+            Capture r = captureOut(() -> new DaemonStatusCommand(stateFile().toString(), raiz).call());
             assertTrue(r.texto().contains("NÃO EXISTE") || r.texto().contains("não existe mais"),
                     r.texto());
             assertTrue(r.texto().contains("daemon enable"),
                     "tem que dizer como consertar: " + r.texto());
         } finally {
-            if (havia) {
-                Files.move(jar.resolveSibling("siteblock.jar.bak"), jar);
-            }
+            Files.deleteIfExists(jar);
+            Files.deleteIfExists(unit);
         }
+    }
+
+    @Test
+    void statusNeverRepeatsSudo() throws Exception {
+        semear(prazos("permanente.com", null));
+        Capture r = captureOut(() -> new DaemonStatusCommand(stateFile().toString()).call());
+        assertFalse(r.texto().contains("sudo sudo"),
+                "a saída não pode repetir o sudo:\n" + r.texto());
     }
 
     @Test

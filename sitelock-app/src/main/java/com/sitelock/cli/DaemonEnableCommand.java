@@ -77,7 +77,7 @@ public class DaemonEnableCommand implements Callable<Integer> {
             System.err.println("Não encontrei " + nomeDoAgendador(os) + " nesta máquina.");
             System.err.println("Sem ele não dá para subir o daemon automaticamente. "
                     + "Você ainda pode rodar o daemon na mão, em outro terminal:");
-            System.err.println("  sudo " + CliSupport.sudoCommand("daemon start"));
+            System.err.println("  " + CliSupport.sudoCommand("daemon start"));
             System.err.println("Ele libera os expirados enquanto estiver aberto — mas fechar "
                     + "o terminal encerra o daemon.");
             return 1;
@@ -120,16 +120,14 @@ public class DaemonEnableCommand implements Callable<Integer> {
             return 1;
         }
 
-        System.out.println("Daemon de expiração instalado para subir a cada boot.");
-        System.out.println("Artefato: " + artefato);
-        System.out.println("Jar do daemon: " + jarInstalado);
+        System.out.println("Daemon de expiração instalado. Vai subir a cada boot.");
+        System.out.println("Jar: " + jarInstalado);
         String aviso = avisoDonoDoInstall(os, systemRoot);
         if (aviso != null) {
             System.out.println(aviso);
         }
         System.out.println("Depois de recompilar (mvn package), rode de novo: "
-                + "sudo " + CliSupport.sudoCommand("daemon enable"));
-        System.out.println("Confira com: siteblock daemon status");
+                + CliSupport.sudoCommand("daemon enable"));
         return 0;
     }
 
@@ -225,9 +223,8 @@ private String usuarioReal() {
         try {
             String dono = Files.getOwner(dir).getName();
             if (!"root".equals(dono.toLowerCase(java.util.Locale.ROOT))) {
-                return "Aviso: " + dir + " pertence a " + dono + ", não ao root. O daemon roda como "
-                        + "root e vai executar um jar que você pode trocar. Apague o diretório e "
-                        + "rode o enable de novo, ou use: sudo chmod 755 " + dir;
+                return "Aviso: " + dir + " não é do root — o daemon executaria um jar que você "
+                        + "pode trocar. Rode: sudo chown root " + dir;
             }
         } catch (Exception e) {
             // Sem permissão de ler o dono: não dá para afirmar nada, e o aviso

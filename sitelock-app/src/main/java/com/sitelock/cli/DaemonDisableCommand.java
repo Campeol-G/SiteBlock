@@ -53,7 +53,8 @@ public class DaemonDisableCommand implements Callable<Integer> {
         }
 
         System.out.println("Autostart removido. O daemon para de subir sozinho a cada boot.");
-        System.out.println("Um daemon que já estiver rodando continua até: sudo siteblock daemon stop");
+        System.out.println("Um daemon que já estiver rodando continua até: "
+                + CliSupport.sudoCommand("daemon stop"));
         return 0;
     }
 }

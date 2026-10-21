@@ -204,12 +204,13 @@ public class DaemonStartCommand implements Callable<Integer> {
     }
 
     /**
-     * O daemon roda como root e executa código de um caminho que o usuário pode
-     * trocar. Isso é verdade por construção no install documentado (o jar vive
-     * em ~/Projects/.../target/), então isto é aviso, nunca recusa: um portão
-     * rígido quebraria o caminho de instalação no primeiro dia. O alvo é o
-     * usuário distraído, não o atacante — quem quer burlar já edita o
-     * /etc/hosts com sudo, que é uma linha a mais.
+     * O {@code daemon start} executa o jar de onde ele está — normalmente o do
+     * build, num diretório que o usuário pode trocar. Isto é aviso, nunca
+     * recusa: o alvo é o usuário distraído, não o atacante (quem quer burlar já
+     * edita o /etc/hosts com sudo, que é uma linha a mais).
+     *
+     * <p>A correção já existe e é um comando: o {@code daemon enable} instala
+     * uma cópia do jar num diretório do root e aponta a inicialização para lá.
      */
     private String caminhoGravavelPeloUsuario() {
         String jar = System.getProperty("siteblock.jar");
@@ -223,8 +224,8 @@ public class DaemonStartCommand implements Callable<Integer> {
             return null;
         }
         return "Aviso: o daemon roda como root e executa o jar em " + p
-                + ", que você pode trocar. Se isso te incomodar, instale o jar em um "
-                + "diretório que só o root escreva.";
+                + ", que você pode trocar. Para evitar isso, rode: "
+                + CliSupport.sudoCommand("daemon enable");
     }
 
     private static void printLogTail(Path logFile) {
