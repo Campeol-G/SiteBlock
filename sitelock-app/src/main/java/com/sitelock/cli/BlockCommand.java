@@ -90,10 +90,8 @@ public class BlockCommand implements Callable<Integer> {
             return 1;
         }
 
-        final Map<String, BlockEntry> state;
         try {
             BlockService.SweepResult sweep = service.sweepExpired();
-            state = sweep.state();
             if (!sweep.removed().isEmpty()) {
                 System.out.println("Limpeza: bloqueios expirados removidos: "
                         + String.join(", ", sweep.removed()));
@@ -109,48 +107,66 @@ public class BlockCommand implements Callable<Integer> {
         }
 
         Instant now = Instant.now(service.getClock());
-        int failures = 0;
-        for (String domain : domains) {
-            BlockEntry previous = state.get(domain);
-            Instant expiresAt = duration == null ? null : now.plus(duration);
-            state.put(domain, new BlockEntry(domain, now, expiresAt));
-            try {
-                service.getStore().save(state);
-            } catch (IOException e) {
-                System.err.println("Erro ao salvar estado de '" + domain + "': " + e.getMessage());
-                if (previous == null) {
-                    state.remove(domain);
-                } else {
-                    state.put(domain, previous);
-                }
-                failures++;
-                continue;
-            }
-            try {
-                service.getBlocker().block(domain);
-            } catch (IOException e) {
-                try {
-                    if (previous == null) {
-                        state.remove(domain);
-                    } else {
-                        state.put(domain, previous);
-                    }
-                    service.getStore().save(state);
-                } catch (IOException rollbackFailure) {
-                    System.err.println("Erro CRÍTICO: falha no hosts E ao reverter o estado de '"
-                            + domain + "': " + rollbackFailure.getMessage());
-                }
-                System.err.println("Erro ao bloquear '" + domain + "': " + e.getMessage());
-                failures++;
-                continue;
-            }
-            if (expiresAt == null) {
-                System.out.println("Bloqueado " + domain + ".");
-            } else {
-                System.out.println("Bloqueado " + domain + " por "
-                        + DurationParser.formatRemaining(duration) + ".");
-            }
+        final Instant expiresAt = duration == null ? null : now.plus(duration);
+        Plano plano = new Plano();
+        try {
+            service.inTransaction(
+                    (state, tx) -> {
+                        for (String domain : domains) {
+                            BlockEntry previous = state.get(domain);
+                            plano.anteriores.put(domain, previous);
+                            state.put(domain, new BlockEntry(domain, now, expiresAt));
+                            try {
+                                tx.save(state);
+                            } catch (IOException e) {
+                                System.err.println("Erro ao salvar estado de '" + domain + "': "
+                                        + e.getMessage());
+                                if (previous == null) {
+                                    state.remove(domain);
+                                } else {
+                                    state.put(domain, previous);
+                                }
+                                plano.falhas++;
+                                continue;
+                            }
+                            plano.gravados.add(domain);
+                        }
+                        return plano;
+                    },
+                    (p, state, tx) -> {
+                        for (String domain : p.gravados) {
+                            try {
+                                service.getBlocker().block(domain);
+                            } catch (IOException e) {
+                                try {
+                                    BlockEntry previous = p.anteriores.get(domain);
+                                    if (previous == null) {
+                                        state.remove(domain);
+                                    } else {
+                                        state.put(domain, previous);
+                                    }
+                                    tx.save(state);
+                                } catch (IOException rollbackFailure) {
+                                    System.err.println("Erro CRÍTICO: falha no hosts E ao reverter o estado de '"
+                                            + domain + "': " + rollbackFailure.getMessage());
+                                }
+                                System.err.println("Erro ao bloquear '" + domain + "': " + e.getMessage());
+                                p.falhas++;
+                                continue;
+                            }
+                            if (expiresAt == null) {
+                                System.out.println("Bloqueado " + domain + ".");
+                            } else {
+                                System.out.println("Bloqueado " + domain + " por "
+                                        + DurationParser.formatRemaining(duration) + ".");
+                            }
+                        }
+                    });
+        } catch (IOException e) {
+            System.err.println("Erro ao gravar o estado: " + e.getMessage());
+            return 1;
         }
+        int failures = plano.falhas;
         if (failures == 0) {
             // Best-effort: não muda o exit code; só avisa se o flush falhar.
             CliSupport.flushDnsBestEffort();
@@ -160,5 +176,19 @@ public class BlockCommand implements Callable<Integer> {
             return 0;
         }
         return 1;
+    }
+
+    /**
+     * O que a transação do {@code block} carrega entre o estado e o hosts.
+     *
+     * <p>POR QUE: os dois lados da transação precisam saber o que foi gravado
+     * no estado e qual era a entrada anterior de cada domínio — é o que
+     * permite reverter só o domínio que falhou, sem desfazer os outros.
+     */
+    private static final class Plano {
+
+        final List<String> gravados = new ArrayList<>();
+        final Map<String, BlockEntry> anteriores = new LinkedHashMap<>();
+        int falhas;
     }
 }

@@ -13,9 +13,9 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Scanner;
 import java.util.concurrent.Callable;
 
 /**
@@ -114,7 +114,10 @@ public class UnblockCommand implements Callable<Integer> {
             }
         }
 
-        int failures = 0;
+        // A confirmação é digitada antes da transação: segurar a trava do estado
+        // enquanto a pessoa escreve SIM travaria o daemon e qualquer outro
+        // comando até ela terminar de digitar.
+        final List<String> aSoltar = new ArrayList<>();
         boolean cancelledAny = false;
         for (String domain : domains) {
             BlockEntry entry = state.get(domain);
@@ -130,38 +133,67 @@ public class UnblockCommand implements Callable<Integer> {
                         + " de bloqueio. Isso enfraquece sua proteção contra procrastinação.");
                 System.out.print("Para confirmar, digite SIM e pressione Enter (qualquer outra coisa cancela): ");
                 System.out.flush();
-                String answer = readLine();
+                String answer = CliSupport.readLine();
                 if (answer == null || !answer.trim().equalsIgnoreCase("SIM")) {
                     System.out.println("Desbloqueio antecipado CANCELADO para '" + domain + "'. Continua bloqueado.");
                     cancelledAny = true;
                     continue;
                 }
             }
-            state.remove(domain);
-            try {
-                service.getStore().save(state);
-            } catch (IOException e) {
-                System.err.println("Erro ao salvar estado de '" + domain + "': " + e.getMessage());
-                state.put(domain, entry);
-                failures++;
-                continue;
-            }
-            try {
-                service.getBlocker().unblock(domain);
-            } catch (IOException e) {
-                try {
-                    state.put(domain, entry);
-                    service.getStore().save(state);
-                } catch (IOException rollbackFailure) {
-                    System.err.println("Erro CRÍTICO: falha no hosts E ao reverter o estado de '"
-                            + domain + "': " + rollbackFailure.getMessage());
-                }
-                System.err.println("Erro ao desbloquear '" + domain + "': " + e.getMessage());
-                failures++;
-                continue;
-            }
-            System.out.println("Desbloqueado " + domain + ".");
+            aSoltar.add(domain);
         }
+
+        Plano plano = new Plano();
+        try {
+            service.inTransaction(
+                    (estado, tx) -> {
+                        for (String domain : aSoltar) {
+                            BlockEntry entry = estado.get(domain);
+                            if (entry == null) {
+                                plano.ausentes.add(domain);
+                                continue;
+                            }
+                            plano.anteriores.put(domain, entry);
+                            estado.remove(domain);
+                            try {
+                                tx.save(estado);
+                            } catch (IOException e) {
+                                System.err.println("Erro ao salvar estado de '" + domain + "': " + e.getMessage());
+                                estado.put(domain, entry);
+                                plano.falhas++;
+                                continue;
+                            }
+                            plano.gravados.add(domain);
+                        }
+                        return plano;
+                    },
+                    (p, estado, tx) -> {
+                        for (String domain : p.gravados) {
+                            try {
+                                service.getBlocker().unblock(domain);
+                            } catch (IOException e) {
+                                try {
+                                    estado.put(domain, p.anteriores.get(domain));
+                                    tx.save(estado);
+                                } catch (IOException rollbackFailure) {
+                                    System.err.println("Erro CRÍTICO: falha no hosts E ao reverter o estado de '"
+                                            + domain + "': " + rollbackFailure.getMessage());
+                                }
+                                System.err.println("Erro ao desbloquear '" + domain + "': " + e.getMessage());
+                                p.falhas++;
+                                continue;
+                            }
+                            System.out.println("Desbloqueado " + domain + ".");
+                        }
+                    });
+        } catch (IOException e) {
+            System.err.println("Erro ao gravar o estado: " + e.getMessage());
+            return 1;
+        }
+        for (String domain : plano.ausentes) {
+            System.out.println("'" + domain + "' não está bloqueado. Nada a fazer.");
+        }
+        int failures = plano.falhas;
         if (failures > 0) {
             return 1;
         }
@@ -172,15 +204,19 @@ public class UnblockCommand implements Callable<Integer> {
         return cancelledAny ? 3 : 0;
     }
 
-    private static String readLine() {
-        try {
-            Scanner scanner = new Scanner(System.in);
-            if (!scanner.hasNextLine()) {
-                return null;
-            }
-            return scanner.nextLine();
-        } catch (Exception e) {
-            return null;
-        }
+    /**
+     * O que a transação do {@code unblock} carrega entre o estado e o hosts.
+     *
+     * <p>POR QUE: o estado e o hosts são dois lugares, e o desbloqueio tem que
+     * sair nos dois. Guardar o que estava em cada domínio é o que permite
+     * reverter só o que falhou.
+     */
+    private static final class Plano {
+
+        final List<String> gravados = new ArrayList<>();
+        final List<String> ausentes = new ArrayList<>();
+        final Map<String, BlockEntry> anteriores = new LinkedHashMap<>();
+        int falhas;
     }
+
 }

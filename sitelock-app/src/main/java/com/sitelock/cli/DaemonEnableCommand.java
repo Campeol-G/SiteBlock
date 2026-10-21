@@ -244,6 +244,13 @@ private String usuarioReal() {
      * executar código do root e executar código do usuário como root.
      */
     private String avisoDonoDoInstall(OsType os, Path systemRoot) {
+        if (os.isWindows()) {
+            // ATENÇÃO: no Windows não existe uid root nem chown. Quem protege o
+            // jar é a permissão (ACL) da pasta, e o dono do arquivo não diz quem
+            // pode escrever nele — o dono do ProgramData é o usuário que
+            // instalou. Pedir um chown ali é pedir um comando que não existe.
+            return null;
+        }
         Path dir = AutostartInstaller.installDir(os, systemRoot);
         try {
             String dono = Files.getOwner(dir).getName();

@@ -12,6 +12,7 @@ import picocli.CommandLine.Parameters;
 import picocli.CommandLine.ParentCommand;
 
 import java.io.IOException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -63,6 +64,12 @@ public class ProfileAddCommand implements Callable<Integer> {
 
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
 
+    /** Relógio injetado pelo teste; null = o do sistema. */
+    Clock clockOverride;
+
+    /** Store injetado pelo teste; null = usa o do stateDir. */
+    ProfileStore storeOverride;
+
     public ProfileAddCommand() {
     }
 
@@ -98,40 +105,44 @@ public class ProfileAddCommand implements Callable<Integer> {
             return 1;
         }
 
-        ProfileStore store = new ProfileStore(CliSupport.resolveProfilesFile(stateFileOverride));
-        final Map<String, Profile> profiles;
+        ProfileStore store = storeOverride != null ? storeOverride
+                : new ProfileStore(CliSupport.resolveProfilesFile(stateFileOverride));
+
+        Long millis = duration == null ? null : duration.toMillis();
+        List<String> adicionados = new ArrayList<>();
+        List<String> substituidos = new ArrayList<>();
+        boolean[] naoExiste = {false};
+        // A leitura e a gravação da receita dentro de uma transação: dois
+        // `profile add` simultâneos não podem se perder.
         try {
-            profiles = store.load();
+            store.inTransaction(tx -> {
+                Map<String, Profile> profiles = tx.load();
+                Profile profile = profiles.get(nome);
+                if (profile == null) {
+                    naoExiste[0] = true;
+                    return null;
+                }
+                Map<String, ProfileEntry> entries = new TreeMap<>(profile.getEntries());
+                for (String domain : domains) {
+                    if (entries.containsKey(domain)) {
+                        substituidos.add(domain);
+                    } else {
+                        adicionados.add(domain);
+                    }
+                    entries.put(domain, new ProfileEntry(millis));
+                }
+                profiles.put(nome, new Profile(profile.getCreatedAt(), Instant.now(clock()), entries));
+                tx.save(profiles);
+                return null;
+            });
         } catch (IOException e) {
-            System.err.println("Erro ao ler perfis: " + e.getMessage());
+            System.err.println("Erro ao salvar o perfil: " + e.getMessage());
             return 1;
         }
-        final Profile profile = profiles.get(nome);
-        if (profile == null) {
+        if (naoExiste[0]) {
             System.err.println("Perfil '" + nome + "' não existe.");
             System.err.println("Para criar um perfil novo, bloqueie os domínios e rode: "
                     + "siteblock profile save " + nome);
-            return 1;
-        }
-
-        Long millis = duration == null ? null : duration.toMillis();
-        Map<String, ProfileEntry> entries = new TreeMap<>(profile.getEntries());
-        List<String> adicionados = new ArrayList<>();
-        List<String> substituidos = new ArrayList<>();
-        for (String domain : domains) {
-            if (entries.containsKey(domain)) {
-                substituidos.add(domain);
-            } else {
-                adicionados.add(domain);
-            }
-            entries.put(domain, new ProfileEntry(millis));
-        }
-
-        profiles.put(nome, new Profile(profile.getCreatedAt(), Instant.now(), entries));
-        try {
-            store.save(profiles);
-        } catch (IOException e) {
-            System.err.println("Erro ao salvar o perfil: " + e.getMessage());
             return 1;
         }
 
@@ -148,6 +159,11 @@ public class ProfileAddCommand implements Callable<Integer> {
         System.out.println("A receita mudou; o que está bloqueado agora não mudou. "
                 + "Rode 'siteblock profile apply " + nome + "' para aplicar.");
         return 0;
+    }
+
+    /** O relógio do comando: o injetado pelo teste, ou o da CLI. */
+    private Clock clock() {
+        return clockOverride != null ? clockOverride : CliSupport.clock();
     }
 
     /**

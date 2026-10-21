@@ -3,10 +3,15 @@ package com.sitelock.cli;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.sitelock.core.Profile;
+import com.sitelock.core.ProfileStore;
+
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -116,9 +121,60 @@ class ProfileCommandsTest {
         assertTrue(perfil.contains("vivo.com"), perfil);
     }
 
+    /**
+     * Salvar um perfil não pode apagar a receita que outro terminal gravou.
+     *
+     * <p>O comando lia as receitas e gravava o arquivo inteiro: uma receita
+     * escrita no meio do caminho sumia. O teste é determinístico — o outro
+     * escritor grava o arquivo por fora da trava, no momento em que o comando
+     * carrega as receitas.
+     */
     @Test
-    void listShowsNameAndCount() throws Exception {
-        block("tiktok.com", "youtube.com");
+    void saveNaoPerdeAReceitaEscritaPorOutroTerminal() throws Exception {
+        block("tiktok.com");
+
+        ProfileStore espiao = new ProfileStore(profilesFile()) {
+            @Override
+            public Map<String, Profile> load() throws IOException {
+                Map<String, Profile> perfis = super.load();
+                escreverReceitaPorForaDaTrava(profilesFile(), "outro");
+                return perfis;
+            }
+        };
+
+        ProfileSaveCommand cmd = new ProfileSaveCommand("trabalho", false,
+                hosts().toString(), state());
+        cmd.storeOverride = espiao;
+        assertEquals(0, cmd.call());
+
+        Map<String, Profile> depois = new ProfileStore(profilesFile()).load();
+        assertTrue(depois.containsKey("trabalho"),
+                "o perfil salvo tem que estar lá: " + depois.keySet());
+        assertTrue(depois.containsKey("outro"),
+                "a receita escrita por outro terminal não pode se perder: " + depois.keySet());
+    }
+
+    /** Grava o profiles.json por fora da trava, como um escritor que não a respeita. */
+    private void escreverReceitaPorForaDaTrava(Path file, String nome) throws IOException {
+        String json = """
+                {
+                  "version" : 1,
+                  "profiles" : {
+                    "%s" : {
+                      "createdAt" : "2026-10-15T12:02:11Z",
+                      "updatedAt" : "2026-10-15T12:02:11Z",
+                      "entries" : {
+                        "outro.com" : { "durationMillis" : null }
+                      }
+                    }
+                  }
+                }
+                """.formatted(nome);
+        Files.writeString(file, json, StandardCharsets.UTF_8);
+    }
+
+    @Test
+    void listShowsNameAndCount() throws Exception {        block("tiktok.com", "youtube.com");
         assertEquals(0, new ProfileSaveCommand("trabalho", false, hosts().toString(), state()).call());
         assertEquals(0, new ProfileSaveCommand("descanso", false, hosts().toString(), state()).call());
 

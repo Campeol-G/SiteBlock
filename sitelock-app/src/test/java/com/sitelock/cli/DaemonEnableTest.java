@@ -290,9 +290,24 @@ class DaemonEnableTest {
         assertEquals(0, r.exit(), r.texto());
     }
 
+    /**
+     * O aviso de dono do diretório não pode pedir {@code chown} no Windows.
+     *
+     * <p>Lá não existe uid {@code root} nem {@code chown}: quem protege o jar
+     * é a permissão da pasta, e o dono do arquivo não diz quem pode escrever
+     * nele. A instrução "Rode: sudo chown root ..." é impossível de seguir.
+     */
     @Test
-    void macOsArtifactIsAPlist() throws Exception {
-        rodar(enable(OsType.MACOS, jarDeExemplo().toString())::call);
+    void noWindowsOAvisoDeDonoNaoPedeChown() throws Exception {
+        Resultado r = rodar(enable(OsType.WINDOWS, jarDeExemplo().toString())::call);
+
+        assertEquals(0, r.exit(), r.texto());
+        assertFalse(r.texto().contains("chown"),
+                "no Windows não existe chown, nem root: " + r.texto());
+    }
+
+    @Test
+    void macOsArtifactIsAPlist() throws Exception {        rodar(enable(OsType.MACOS, jarDeExemplo().toString())::call);
 
         assertTrue(Files.exists(artefato(OsType.MACOS)));
         String plist = ler(artefato(OsType.MACOS));

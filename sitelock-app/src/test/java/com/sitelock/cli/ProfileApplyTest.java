@@ -169,9 +169,50 @@ class ProfileApplyTest {
                 "se o hosts não aceitou, o estado tem que voltar — senão o JSON diz bloqueado e o hosts não tem a linha");
     }
 
+    /**
+     * O aviso de daemon ausente depende do ESTADO FINAL, não da mudança.
+     *
+     * <p>Com a receita mais fraca que o estado, o merge dá KEPT — nada mudou.
+     * Mas o bloqueio com prazo continua valendo, e sem daemon ele só vence
+     * quando alguém rodar outro comando. Quem digitou o prazo precisa saber
+     * disso, e o aviso escondido faz a pessoa acreditar que o prazo se cumpre
+     * sozinho.
+     */
+    @Test
+    void applyAvisaQuandoOTemporarioAtivoJaEstavaNoEstado() throws Exception {
+        assertEquals(0, new BlockCommand(List.of("tiktok.com"), "1h",
+                hosts().toString(), state()).call());
+        assertEquals(0, save("trabalho"));
+        // O estado passa a ser mais forte que a receita: o merge vai dar KEPT.
+        assertEquals(0, new BlockCommand(List.of("tiktok.com"), "10h",
+                hosts().toString(), state()).call());
+
+        String saida = capture(() -> apply("trabalho"));
+
+        assertTrue(saida.contains("AVISO:"),
+                "temporário ativo sem daemon tem que avisar, mesmo sem mudança: " + saida);
+        assertTrue(saida.contains("daemon enable"), saida);
+    }
+
     @Test
     void applyUnknownProfileFails() throws Exception {
         assertEquals(1, apply("nao-existe"));
+    }
+
+    @Test
+    void applyGravaOJsonOrdenado() throws Exception {
+        block("alfa.com", "beta.com", "mike.com", "zeta.com");
+        assertEquals(0, save("trabalho"));
+
+        assertEquals(0, apply("trabalho"));
+
+        String json = blocksJson();
+        int alfa = json.indexOf("alfa.com");
+        int beta = json.indexOf("beta.com");
+        int mike = json.indexOf("mike.com");
+        int zeta = json.indexOf("zeta.com");
+        assertTrue(alfa >= 0 && alfa < beta && beta < mike && mike < zeta,
+                "o JSON tem que sair sempre ordenado: " + json);
     }
 
     @FunctionalInterface

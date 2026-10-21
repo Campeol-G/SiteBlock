@@ -131,10 +131,18 @@ public class BlockStore {
  * <p>É a mesma verificação otimista que o {@code HostsFileManager.modifyHosts}
  * já faz contra o hosts, finalmente aplicada ao JSON.
  *
+ * <p>Desde que a CLI passou a usar esta transação em todo comando que
+ * escreve estado ({@code block}, {@code unblock}, {@code profile apply},
+ * {@code profile add/remove/save}), o {@code load} e o {@code save} de um
+ * mesmo comando acontecem dentro da mesma trava. E a gravação é um delta
+ * sobre o que está no disco, não uma escrita cega: assim uma escrita
+ * concorrente de quem não respeita a trava (outra versão da ferramenta, um
+ * script, uma edição manual) não é apagada.
+ *
  * @param body recebe acesso ao estado já carregado e um {@code save} que não
  *             trava de novo
  */
-public <R> R inTransaction(TransactionBody<R> body) throws IOException {
+    public <R> R inTransaction(TransactionBody<R> body) throws IOException {
         ensureParentExists(stateFile);
         ensureParentExists(lockFile);
         SiteLockPaths.chownToUserIfConfigured(stateFile.getParent());
@@ -142,27 +150,68 @@ public <R> R inTransaction(TransactionBody<R> body) throws IOException {
                 StandardOpenOption.CREATE, StandardOpenOption.WRITE);
              FileLock ignored = channel.lock()) {
             SiteLockPaths.chownToUserIfConfigured(lockFile);
-            return body.apply(new Transaction() {
-                @Override
-                public Map<String, BlockEntry> load() throws IOException {
-                    // Mesma guarda de load(): arquivo inexistente é estado vazio,
-                    // não erro. Sem ela o primeiro `block` de uma máquina nova
-                    // falharia, porque ainda não há arquivo para ler.
-                    if (!Files.exists(stateFile)) {
-                        return new TreeMap<>();
-                    }
-                    return readAndParse();
-                }
-
-                @Override
-                public void save(Map<String, BlockEntry> blocks) throws IOException {
-                    writeAtomically(blocks);
-                }
-            });
+            return body.apply(new LockedState());
         } catch (OverlappingFileLockException e) {
             // Outra thread da MESMA JVM. Não é erro de dado: o chamador decide.
             throw new IOException("Outro processo/thread está escrevendo o estado agora; "
                     + "tente de novo.", e);
+        }
+    }
+
+    /**
+     * A transação: o estado carregado e o que foi gravado por último.
+     *
+     * <p>POR QUE: o {@code save} de dentro da transação não pode ser uma escrita
+     * cega. O que está no disco pode ter mudado desde o {@code load} — por
+     * outro escritor que não espera a trava — e apagar isso é o lost update
+     * que a transação existe para impedir.
+     */
+    private final class LockedState implements Transaction {
+
+        /** O que foi gravado por último: a base do delta da próxima gravação. */
+        private Map<String, BlockEntry> lastWritten = new TreeMap<>();
+
+        @Override
+        public Map<String, BlockEntry> load() throws IOException {
+            // Mesma guarda de load(): arquivo inexistente é estado vazio,
+            // não erro. Sem ela o primeiro `block` de uma máquina nova
+            // falharia, porque ainda não há arquivo para ler.
+            Map<String, BlockEntry> state = Files.exists(stateFile)
+                    ? readAndParse()
+                    : new TreeMap<>();
+            lastWritten = new TreeMap<>(state);
+            return state;
+        }
+
+        @Override
+        public void save(Map<String, BlockEntry> blocks) throws IOException {
+            writeAtomically(mergeIntoDisk(blocks));
+            lastWritten = new TreeMap<>(blocks);
+        }
+
+        /**
+         * Aplica o delta entre o que foi gravado por último e o que se quer
+         * gravar sobre o que está no disco agora.
+         */
+        private Map<String, BlockEntry> mergeIntoDisk(Map<String, BlockEntry> blocks)
+                throws IOException {
+            Map<String, BlockEntry> onDisk = Files.exists(stateFile)
+                    ? readAndParse()
+                    : new TreeMap<>();
+            Map<String, BlockEntry> merged = new TreeMap<>(onDisk);
+            for (Map.Entry<String, BlockEntry> e : lastWritten.entrySet()) {
+                BlockEntry wanted = blocks.get(e.getKey());
+                if (wanted == null || !wanted.equals(e.getValue())) {
+                    merged.remove(e.getKey());
+                }
+            }
+            for (Map.Entry<String, BlockEntry> e : blocks.entrySet()) {
+                BlockEntry before = lastWritten.get(e.getKey());
+                if (before == null || !before.equals(e.getValue())) {
+                    merged.put(e.getKey(), e.getValue());
+                }
+            }
+            return merged;
         }
     }
 

@@ -73,6 +73,37 @@ class CliCommandsTest {
         assertTrue(content.contains("127.0.0.1 b.com"));
     }
 
+    /**
+     * As confirmações digitadas não podem se perder entre si.
+     *
+     * <p>Um {@code Scanner} novo por pergunta lê o stdin num buffer de 1 KB: na
+     * primeira pergunta ele consome as duas linhas que a pessoa digitou, e a
+     * segunda pergunta não tem mais o que ler. O resultado era o pior possível
+     * para uma trava de HPV contra distraído: a pessoa confirmou duas vezes e
+     * o comando dizia que não desbloqueou.
+     */
+    @Test
+    void unblockForceAceitaAsDuasConfirmacoes() throws Exception {
+        Path h = hosts();
+        assertEquals(0, new BlockCommand(List.of("a.com", "b.com"), "1h",
+                h.toString(), state()).call());
+
+        java.io.InputStream originalIn = System.in;
+        System.setIn(new java.io.ByteArrayInputStream("SIM\nSIM\n".getBytes(StandardCharsets.UTF_8)));
+        int exit;
+        try {
+            exit = new UnblockCommand(List.of("a.com", "b.com"), true,
+                    h.toString(), state()).call();
+        } finally {
+            System.setIn(originalIn);
+        }
+
+        assertEquals(0, exit, "as duas confirmações digitadas têm que valer");
+        String content = Files.readString(h, StandardCharsets.UTF_8);
+        assertFalse(content.contains("127.0.0.1 a.com"), content);
+        assertFalse(content.contains("127.0.0.1 b.com"), content);
+    }
+
     private static int countOccurrences(String haystack, String needle) {
         int count = 0;
         int idx = 0;

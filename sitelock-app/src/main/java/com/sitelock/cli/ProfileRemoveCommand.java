@@ -14,6 +14,7 @@ import picocli.CommandLine.Parameters;
 import picocli.CommandLine.ParentCommand;
 
 import java.io.IOException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -54,6 +55,12 @@ public class ProfileRemoveCommand implements Callable<Integer> {
 
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
 
+    /** Relógio injetado pelo teste; null = o do sistema. */
+    Clock clockOverride;
+
+    /** Store injetado pelo teste; null = usa o do stateDir. */
+    ProfileStore storeOverride;
+
     public ProfileRemoveCommand() {
     }
 
@@ -81,41 +88,49 @@ public class ProfileRemoveCommand implements Callable<Integer> {
             }
         }
 
-        ProfileStore store = new ProfileStore(CliSupport.resolveProfilesFile(stateFileOverride));
-        final Map<String, Profile> profiles;
+        ProfileStore store = storeOverride != null ? storeOverride
+                : new ProfileStore(CliSupport.resolveProfilesFile(stateFileOverride));
+
+        List<String> removidos = new ArrayList<>();
+        List<String> ausentes = new ArrayList<>();
+        boolean[] naoExiste = {false};
+        boolean[] nadaARemover = {false};
+        // A leitura e a gravação da receita dentro de uma transação: dois
+        // `profile remove` simultâneos não podem se perder.
         try {
-            profiles = store.load();
+            store.inTransaction(tx -> {
+                Map<String, Profile> profiles = tx.load();
+                Profile profile = profiles.get(nome);
+                if (profile == null) {
+                    naoExiste[0] = true;
+                    return null;
+                }
+                Map<String, ProfileEntry> entries = new TreeMap<>(profile.getEntries());
+                for (String domain : domains) {
+                    if (entries.remove(domain) != null) {
+                        removidos.add(domain);
+                    } else {
+                        ausentes.add(domain);
+                    }
+                }
+                if (removidos.isEmpty()) {
+                    nadaARemover[0] = true;
+                    return null;
+                }
+                profiles.put(nome, new Profile(profile.getCreatedAt(), Instant.now(clock()), entries));
+                tx.save(profiles);
+                return null;
+            });
         } catch (IOException e) {
-            System.err.println("Erro ao ler perfis: " + e.getMessage());
+            System.err.println("Erro ao salvar o perfil: " + e.getMessage());
             return 1;
         }
-        final Profile profile = profiles.get(nome);
-        if (profile == null) {
+        if (naoExiste[0]) {
             System.err.println("Perfil '" + nome + "' não existe.");
             return 1;
         }
-
-        Map<String, ProfileEntry> entries = new TreeMap<>(profile.getEntries());
-        List<String> removidos = new ArrayList<>();
-        List<String> ausentes = new ArrayList<>();
-        for (String domain : domains) {
-            if (entries.remove(domain) != null) {
-                removidos.add(domain);
-            } else {
-                ausentes.add(domain);
-            }
-        }
-
-        if (removidos.isEmpty()) {
+        if (nadaARemover[0]) {
             System.err.println("Nenhum dos domínios está no perfil '" + nome + "'. Nada foi alterado.");
-            return 1;
-        }
-
-        profiles.put(nome, new Profile(profile.getCreatedAt(), Instant.now(), entries));
-        try {
-            store.save(profiles);
-        } catch (IOException e) {
-            System.err.println("Erro ao salvar o perfil: " + e.getMessage());
             return 1;
         }
 
@@ -148,7 +163,7 @@ public class ProfileRemoveCommand implements Callable<Integer> {
                     + "bloqueado (" + e.getMessage() + ").");
             return;
         }
-        Instant now = Instant.now();
+        Instant now = Instant.now(clock());
         List<String> continuam = new ArrayList<>();
         for (String domain : removidos) {
             BlockEntry entry = estado.get(domain);
@@ -170,6 +185,11 @@ public class ProfileRemoveCommand implements Callable<Integer> {
         }
         Duration restante = Duration.between(now, entry.getExpiresAt());
         return "restam " + DurationParser.formatRemaining(restante);
+    }
+
+    /** O relógio do comando: o injetado pelo teste, ou o da CLI. */
+    private Clock clock() {
+        return clockOverride != null ? clockOverride : CliSupport.clock();
     }
 
     private String nomeDoPerfil() {
