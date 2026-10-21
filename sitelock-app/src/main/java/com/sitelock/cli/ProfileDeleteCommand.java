@@ -7,10 +7,7 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.concurrent.Callable;
 
 /**
@@ -70,7 +67,7 @@ public class ProfileDeleteCommand implements Callable<Integer> {
         System.out.print("Para confirmar, digite SIM e pressione Enter: ");
         System.out.flush();
 
-        String resposta = answer != null ? answer : readLine();
+        String resposta = answer != null ? answer : CliSupport.readLine();
         if (resposta == null || !resposta.trim().equalsIgnoreCase("SIM")) {
             System.out.println("Apagamento CANCELADO. O perfil continua existindo.");
             return 3;
@@ -84,14 +81,5 @@ public class ProfileDeleteCommand implements Callable<Integer> {
         }
         System.out.println("Perfil '" + valid + "' apagado.");
         return 0;
-    }
-
-    static String readLine() {
-        try {
-            BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
-            return in.readLine();
-        } catch (IOException e) {
-            return null;
-        }
     }
 }

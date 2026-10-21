@@ -177,7 +177,7 @@ public class ProfileUnblockCommand implements Callable<Integer> {
         System.out.print("Para confirmar, digite SIM e pressione Enter (qualquer outra coisa cancela): ");
         System.out.flush();
 
-        String resposta = answer != null ? answer : ProfileDeleteCommand.readLine();
+        String resposta = answer != null ? answer : CliSupport.readLine();
         if (resposta == null || !resposta.trim().equalsIgnoreCase("SIM")) {
             System.out.println("Desbloqueio CANCELADO. Todos continuam bloqueados.");
             return 3;
