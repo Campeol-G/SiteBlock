@@ -106,11 +106,17 @@ public class DaemonEnableCommand implements Callable<Integer> {
             System.err.println("Erro: " + copia.detail());
             return 1;
         }
-        String jarInstalado = copia.detail();
+        Path jarInstalado = copia.path();
+        if (jarInstalado == null) {
+            // ATENÇÃO: sem o caminho não há unit possível — melhor falhar aqui do
+            // que escrever um ExecStart apontando para o nada.
+            System.err.println("Erro: " + copia.detail());
+            return 1;
+        }
 
         AutostartPaths caminhosFinais = new AutostartPaths(
                 caminhos.stateDir(), caminhos.hostsFile(), caminhos.javaBin(),
-                jarInstalado, caminhos.classpath(), caminhos.realUserName(), os);
+                jarInstalado.toString(), caminhos.classpath(), caminhos.realUserName(), os);
 
         AutostartInstaller installer = new AutostartInstaller(os, systemRoot, runnerOverride);
         AutostartInstaller.InstallResult result = installer.install(caminhosFinais);

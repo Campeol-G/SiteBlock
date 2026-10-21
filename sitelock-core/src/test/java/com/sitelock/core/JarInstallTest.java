@@ -144,6 +144,55 @@ class JarInstallTest {
     }
 
     @Test
+    void oResultadoSeparaOCaminhoDoJarDaMensagem() throws Exception {
+        Path origem = jarDeExemplo("versao 1");
+
+        AutostartInstaller.InstallResult r =
+                AutostartInstaller.installJar(OsType.LINUX, tmp, origem);
+
+        Path destino = AutostartInstaller.installJarPath(OsType.LINUX, tmp);
+        assertTrue(r.success(), r.detail());
+        assertEquals(destino, r.path(),
+                "o caminho do jar vem separado da mensagem — misturados, a frase virava "
+                        + "caminho da unit");
+        assertTrue(r.detail().contains(destino.toString()), r.detail());
+    }
+
+    @Test
+    void oResultadoTemOCaminhoQuandoOJarJaEstaNoLugar() throws Exception {
+        // É o caso do enable rodado a partir do jar já instalado: o detail()
+        // era a frase "O jar já está no lugar: ..." e a unit passava a apontar
+        // para ela.
+        Path destino = AutostartInstaller.installJarPath(OsType.LINUX, tmp);
+        Files.createDirectories(destino.getParent());
+        Files.writeString(destino, "original", StandardCharsets.UTF_8);
+
+        AutostartInstaller.InstallResult r =
+                AutostartInstaller.installJar(OsType.LINUX, tmp, destino);
+
+        assertTrue(r.success(), r.detail());
+        assertEquals(destino, r.path());
+    }
+
+    @Test
+    void oInstallEDoDisableTrazemOCaminhoDoArtefato() {
+        AutostartInstaller installer =
+                new AutostartInstaller(OsType.LINUX, tmp, c -> 0);
+        AutostartPaths caminhos = new AutostartPaths(
+                Path.of("/home/chico/.sitelock"), Path.of("/etc/hosts"),
+                "/usr/bin/java", "/opt/sitelock/siteblock.jar", "/opt/classes",
+                "chico", OsType.LINUX);
+
+        AutostartInstaller.InstallResult installed = installer.install(caminhos);
+        assertTrue(installed.success(), installed.detail());
+        assertEquals(installer.artifactPath(), installed.path());
+
+        AutostartInstaller.InstallResult removed = installer.disable();
+        assertTrue(removed.success(), removed.detail());
+        assertEquals(installer.artifactPath(), removed.path());
+    }
+
+    @Test
     void listOfFilesInInstallDirIsJustTheJar() throws Exception {
         Path origem = jarDeExemplo("versao 1");
         AutostartInstaller.installJar(OsType.LINUX, tmp, origem);
