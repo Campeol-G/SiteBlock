@@ -132,6 +132,42 @@ class DaemonEnableTest {
     }
 
     @Test
+    void enableNoWindowsNaoEstouraExcecao() throws Exception {
+        // O Windows é suportado pelo projeto, e o enable estourava NPE: o
+        // artifactPath devolve null lá, e a checagem de elevação dereferenciava.
+        Resultado r = rodar(enable(OsType.WINDOWS, jarDeExemplo().toString())::call);
+
+        assertEquals(0, r.exit(), r.texto());
+        assertTrue(comandos.stream().anyMatch(c -> c.get(0).equals("schtasks")
+                && c.contains("/create")), comandos.toString());
+    }
+
+    @Test
+    void enableNoWindowsRecusaSemElevacaoQuandoODiretorioDoJarNaoEhGravavel() throws Exception {
+        // No Windows não existe artefato em arquivo: o que precisa ser
+        // gravável é o diretório onde o jar é instalado.
+        Path raizWin = tmp.resolve("sys-win");
+        Path dir = raizWin.resolve("ProgramData/SiteBlock");
+        Files.createDirectories(dir);
+        try {
+            Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("r-xr-xr-x"));
+        } catch (UnsupportedOperationException e) {
+            // Sem POSIX não há como simular diretório sem escrita (o CI também
+            // roda no Windows). Mesma técnica de enableRefusesWithoutRootAndSaysHow.
+            return;
+        }
+
+        Resultado r = rodar(new DaemonEnableCommand(OsType.WINDOWS, raizWin,
+                jarDeExemplo().toString(), runner)::call);
+
+        assertEquals(1, r.exit(), r.texto());
+        assertTrue(r.texto().toLowerCase().contains("sudo")
+                        || r.texto().toLowerCase().contains("administrador"),
+                "a saída tem que dizer como elevar: " + r.texto());
+        assertTrue(comandos.isEmpty(), "nem deve chamar o agendador: " + comandos);
+    }
+
+    @Test
     void linuxWithoutSystemdPrintsManualInstructions() throws Exception {
         DaemonEnableCommand cmd = new DaemonEnableCommand(OsType.LINUX, raiz(),
                 jarDeExemplo().toString(), runner, false);

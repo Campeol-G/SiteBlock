@@ -83,8 +83,7 @@ public class DaemonEnableCommand implements Callable<Integer> {
             return 1;
         }
 
-        Path artefato = AutostartInstaller.artifactPath(os, systemRoot);
-        if (!podeEscrever(artefato)) {
+        if (!podeEscrever(diretorioDaInstalacao(os, systemRoot))) {
             System.err.println("Erro: " + CliSupport.elevationHint("daemon enable"));
             return 1;
         }
@@ -174,19 +173,39 @@ private String usuarioReal() {
     }
 
     /**
- * Dá para criar o artefato aqui?
- *
- * <p>Sobe até o ancestral existente mais próximo, porque o diretório ainda pode
- * não existir — {@code /etc/systemd/system} não existe numa máquina sem
- * systemd, mas é o próprio {@code install} que o cria. O que decide é se
- * chegamos a um diretório gravável antes de subir a raiz.
- */
-    private static boolean podeEscrever(Path artefato) {
-        Path parent = artefato.getParent();
-        if (parent == null) {
+     * O diretório que precisa ser gravável para a instalação acontecer.
+     *
+     * <p>No Linux e no macOS é o diretório do artefato ({@code /etc/systemd/system},
+     * {@code /Library/LaunchDaemons}). No Windows não existe artefato em arquivo —
+     * a definição vive na Tarefa do Agendador —, e quem decide é o diretório onde
+     * o jar é instalado ({@code ProgramData/SiteBlock}).
+     */
+    private static Path diretorioDaInstalacao(OsType os, Path systemRoot) {
+        Path artefato = AutostartInstaller.artifactPath(os, systemRoot);
+        if (artefato != null) {
+            Path parent = artefato.getParent();
+            return parent != null ? parent : artefato;
+        }
+        return AutostartInstaller.installDir(os, systemRoot);
+    }
+
+    /**
+     * Dá para criar o artefato aqui?
+     *
+     * <p>Sobe até o ancestral existente mais próximo, porque o diretório ainda pode
+     * não existir — {@code /etc/systemd/system} não existe numa máquina sem
+     * systemd, mas é o próprio {@code install} que o cria. O que decide é se
+     * chegamos a um diretório gravável antes de subir a raiz.
+     *
+     * <p>ATENÇÃO: o argumento é o diretório que precisa ser gravável, e não o
+     * arquivo do artefato — no Windows não existe arquivo, e quem decide é o
+     * diretório de instalação do jar.
+     */
+    private static boolean podeEscrever(Path diretorio) {
+        if (diretorio == null) {
             return false;
         }
-        Path existente = parent;
+        Path existente = diretorio;
         while (existente != null && !Files.exists(existente)) {
             existente = existente.getParent();
         }
