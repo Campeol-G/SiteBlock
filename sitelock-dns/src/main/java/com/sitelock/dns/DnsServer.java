@@ -72,6 +72,7 @@ public class DnsServer {
 
     private final int port;
     private final InetAddress upstream;
+    private final int upstreamPort;
     private final int upstreamTimeoutMs;
     private final BlockStore store;
     private final Clock clock;
@@ -88,12 +89,14 @@ public class DnsServer {
     private final Map<String, Long> ultimaRecusa = new ConcurrentHashMap<>();
 
     public DnsServer(int port, InetAddress upstream, BlockStore store, Clock clock) {
-        this(port, upstream, DEFAULT_UPSTREAM_TIMEOUT_MS, store, clock);
+        this(port, upstream, DnsResolver.UPSTREAM_PORT, DEFAULT_UPSTREAM_TIMEOUT_MS,
+                store, clock, List.of());
     }
 
     public DnsServer(int port, InetAddress upstream, int upstreamTimeoutMs,
                      BlockStore store, Clock clock) {
-        this(port, upstream, upstreamTimeoutMs, store, clock, List.of());
+        this(port, upstream, DnsResolver.UPSTREAM_PORT, upstreamTimeoutMs,
+                store, clock, List.of());
     }
 
     /**
@@ -102,7 +105,8 @@ public class DnsServer {
      */
     public DnsServer(int port, InetAddress upstream, BlockStore store, Clock clock,
                      List<String> allowFrom) {
-        this(port, upstream, DEFAULT_UPSTREAM_TIMEOUT_MS, store, clock, allowFrom);
+        this(port, upstream, DnsResolver.UPSTREAM_PORT, DEFAULT_UPSTREAM_TIMEOUT_MS,
+                store, clock, allowFrom);
     }
 
     /**
@@ -111,11 +115,29 @@ public class DnsServer {
      */
     public DnsServer(int port, InetAddress upstream, int upstreamTimeoutMs,
                      BlockStore store, Clock clock, List<String> allowFrom) {
-        this(port, upstream, upstreamTimeoutMs, store, clock, SourcePolicy.padrao(allowFrom));
+        this(port, upstream, DnsResolver.UPSTREAM_PORT, upstreamTimeoutMs,
+                store, clock, allowFrom);
+    }
+
+    /**
+     * @param upstreamPort porta do upstream (53 no DNS público)
+     * @param allowFrom    origens liberadas além das locais (endereço ou CIDR)
+     */
+    public DnsServer(int port, InetAddress upstream, int upstreamPort, int upstreamTimeoutMs,
+                     BlockStore store, Clock clock, List<String> allowFrom) {
+        this(port, upstream, upstreamPort, upstreamTimeoutMs, store, clock,
+                SourcePolicy.padrao(allowFrom));
     }
 
     /** Construtor com a política de origem já pronta (usado nos testes). */
     DnsServer(int port, InetAddress upstream, int upstreamTimeoutMs,
+              BlockStore store, Clock clock, SourcePolicy policy) {
+        this(port, upstream, DnsResolver.UPSTREAM_PORT, upstreamTimeoutMs,
+                store, clock, policy);
+    }
+
+    /** Construtor com a política de origem e a porta do upstream (usados nos testes). */
+    DnsServer(int port, InetAddress upstream, int upstreamPort, int upstreamTimeoutMs,
               BlockStore store, Clock clock, SourcePolicy policy) {
         if (port < 1 || port > 65535) {
             throw new IllegalArgumentException("porta inválida: " + port);
@@ -128,6 +150,7 @@ public class DnsServer {
         }
         this.port = port;
         this.upstream = upstream;
+        this.upstreamPort = upstreamPort;
         this.upstreamTimeoutMs = upstreamTimeoutMs;
         this.store = store;
         this.clock = clock;
@@ -336,7 +359,7 @@ public class DnsServer {
         }
 
         try {
-            return DnsResolver.forwardRaw(data, data.length, upstream, upstreamTimeoutMs);
+            return DnsResolver.forwardRaw(data, data.length, upstream, upstreamPort, upstreamTimeoutMs);
         } catch (SocketTimeoutException e) {
             log("timeout do upstream " + upstream.getHostAddress() + " para " + query.name()
                     + " (SERVFAIL)");

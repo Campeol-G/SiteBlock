@@ -15,11 +15,13 @@ import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -36,15 +38,22 @@ class DnsServerTest {
     Path tmp;
 
     /**
-     * O upstream fica no escuro: 127.0.0.1:53 não tem ninguém escutando, então
-     * um encaminhamento acaba em SERVFAIL — que é exatamente o sintoma do
-     * defeito (nome bloqueado que vaza para o upstream).
+     * Sobe o servidor. Com {@code upstream} nulo, o upstream fica no escuro
+     * (127.0.0.1:53, onde não escuta ninguém) — um encaminhamento acaba em
+     * SERVFAIL, que é o sintoma do defeito de bloqueio.
      */
     private DnsServer subirServidor(String... bloqueados) throws Exception {
+        return subirServidor(null, bloqueados);
+    }
+
+    private DnsServer subirServidor(FakeUpstream upstream, String... bloqueados) throws Exception {
         Path estado = DnsTestSupport.arquivoDeBloqueios(tmp, bloqueados);
         int porta = DnsTestSupport.portaLivre();
-        DnsServer server = new DnsServer(porta, InetAddress.getLoopbackAddress(), 500,
-                new BlockStore(estado), Clock.systemUTC());
+        InetAddress enderecoUpstream = upstream == null
+                ? InetAddress.getLoopbackAddress() : upstream.endereco();
+        int portaUpstream = upstream == null ? 53 : upstream.porta();
+        DnsServer server = new DnsServer(porta, enderecoUpstream, portaUpstream, 2000,
+                new BlockStore(estado), Clock.systemUTC(), List.of());
         Thread t = new Thread(server::serveForever, "servidor-de-teste");
         t.setDaemon(true);
         t.start();
@@ -171,6 +180,74 @@ class DnsServerTest {
             lidos += r;
         }
         return buffer;
+    }
+
+    /**
+     * O ID do cliente não pode trafegar em claro até o upstream: quem escuta o
+     * caminho passa a poder forjar a resposta. O upstream recebe um ID
+     * próprio, e o cliente recebe a resposta com o ID dele.
+     */
+    @Test
+    void upstreamRecebeIdDiferenteDoCliente() throws Exception {
+        FakeUpstream upstream = new FakeUpstream();
+        upstream.start();
+        DnsServer server = subirServidor(upstream, "youtube.com");
+        try {
+            byte[] bruto = DnsTestSupport.consultar(server.getPort(),
+                    DnsWire.query(0x6789, "exemplo.com", 1), 3000);
+            assertNotNull(bruto, "o servidor não respondeu");
+            DnsWire.Resposta r = DnsWire.parse(bruto);
+            assertEquals(0x6789, r.id(), "o cliente precisa ver o próprio ID");
+            assertEquals(1, r.anCount(), "a resposta do upstream tem que ser repassada");
+
+            List<byte[]> vistas = upstream.consultasRecebidas();
+            assertEquals(1, vistas.size(), "o upstream deve receber uma consulta");
+            assertNotEquals(0x6789, DnsWire.u16(vistas.get(0), 0),
+                    "o ID do cliente não pode ir para o upstream em claro");
+        } finally {
+            server.stop();
+            upstream.close();
+        }
+    }
+
+    /** Resposta com ID trocado é de outra transação: vira SERVFAIL, não dado falso. */
+    @Test
+    void respostaComIdErradoNaoChegaAoCliente() throws Exception {
+        FakeUpstream upstream = new FakeUpstream();
+        upstream.modo(FakeUpstream.Modo.ID_ERRADO);
+        upstream.start();
+        DnsServer server = subirServidor(upstream, "youtube.com");
+        try {
+            byte[] bruto = DnsTestSupport.consultar(server.getPort(),
+                    DnsWire.query(0x1111, "exemplo.com", 1), 3000);
+            assertNotNull(bruto, "o servidor não respondeu");
+            DnsWire.Resposta r = DnsWire.parse(bruto);
+            assertEquals(2, r.rcode(), "resposta inválida tem que virar SERVFAIL");
+            assertEquals(0, r.anCount(), "nenhum dado de resposta inválida pode vazar");
+        } finally {
+            server.stop();
+            upstream.close();
+        }
+    }
+
+    /** Pacote que não é resposta (QR=0) também é descartado. */
+    @Test
+    void pacoteQueNaoERespostaNaoChegaAoCliente() throws Exception {
+        FakeUpstream upstream = new FakeUpstream();
+        upstream.modo(FakeUpstream.Modo.SEM_QR);
+        upstream.start();
+        DnsServer server = subirServidor(upstream, "youtube.com");
+        try {
+            byte[] bruto = DnsTestSupport.consultar(server.getPort(),
+                    DnsWire.query(0x2222, "exemplo.com", 1), 3000);
+            assertNotNull(bruto, "o servidor não respondeu");
+            DnsWire.Resposta r = DnsWire.parse(bruto);
+            assertEquals(2, r.rcode(), "pacote que não é resposta tem que virar SERVFAIL");
+            assertEquals(0, r.anCount());
+        } finally {
+            server.stop();
+            upstream.close();
+        }
     }
 
     /**
