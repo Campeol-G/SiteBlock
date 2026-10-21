@@ -174,14 +174,14 @@ public class ProfileStore {
             // O load público já sabe ler sem a trava — e a transação já tem a
             // trava, então ele cai no caminho direto, que é o que interessa.
             Map<String, Profile> perfis = ProfileStore.this.load();
-            lastWritten = new TreeMap<>(perfis);
+            lastWritten = copia(perfis);
             return perfis;
         }
 
         @Override
         public void save(Map<String, Profile> perfis) throws IOException {
             writeAtomically(mergeIntoDisk(perfis));
-            lastWritten = new TreeMap<>(perfis);
+            lastWritten = copia(perfis);
         }
 
         /**
@@ -208,6 +208,40 @@ public class ProfileStore {
             }
             return merged;
         }
+    }
+
+    /**
+     * A cópia de comparação do delta.
+     *
+     * <p>POR QUE: a comparação é por valor, e a base do delta precisa ser o
+     * estado como ele estava <b>antes</b> da mudança. Guardando os mesmos
+     * objetos que foram carregados, uma alteração feita no lugar — no perfil
+     * ou na entrada dele — mudaria a base junto, e o delta não veria
+     * mudança nenhuma: a receita alterada nunca chegaria ao disco.
+     */
+    private static Map<String, Profile> copia(Map<String, Profile> perfis) {
+        Map<String, Profile> copia = new TreeMap<>();
+        for (Map.Entry<String, Profile> e : perfis.entrySet()) {
+            Profile p = e.getValue();
+            if (p == null) {
+                copia.put(e.getKey(), null);
+                continue;
+            }
+            Map<String, ProfileEntry> entradas = new TreeMap<>();
+            for (Map.Entry<String, ProfileEntry> entrada : p.getEntries().entrySet()) {
+                ProfileEntry valor = entrada.getValue();
+                entradas.put(entrada.getKey(),
+                        valor == null ? null : new ProfileEntry(valor.getDurationMillis()));
+            }
+            // Construtor sem argumentos e setters: é o jeito de copiar as
+            // datas como elas são, inclusive quando o updatedAt é nulo.
+            Profile novo = new Profile();
+            novo.setCreatedAt(p.getCreatedAt());
+            novo.setUpdatedAt(p.getUpdatedAt());
+            novo.setEntries(entradas);
+            copia.put(e.getKey(), novo);
+        }
+        return copia;
     }
 
     /** Escrita atômica das receitas. */
