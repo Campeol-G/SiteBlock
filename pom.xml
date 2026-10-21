@@ -19,6 +19,9 @@
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- Timestamp fixo do build: sem ele o jar carrega a hora da máquina e dois
+         builds da mesma revisão saem com bytes diferentes. -->
+    <project.build.outputTimestamp>2026-01-01T00:00:00Z</project.build.outputTimestamp>
     <!-- Java 26: alvo oficial do projeto (linguagem e bytecode). -->
     <maven.compiler.release>26</maven.compiler.release>
     <picocli.version>4.7.6</picocli.version>
