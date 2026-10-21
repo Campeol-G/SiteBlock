@@ -168,8 +168,28 @@ class DnsResolverTest {
     }
 
     @Test
-    void decideInstanciaNaoLogaConsultaDeTipoA(@TempDir Path dir) throws Exception {
-        Path state = dir.resolve("blocks.json");
+    void listaEmUnicodeCasaComConsultaEmPunycode() {
+        Map<String, BlockEntry> s = state(permanent("пример.рф"));
+        assertEquals(BLOCK, DnsResolver.decide("xn--e1afmkfd.xn--p1ai", 1, s, NOW));
+        assertEquals(BLOCK, DnsResolver.decide("пример.рф", 1, s, NOW));
+        assertEquals(BLOCK, DnsResolver.decide("www.пример.рф", 1, s, NOW));
+    }
+
+    @Test
+    void listaEmPunycodeCasaComConsultaEmUnicode() {
+        Map<String, BlockEntry> s = state(permanent("xn--e1afmkfd.xn--p1ai"));
+        assertEquals(BLOCK, DnsResolver.decide("пример.рф", 1, s, NOW));
+        assertEquals(BLOCK, DnsResolver.decide("xn--e1afmkfd.xn--p1ai", 28, s, NOW));
+    }
+
+    @Test
+    void nomeIdnNaoBloqueadoContinuaEncaminhado() {
+        Map<String, BlockEntry> s = state(permanent("youtube.com"));
+        assertEquals(FORWARD, DnsResolver.decide("пример.рф", 1, s, NOW));
+    }
+
+    @Test
+    void decideInstanciaNaoLogaConsultaDeTipoA(@TempDir Path dir) throws Exception {        Path state = dir.resolve("blocks.json");
         Files.writeString(state, "{\"youtube.com\":{\"domain\":\"youtube.com\","
                 + "\"createdAt\":\"2026-01-01T11:00:00Z\",\"expiresAt\":null}}");
         DnsResolver resolver = new DnsResolver(new BlockStore(state), Clock.systemUTC());

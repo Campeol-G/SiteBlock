@@ -113,4 +113,91 @@ class DnsPacketParserTest {
         assertThrows(DnsParseException.class,
                 () -> DnsPacketParser.parse(truncated, truncated.length));
     }
+
+    /** Consulta com rótulos em bytes crus (permite bytes >= 0x80 e UTF-8). */
+    static byte[] queryBytesLabels(int id, byte[][] labels, int qtype, int qclass) {
+        try {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            out.write((id >>> 8) & 0xFF);
+            out.write(id & 0xFF);
+            out.write(0x01); // flags: RD
+            out.write(0x00);
+            out.write(0x00);
+            out.write(0x01); // QDCOUNT = 1
+            out.write(0x00);
+            out.write(0x00); // ANCOUNT
+            out.write(0x00);
+            out.write(0x00); // NSCOUNT
+            out.write(0x00);
+            out.write(0x00); // ARCOUNT
+            for (byte[] lb : labels) {
+                out.write(lb.length);
+                out.write(lb, 0, lb.length);
+            }
+            out.write(0x00); // fim do QNAME
+            out.write((qtype >>> 8) & 0xFF);
+            out.write(qtype & 0xFF);
+            out.write((qclass >>> 8) & 0xFF);
+            out.write(qclass & 0xFF);
+            return out.toByteArray();
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** Rótulos em UTF-8 (o que um cliente envia quando manda IDN em vez de punycode). */
+    private static byte[][] utf8Labels(String... labels) {
+        byte[][] out = new byte[labels.length][];
+        for (int i = 0; i < labels.length; i++) {
+            out[i] = labels[i].getBytes(StandardCharsets.UTF_8);
+        }
+        return out;
+    }
+
+    @Test
+    void nomeComByteAltoNaoViraReplacementChar() throws Exception {
+        byte[] raw = queryBytesLabels(0x1, utf8Labels("exämple", "com"), 1, 1);
+        DnsQuery q = DnsPacketParser.parse(raw, raw.length);
+        assertFalse(q.name().contains("�"), "o nome não pode conter U+FFFD: " + q.name());
+        assertEquals("xn--exmple-cua.com", q.name());
+    }
+
+    @Test
+    void nomeEmPunycodeNaoMuda() throws Exception {
+        byte[] raw = queryBytes(0x2, "xn--e1afmkfd.xn--p1ai", 1, 1);
+        DnsQuery q = DnsPacketParser.parse(raw, raw.length);
+        assertEquals("xn--e1afmkfd.xn--p1ai", q.name());
+    }
+
+    @Test
+    void nomeUtf8CruViraPunycodeCanonico() throws Exception {
+        byte[] raw = queryBytesLabels(0x3, utf8Labels("пример", "рф"), 1, 1);
+        DnsQuery q = DnsPacketParser.parse(raw, raw.length);
+        assertFalse(q.name().contains("�"), "o nome não pode conter U+FFFD: " + q.name());
+        assertEquals("xn--e1afmkfd.xn--p1ai", q.name());
+    }
+
+    @Test
+    void byteProibidoNoRotuloEhRejeitadoSemDerrubarOServidor() {
+        byte[] raw = queryBytesLabels(0x4, new byte[][]{{(byte) 0x80}}, 1, 1);
+        assertThrows(DnsParseException.class,
+                () -> DnsPacketParser.parse(raw, raw.length));
+    }
+
+    @Test
+    void codePointNaoAtribuidoNoRotuloEhRejeitado() {
+        // U+0378 não é atribuído no Unicode: IDN.toASCII lança e o pacote é descartado.
+        byte[] raw = queryBytesLabels(0x5, utf8Labels("͸", "com"), 1, 1);
+        assertThrows(DnsParseException.class,
+                () -> DnsPacketParser.parse(raw, raw.length));
+    }
+
+    @Test
+    void nomeAcimaDe253CaracteresEhRejeitado() {
+        // 4 rótulos de 63 bytes + 3 pontos = 255 > 253 (RFC 1035 §3.1).
+        String label = "a".repeat(63);
+        byte[] raw = queryBytesLabels(0x6, utf8Labels(label, label, label, label), 1, 1);
+        assertThrows(DnsParseException.class,
+                () -> DnsPacketParser.parse(raw, raw.length));
+    }
 }

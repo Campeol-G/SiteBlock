@@ -152,7 +152,7 @@ public class DnsResolver {
      */
     public static Decision decide(String domain, int qtype,
                                   Map<String, BlockEntry> state, Instant now) {
-        String q = normalizeQueryName(domain);
+        String q = canonicalName(domain);
         if (q.isEmpty() || state == null || state.isEmpty()) {
             return Decision.FORWARD;
         }
@@ -177,12 +177,35 @@ public class DnsResolver {
             if (entry.isExpired(now)) {
                 continue;
             }
-            String blocked = entry.getDomain().toLowerCase(Locale.ROOT);
+            String blocked = canonicalName(entry.getDomain());
+            if (blocked.isEmpty()) {
+                continue;
+            }
             if (q.equals(blocked) || q.endsWith("." + blocked)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * Forma canônica do nome para comparar com a lista de bloqueio: minúsculas, sem
+     * ponto final e em punycode.
+     *
+     * <p>Assim o nome em unicode e o nome em punycode casam com a mesma entrada da
+     * lista ("пример.рф" e "xn--e1afmkfd.xn--p1ai" são o mesmo nome).
+     */
+    static String canonicalName(String raw) {
+        String norm = normalizeQueryName(raw);
+        if (norm.isEmpty()) {
+            return "";
+        }
+        try {
+            return DnsPacketParser.toAsciiName(norm);
+        } catch (IllegalArgumentException e) {
+            // Nome inválido para IDNA não casa com nenhuma entrada da lista.
+            return norm;
+        }
     }
 
     /** Minúsculas + remove um ponto final (FQDN com trailing dot). Não remove "www.". */
