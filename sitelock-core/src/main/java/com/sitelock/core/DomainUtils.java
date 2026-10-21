@@ -86,12 +86,18 @@ public final class DomainUtils {
             changed = true;
         }
 
-        if (s.equals("www") || s.startsWith("www.")) {
-            if (s.equals("www")) {
-                throw new IllegalArgumentException(
-                        "Domínio inválido: '" + original + "'. Ex.: tiktok.com");
+        if (s.equals("www")) {
+            throw new IllegalArgumentException(
+                    "Domínio inválido: '" + original + "'. Ex.: tiktok.com");
+        }
+        // POR QUE: "www.com" é domínio legítimo, mas sem o prefixo sobra "com", que
+        // não é domínio. O prefixo só sai quando o que resta ainda é um domínio válido.
+        while (s.startsWith("www.")) {
+            String semPrefixo = s.substring("www.".length());
+            if (!isValid(semPrefixo)) {
+                break;
             }
-            s = s.substring("www.".length());
+            s = semPrefixo;
             changed = true;
         }
 
@@ -109,6 +115,9 @@ public final class DomainUtils {
             return false;
         }
         if (IPV4_PATTERN.matcher(domain).matches()) {
+            return false;
+        }
+        if (isOnlyWww(domain)) {
             return false;
         }
         if (domain.length() > 253) {
@@ -138,11 +147,27 @@ public final class DomainUtils {
                     "Domínio inválido: '" + original + "' (interpretado como '" + domain
                             + "'). Ex.: tiktok.com");
         }
+        if (isOnlyWww(domain)) {
+            throw new IllegalArgumentException(
+                    "Domínio inválido: '" + original + "'. Ex.: tiktok.com");
+        }
         String tld = domain.substring(domain.lastIndexOf('.') + 1);
         if (tld.length() < 2 || !tld.matches(".*[a-z].*")) {
             throw new IllegalArgumentException(
                     "Domínio inválido (TLD suspeito): '" + original + "'. Ex.: tiktok.com");
         }
+    }
+
+    /**
+     * Só rótulos "www" não são domínio: sobraria a linha "127.0.0.1 www" no hosts.
+     */
+    private static boolean isOnlyWww(String domain) {
+        for (String label : domain.split("\\.")) {
+            if (!label.equals("www")) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static int indexOfFirst(String s, char... chars) {
