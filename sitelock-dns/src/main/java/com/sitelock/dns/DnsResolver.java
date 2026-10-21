@@ -40,11 +40,11 @@ import java.util.Map;
  * semântica correta de "o nome existe, mas não há dados desse tipo" — a mesma do
  * Pi-hole/AdGuard.
  *
- * <p><b>Alias por CNAME (backlog):</b> a decisão olha só o nome consultado. Um nome
- * livre cujo CNAME aponte para um nome bloqueado ainda é encaminhado, e o upstream
- * devolve o IP real do alvo na mesma resposta. Fechar isso exige resolver a cadeia de
- * CNAMEs (inspeção da section answer do upstream), que é escopo maior e não cabe na
- * decisão.
+ * <p><b>Alias por CNAME:</b> a decisão olha só o nome consultado — o alias só
+ * aparece na <i>resposta</i> do upstream, então a consulta sai mesmo assim. Quem
+ * fecha o buraco é o servidor: ele inspeciona a section answer da resposta
+ * ({@link #nomeBloqueadoNaCadeia}) e, se algum nome da cadeia for bloqueado,
+ * descarta a resposta do upstream e entrega o sinkhole local ao cliente.
  *
  * <h2>Concorrência e tempo real (sem observer, sem cache)</h2>
  * <p>Cada consulta relê o {@code blocks.json} do disco via {@link BlockStore#load()},
@@ -138,13 +138,33 @@ public class DnsResolver {
         this.clock = clock;
     }
 
+    /**
+     * A decisão e o snapshot do estado que a produziu.
+     *
+     * @param decisao o que fazer com a consulta
+     * @param estado  os bloqueios usados na decisão (snapshot do disco)
+     */
+    public record Resultado(Decision decisao, Map<String, BlockEntry> estado) {
+    }
+
     /** Lê o estado do disco e decide (fail-open em caso de erro de leitura). */
     public Decision decide(String domain, int qtype) {
+        return decideComEstado(domain, qtype).decisao();
+    }
+
+    /**
+     * Decide e devolve junto o snapshot do estado usado na decisão.
+     *
+     * <p>POR QUE: a checagem da cadeia de CNAMEs (no caminho FORWARD) precisa da
+     * MESMA lista de bloqueios da decisão. Sem devolver o snapshot, o servidor
+     * teria que reler o blocks.json — uma segunda leitura de disco por consulta.
+     */
+    public Resultado decideComEstado(String domain, int qtype) {
         final Map<String, BlockEntry> state;
         try {
             state = store.load();
         } catch (IOException e) {
-            return Decision.FORWARD;
+            return new Resultado(Decision.FORWARD, Map.of());
         }
         Decision decision = decide(domain, qtype, state, Instant.now(clock));
         if (decision == Decision.BLOCK_NODATA) {
@@ -152,7 +172,46 @@ public class DnsResolver {
             // de um nome bloqueado — é o indício de um app contornando o bloqueio.
             log("BLOQUEADO (nodata) " + domain + " tipo=" + qtype);
         }
-        return decision;
+        return new Resultado(decision, state);
+    }
+
+    /**
+     * Nome bloqueado na cadeia de aliases da resposta do upstream.
+     *
+     * <p>É o buraco que sobrou no bloqueio por DNS: o nome consultado é livre, mas
+     * o upstream responde com a cadeia de CNAMEs <b>e</b> o IP real do alvo na
+     * mesma resposta. Se algum nome da cadeia for bloqueado, a resposta do
+     * upstream vale como o IP de um domínio bloqueado.
+     *
+     * @param resposta bytes da resposta do upstream
+     * @param estado   snapshot dos bloqueios (o mesmo da decisão)
+     * @return o nome bloqueado encontrado, ou null se a cadeia é limpa
+     */
+    public String nomeBloqueadoNaCadeia(byte[] resposta, Map<String, BlockEntry> estado) {
+        if (resposta == null || estado == null || estado.isEmpty()) {
+            return null;
+        }
+        Instant now = Instant.now(clock);
+        for (String nome : DnsPacketParser.nomesDaAnswer(resposta, resposta.length)) {
+            if (nome.isEmpty()) {
+                continue;
+            }
+            if (decide(nome, DnsQuery.TYPE_A, estado, now) != Decision.FORWARD) {
+                return nome;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Decisão de resposta local para um nome cuja cadeia de alias é bloqueada.
+     *
+     * <p>POR QUE: a resposta tem que ser a mesma de um nome bloqueado — sinkhole
+     * (0.0.0.0 / ::) em A/AAAA e NODATA nos demais tipos.
+     */
+    public static Decision decisaoDeBloqueio(int qtype) {
+        return (qtype == DnsQuery.TYPE_A || qtype == DnsQuery.TYPE_AAAA)
+                ? Decision.BLOCK : Decision.BLOCK_NODATA;
     }
 
     private static void log(String message) {
@@ -182,10 +241,7 @@ public class DnsResolver {
         if (!isBlockedName(q, state, now)) {
             return Decision.FORWARD;
         }
-        if (qtype == DnsQuery.TYPE_A || qtype == DnsQuery.TYPE_AAAA) {
-            return Decision.BLOCK;
-        }
-        return Decision.BLOCK_NODATA;
+        return decisaoDeBloqueio(qtype);
     }
 
     /**
