@@ -4,6 +4,7 @@ import com.sitelock.core.BlockEntry;
 import com.sitelock.core.BlockStore;
 import com.sitelock.core.DurationParser;
 import com.sitelock.core.PermissionAdvisor;
+import com.sitelock.core.SiteLockPaths;
 import com.sitelock.dns.DnsDaemonState;
 import com.sitelock.dns.DnsServer;
 import com.sitelock.dns.NetworkUtils;
@@ -236,6 +237,19 @@ public class DnsStartCommand implements Callable<Integer> {
         String binProp = System.getProperty("siteblock.bin");
         if (binProp != null && !binProp.isBlank()) {
             cmd.add("-Dsiteblock.bin=" + binProp);
+        }
+        // O filho tem que enxergar o MESMO estado do pai. Sem estas properties,
+        // um daemon iniciado como root sem SUDO_USER (autostart) opera em
+        // /root/.sitelock enquanto o `dns status` olha ~/.sitelock: o status
+        // diz "PARADO" com o servidor no ar, e o `dns stop` não o encerra.
+        cmd.add("-Dsitelock.stateDir="
+                + DnsDaemonState.stateDirFor(stateFileOverride).toAbsolutePath());
+        String usuario = System.getProperty("sitelock.user");
+        if (usuario == null || usuario.isBlank()) {
+            usuario = SiteLockPaths.realUserName().orElse(null);
+        }
+        if (usuario != null && !usuario.isBlank()) {
+            cmd.add("-Dsitelock.user=" + usuario);
         }
         cmd.add("-cp");
         cmd.add(classpath);
