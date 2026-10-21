@@ -38,6 +38,13 @@ import java.util.concurrent.Callable;
  * verificação otimista de concorrência do {@code HostsFileManager} podia
  * matá-lo no domínio k, com os k-1 anteriores já aplicados: estado parcial e
  * um erro depois de metade do trabalho feito.
+ *
+ * <p>O aviso de daemon ausente sai do <b>estado final</b>, não da mudança: o
+ * que interessa é se existe algum bloqueio com prazo valendo depois do apply.
+ * Amarrá-lo à mudança escondia o aviso justamente no caso do {@code KEPT} — o
+ * estado já estava mais forte, o apply não mudou nada, e o prazo continuava
+ * valendo sem ninguém para cumpri-lo. Quem digitou o prazo continua
+ * precisando saber que o prazo só se cumpre quando outro comando roda.
  */
 @Command(name = "apply",
         description = "Aplica um perfil, so aumentando o prazo de cada dominio.",
@@ -130,15 +137,16 @@ public class ProfileApplyCommand implements Callable<Integer> {
                             if (d.action() != ProfileMerge.Action.KEPT) {
                                 novoEstado.put(domain, d.entry());
                                 plano.alterados++;
-                                // Só o que este apply criou tem prazo novo: um RAISED
-                                // para permanente não tem o que cumprir.
-                                plano.criouTemporario |= d.entry().getExpiresAt() != null;
                             } else {
                                 plano.mantidos++;
                             }
                             System.out.println("  " + domain + " — " + descrever(d, now));
                         }
                         plano.decisions = decisions;
+                        // O estado final é o que decide o aviso de daemon: o que
+                        // importa é se existe algum prazo valendo agora, não se
+                        // este apply mudou alguma coisa.
+                        plano.estadoFinal = novoEstado;
 
                         if (plano.alterados > 0) {
                             try {
@@ -183,7 +191,12 @@ public class ProfileApplyCommand implements Callable<Integer> {
 
         System.out.println("Perfil '" + valid + "': " + plano.decisions.size() + " domínio(s), "
                 + plano.alterados + " alterados, " + plano.mantidos + " mantidos.");
-        if (plano.criouTemporario) {
+        // O aviso depende do ESTADO FINAL e não da mudança: um KEPT deixa o
+        // bloqueio com prazo exatamente como estava, e quem digitou o prazo
+        // continua precisando saber que não há daemon para cumpri-lo.
+        boolean temporarioAtivo = plano.estadoFinal.values().stream()
+                .anyMatch(e -> e.isTemporaryAndActive(now));
+        if (temporarioAtivo) {
             CliSupport.warnIfNoDaemon(stateFileOverride);
         }
         return 0;
@@ -199,9 +212,9 @@ public class ProfileApplyCommand implements Callable<Integer> {
     private static final class Plano {
 
         Map<String, ProfileMerge.Decision> decisions = new TreeMap<>();
+        Map<String, BlockEntry> estadoFinal = new TreeMap<>();
         int alterados;
         int mantidos;
-        boolean criouTemporario;
         IOException erroAoSalvar;
     }
 
