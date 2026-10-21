@@ -9,7 +9,11 @@ import com.sitelock.core.ExpirationDaemonState;
 import com.sitelock.core.PermissionAdvisor;
 import com.sitelock.core.SiteLockPaths;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
@@ -162,6 +166,38 @@ final class CliSupport {
             return false;
         }
     }
+
+    /**
+     * Lê uma linha do stdin.
+     *
+     * <p>UM leitor para o processo todo, e não um por pergunta. O
+     * {@code Scanner} antigo lia o stdin num buffer de 1 KB e engolia as
+     * respostas seguintes: na primeira confirmação de um {@code unblock} com
+     * dois domínios, as duas linhas que a pessoa digitou sumiam no buffer, e a
+     * segunda confirmação vinha {@code null} — o comando dizia que não
+     * desbloqueou, com a intenção da pessoa bem clara.
+     *
+     * <p>O leitor é refeito quando o {@code System.in} muda — é o que permite
+     * ao teste trocar o stdin sem que uma leitura velha responda por outra.
+     */
+    static String readLine() {
+        try {
+            InputStream atual = System.in;
+            if (stdin == null || stdinStream != atual) {
+                stdinStream = atual;
+                stdin = new BufferedReader(new InputStreamReader(atual, StandardCharsets.UTF_8));
+            }
+            return stdin.readLine();
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    /** O leitor de stdin do processo. */
+    private static BufferedReader stdin;
+
+    /** De onde veio o leitor: se o {@code System.in} trocar, o leitor troca junto. */
+    private static InputStream stdinStream;
 
     /**
      * Flush do cache DNS após modificação no hosts — best-effort.

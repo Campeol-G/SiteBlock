@@ -16,7 +16,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Scanner;
 import java.util.concurrent.Callable;
 
 /**
@@ -134,7 +133,7 @@ public class UnblockCommand implements Callable<Integer> {
                         + " de bloqueio. Isso enfraquece sua proteção contra procrastinação.");
                 System.out.print("Para confirmar, digite SIM e pressione Enter (qualquer outra coisa cancela): ");
                 System.out.flush();
-                String answer = readLine();
+                String answer = CliSupport.readLine();
                 if (answer == null || !answer.trim().equalsIgnoreCase("SIM")) {
                     System.out.println("Desbloqueio antecipado CANCELADO para '" + domain + "'. Continua bloqueado.");
                     cancelledAny = true;
@@ -220,15 +219,4 @@ public class UnblockCommand implements Callable<Integer> {
         int falhas;
     }
 
-    private static String readLine() {
-        try {
-            Scanner scanner = new Scanner(System.in);
-            if (!scanner.hasNextLine()) {
-                return null;
-            }
-            return scanner.nextLine();
-        } catch (Exception e) {
-            return null;
-        }
-    }
 }
