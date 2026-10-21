@@ -6,14 +6,17 @@ import java.util.Objects;
 /**
  * Uma consulta DNS (seção question) já parseada.
  *
- * @param transactionId ID de 16 bits do header (0–65535); a resposta precisa ecoá-lo.
- * @param name          domínio perguntado, normalizado (minúsculas, sem ponto final).
- *                      Nome vazio ("") representa a raiz ".".
- * @param type          QTYPE (ex.: 1 = A, 28 = AAAA).
- * @param clazz         QCLASS (ex.: 1 = IN).
+ * @param transactionId   ID de 16 bits do header (0–65535); a resposta precisa ecoá-lo.
+ * @param name            domínio perguntado, normalizado (minúsculas, sem ponto final,
+ *                        na forma ASCII canônica/punycode).
+ *                        Nome vazio ("") representa a raiz ".".
+ * @param type            QTYPE (ex.: 1 = A, 28 = AAAA).
+ * @param clazz           QCLASS (ex.: 1 = IN).
  * @param questionSection bytes da seção question (do início do QNAME até QCLASS),
- *                      copiados do pacote original para serem ecoados na resposta.
- * @param requestFlags  palavra de flags do header original (usada para copiar o bit RD).
+ *                         copiados do pacote original para serem ecoados na resposta.
+ * @param requestFlags    palavra de flags do header original (usada para copiar o bit RD).
+ * @param ednsPayloadSize payload UDP anunciado pelo cliente no OPT do EDNS (RFC 6891);
+ *                         0 = o cliente não mandou OPT.
  */
 public record DnsQuery(
         int transactionId,
@@ -21,7 +24,8 @@ public record DnsQuery(
         int type,
         int clazz,
         byte[] questionSection,
-        int requestFlags) {
+        int requestFlags,
+        int ednsPayloadSize) {
 
     /** Tipos e classes (RFC 1035 §3.2.2, §3.2.4). */
     public static final int TYPE_A = 1;
@@ -35,6 +39,12 @@ public record DnsQuery(
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(questionSection, "questionSection");
         questionSection = questionSection.clone();
+    }
+
+    /** Construtor sem EDNS (cliente que não mandou OPT). */
+    public DnsQuery(int transactionId, String name, int type, int clazz,
+                    byte[] questionSection, int requestFlags) {
+        this(transactionId, name, type, clazz, questionSection, requestFlags, 0);
     }
 
     @Override

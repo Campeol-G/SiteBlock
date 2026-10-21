@@ -74,6 +74,43 @@ class DnsPacketParserTest {
         assertEquals("exemplo.com", q.name());
     }
 
+    /** Consulta com um OPT do EDNS (ARCOUNT=1, TYPE=41, CLASS=payload size). */
+    static byte[] queryBytesWithOpt(int id, String dottedName, int qtype, int payloadSize) {
+        byte[] base = queryBytes(id, dottedName, qtype, 1);
+        byte[] raw = new byte[base.length + 11];
+        System.arraycopy(base, 0, raw, 0, base.length);
+        raw[10] = 0x00;
+        raw[11] = 0x01; // ARCOUNT = 1
+        int p = base.length;
+        raw[p] = 0x00; // NAME: raiz
+        raw[p + 1] = 0x00; // TYPE = 41 (OPT)
+        raw[p + 2] = 0x29;
+        raw[p + 3] = (byte) (payloadSize >>> 8); // CLASS = payload size do cliente
+        raw[p + 4] = (byte) payloadSize;
+        raw[p + 5] = 0x00; // TTL = 0
+        raw[p + 6] = 0x00;
+        raw[p + 7] = 0x00;
+        raw[p + 8] = 0x00;
+        raw[p + 9] = 0x00; // RDLEN = 0
+        raw[p + 10] = 0x00;
+        return raw;
+    }
+
+    @Test
+    void optDoClienteEhLido() throws Exception {
+        byte[] raw = queryBytesWithOpt(0x00AB, "exemplo.com", 1, 1232);
+        DnsQuery q = DnsPacketParser.parse(raw, raw.length);
+        assertEquals("exemplo.com", q.name());
+        assertEquals(1232, q.ednsPayloadSize());
+    }
+
+    @Test
+    void consultaSemOptTemPayloadSizeZero() throws Exception {
+        byte[] raw = queryBytes(0x00AC, "exemplo.com", 1, 1);
+        DnsQuery q = DnsPacketParser.parse(raw, raw.length);
+        assertEquals(0, q.ednsPayloadSize());
+    }
+
     @Test
     void rejeitaPacoteCurto() {
         assertThrows(DnsParseException.class,

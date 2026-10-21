@@ -17,14 +17,18 @@ import java.util.Locale;
  * por stubs (celulares, PCs) nunca comprimem a pergunta, então um ponteiro aqui
  * indica pacote malformado ou malicioso.
  *
- * <p>Seções adicionais (ex.: OPT do EDNS, ARCOUNT &gt; 0) são toleradas e ignoradas
- * no parsing — o encaminhamento ao upstream retransmite os bytes originais intactos,
- * então nada se perde. Respostas de bloqueio não ecoam o OPT (resposta mínima válida).
+ * <p>Seções adicionais (ex.: OPT do EDNS, ARCOUNT &gt; 0) são toleradas: o OPT é
+ * lido (payload size do cliente) e o resto é ignorado — o encaminhamento ao
+ * upstream retransmite os bytes originais intactos, então nada se perde.
+ * Respostas de bloqueio ecoam um OPT mínimo (RFC 6891).
  */
 public final class DnsPacketParser {
 
     /** Tamanho do header DNS fixo (ID + flags + 4 contadores). */
     static final int HEADER_LEN = 12;
+
+    /** QTYPE do pseudo-registro OPT do EDNS (RFC 6891 §6.1.1). */
+    static final int TYPE_OPT = 41;
 
     /**
      * Decoder UTF-8 estrito (rejeita entrada inválida em vez de trocar por U+FFFD).
@@ -136,8 +140,71 @@ public final class DnsPacketParser {
         int qclass = u16(data, off + 2);
         int questionEnd = off + 4;
 
+        int ednsPayloadSize = readEdnsPayloadSize(data, questionEnd, length, u16(data, 10));
+
         byte[] questionSection = Arrays.copyOfRange(data, HEADER_LEN, questionEnd);
-        return new DnsQuery(transactionId, canonical, qtype, qclass, questionSection, flags);
+        return new DnsQuery(transactionId, canonical, qtype, qclass, questionSection, flags,
+                ednsPayloadSize);
+    }
+
+    /**
+     * Lê o payload UDP anunciado pelo cliente no OPT do EDNS (RFC 6891).
+     *
+     * <p>A section additional é tolerada: se estiver malformada ou truncada, o OPT
+     * é ignorado (0 = sem EDNS). Nunca ler fora do buffer.
+     */
+    private static int readEdnsPayloadSize(byte[] data, int off, int length, int arCount) {
+        int p = off;
+        for (int i = 0; i < arCount; i++) {
+            int next = skipName(data, p, length);
+            if (next < 0) {
+                return 0;
+            }
+            p = next;
+            if (p + 10 > length) {
+                return 0; // registro truncado
+            }
+            int type = u16(data, p);
+            int cls = u16(data, p + 2);
+            int rdlen = u16(data, p + 8);
+            p += 10;
+            if (p + rdlen > length) {
+                return 0; // RDATA truncada
+            }
+            if (type == TYPE_OPT) {
+                return cls; // CLASS do OPT = payload size do cliente
+            }
+            p += rdlen;
+        }
+        return 0;
+    }
+
+    /**
+     * Devolve o offset logo depois do nome (rótulos ou ponteiro de compressão),
+     * ou -1 se o nome não couber no pacote.
+     */
+    private static int skipName(byte[] data, int off, int length) {
+        int p = off;
+        for (int labels = 0; labels < 128; labels++) {
+            if (p >= length) {
+                return -1;
+            }
+            int l = data[p] & 0xFF;
+            if ((l & 0xC0) == 0xC0) {
+                return p + 2 <= length ? p + 2 : -1;
+            }
+            if (l > 63) {
+                return -1;
+            }
+            p += 1 + l;
+            if (p > length) {
+                return -1;
+            }
+            if (l == 0) {
+                return p; // nome terminado
+            }
+        }
+        return -1;
     }
 
     /**
