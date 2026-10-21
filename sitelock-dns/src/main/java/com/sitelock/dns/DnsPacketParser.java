@@ -6,7 +6,9 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -29,6 +31,9 @@ public final class DnsPacketParser {
 
     /** QTYPE do pseudo-registro OPT do EDNS (RFC 6891 §6.1.1). */
     static final int TYPE_OPT = 41;
+
+    /** QTYPE do registro CNAME (RFC 1035 §3.2.2). */
+    static final int TYPE_CNAME = 5;
 
     /**
      * Decoder UTF-8 estrito (rejeita entrada inválida em vez de trocar por U+FFFD).
@@ -145,6 +150,150 @@ public final class DnsPacketParser {
         byte[] questionSection = Arrays.copyOfRange(data, HEADER_LEN, questionEnd);
         return new DnsQuery(transactionId, canonical, qtype, qclass, questionSection, flags,
                 ednsPayloadSize);
+    }
+
+    /**
+     * Nomes da section answer de uma RESPOSTA (QR=1).
+     *
+     * <p>POR QUE: a cadeia de aliases só aparece na resposta do upstream — o nome
+     * consultado é livre, mas o CNAME aponta para um nome bloqueado. Para ver a
+     * cadeia é preciso ler os nomes da section answer, e lá eles vêm
+     * <b>comprimidos</b> (ponteiro 0xC0xx), ao contrário do QNAME da consulta.
+     *
+     * <p>Devolve o owner de cada registro e o alvo de cada CNAME: são os nomes
+     * da cadeia. Um registro malformado encerra a leitura (o resto da seção não
+     * é confiável) e nada é lido fora do pacote — a lista volta incompleta, o
+     * pacote nunca quebra o servidor.
+     *
+     * @param data   bytes da resposta
+     * @param length quantidade de bytes válidos em {@code data}
+     */
+    public static List<String> nomesDaAnswer(byte[] data, int length) {
+        List<String> nomes = new ArrayList<>();
+        if (data == null || length < HEADER_LEN || length > data.length) {
+            return nomes;
+        }
+        int anCount = u16(data, 6);
+        if (anCount == 0) {
+            return nomes; // NXDOMAIN/NODATA: não há cadeia para inspecionar
+        }
+        // A question é pulada com o mesmo leitor: numa resposta o nome dela
+        // também pode vir comprimido.
+        Nome pergunta = lerNome(data, HEADER_LEN, length, length);
+        if (pergunta == null || pergunta.fim() + 4 > length) {
+            return nomes;
+        }
+        int off = pergunta.fim() + 4; // depois do QTYPE/QCLASS
+        for (int i = 0; i < anCount; i++) {
+            if (off >= length) {
+                break;
+            }
+            Nome owner = lerNome(data, off, length, length);
+            if (owner == null) {
+                break;
+            }
+            off = owner.fim();
+            if (off + 10 > length) {
+                break; // registro truncado
+            }
+            int type = u16(data, off);
+            int rdlen = u16(data, off + 8);
+            int rdata = off + 10;
+            if (rdata + rdlen > length) {
+                break; // RDATA truncada
+            }
+            if (!owner.texto().isEmpty()) {
+                nomes.add(owner.texto());
+            }
+            if (type == TYPE_CNAME) {
+                // O alvo do CNAME é o próximo elo da cadeia: a RDATA é um nome.
+                Nome alvo = lerNome(data, rdata, rdata + rdlen, length);
+                if (alvo != null && !alvo.texto().isEmpty()) {
+                    nomes.add(alvo.texto());
+                }
+            }
+            off = rdata + rdlen;
+        }
+        return nomes;
+    }
+
+    /** Um nome lido do fio: o texto e o offset logo depois dele. */
+    private record Nome(String texto, int fim) {
+    }
+
+    /**
+     * Lê um nome no fio, seguindo ponteiros de compressão (RFC 1035 §4.1.4).
+     *
+     * @param data      pacote
+     * @param off       offset onde o nome começa
+     * @param limite    fim da região onde os rótulos podem ser lidos direto
+     *                  (a RDATA, quando o nome está dentro dela)
+     * @param fimPacote fim do pacote (onde os ponteiros podem apontar)
+     * @return o nome lido, ou null se o nome não couber no pacote
+     */
+    private static Nome lerNome(byte[] data, int off, int limite, int fimPacote) {
+        if (off < 0 || off >= limite || limite > fimPacote) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        int p = off;
+        int fim = -1;
+        int limiteAtual = limite;
+        boolean completo = false;
+        // Trava de segurança: nome com rótulos demais ou ponteiro em ciclo.
+        for (int passos = 0; passos < 128; passos++) {
+            if (p < 0 || p >= fimPacote) {
+                return null;
+            }
+            int b = data[p] & 0xFF;
+            if ((b & 0xC0) == 0xC0) {
+                if (p + 1 >= fimPacote) {
+                    return null;
+                }
+                int destino = ((b & 0x3F) << 8) | (data[p + 1] & 0xFF);
+                if (destino >= fimPacote) {
+                    return null;
+                }
+                if (fim < 0) {
+                    fim = p + 2;
+                }
+                // ATENÇÃO: depois do salto os rótulos vêm do pacote, não da
+                // RDATA — por isso o limite passa a ser o fim do pacote.
+                limiteAtual = fimPacote;
+                p = destino;
+                continue;
+            }
+            if ((b & 0xC0) != 0) {
+                return null; // bits reservados (0x40/0x80) não valem num nome
+            }
+            if (b > 63) {
+                return null;
+            }
+            if (b == 0) {
+                p++;
+                if (fim < 0) {
+                    fim = p;
+                }
+                completo = true;
+                break;
+            }
+            if (p + 1 + b > limiteAtual) {
+                return null; // rótulo ultrapassa a região permitida
+            }
+            p++;
+            if (sb.length() > 0) {
+                sb.append('.');
+            }
+            sb.append(decodeLabel(data, p, b).toLowerCase(Locale.ROOT));
+            p += b;
+            if (sb.length() > 253) {
+                return null; // nome maior que o limite do RFC 1035 §3.1
+            }
+        }
+        if (!completo) {
+            return null; // nome sem terminador ou com rótulos demais
+        }
+        return new Nome(sb.toString(), fim);
     }
 
     /**

@@ -399,13 +399,14 @@ public class DnsServer {
         // Cinturão e suspensórios: nenhum erro de uma consulta pode matar a worker
         // thread sem resposta (o cliente ficaria esperando até o timeout). Erro aqui
         // vira SERVFAIL; pacote malformado continua sendo ignorado (ver acima).
-        final DnsResolver.Decision decision;
+        final DnsResolver.Resultado resultado;
         try {
-            decision = resolver.decide(query.name(), query.type());
+            resultado = resolver.decideComEstado(query.name(), query.type());
         } catch (RuntimeException e) {
             log("erro interno ao decidir " + query.name() + ": " + e + " (SERVFAIL)");
             return DnsPacketBuilder.buildErrorResponse(query, 2);
         }
+        DnsResolver.Decision decision = resultado.decisao();
         // POR QUE: isBlocked() cobre BLOCK e BLOCK_NODATA. Comparar só com BLOCK
         // deixa o tipo ≠ A/AAAA cair no encaminhamento — o cliente receberia os
         // dados REAIS do nome bloqueado e o provedor de DNS veria a consulta.
@@ -415,12 +416,14 @@ public class DnsServer {
             return DnsPacketBuilder.buildResponse(query, decision);
         }
 
+        final byte[] resposta;
         try {
             UpstreamClient cliente = upstreamClient;
             if (cliente == null) {
-                return DnsResolver.forwardRaw(data, data.length, upstream, upstreamPort, upstreamTimeoutMs);
+                resposta = DnsResolver.forwardRaw(data, data.length, upstream, upstreamPort, upstreamTimeoutMs);
+            } else {
+                resposta = cliente.encaminhar(data, data.length);
             }
-            return cliente.encaminhar(data, data.length);
         } catch (SocketTimeoutException e) {
             log("timeout do upstream " + upstream.getHostAddress() + " para " + query.name()
                     + " (SERVFAIL)");
@@ -429,6 +432,29 @@ public class DnsServer {
             log("falha no upstream para " + query.name() + ": " + e.getMessage() + " (SERVFAIL)");
             return DnsPacketBuilder.buildErrorResponse(query, 2);
         }
+
+        // Alias por CNAME: o nome consultado é livre, mas a cadeia que o upstream
+        // devolve pode apontar para um nome bloqueado — e vir com o IP real dele
+        // na mesma resposta. Aí a resposta do upstream é descartada e o cliente
+        // recebe o sinkhole local, como se o nome consultado fosse bloqueado.
+        final String aliasBloqueado;
+        try {
+            aliasBloqueado = resolver.nomeBloqueadoNaCadeia(resposta, resultado.estado());
+        } catch (RuntimeException e) {
+            // Falha na checagem não pode derrubar a resposta nem o servidor:
+            // a rede do cliente continua funcionando (fail-open, como na leitura
+            // do estado). O log registra o problema.
+            log("erro ao checar a cadeia de alias de " + query.name() + ": " + e
+                    + " (resposta repassada)");
+            return resposta;
+        }
+        if (aliasBloqueado != null) {
+            log("BLOQUEADO (alias) " + query.name() + " -> " + aliasBloqueado
+                    + " (tipo " + query.type() + ") <- " + client.getHostAddress());
+            return DnsPacketBuilder.buildResponse(query,
+                    DnsResolver.decisaoDeBloqueio(query.type()));
+        }
+        return resposta;
     }
 
     /**

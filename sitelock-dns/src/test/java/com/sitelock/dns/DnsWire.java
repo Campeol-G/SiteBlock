@@ -1,5 +1,6 @@
 package com.sitelock.dns;
 
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -57,6 +58,86 @@ final class DnsWire {
         put16(out, off, type);
         put16(out, off + 2, 1); // CLASS IN
         return out;
+    }
+
+    /**
+     * Resposta com uma cadeia de aliases, como um upstream de verdade monta.
+     *
+     * <p>Cada elo da cadeia é um CNAME do nome anterior para o próximo; o
+     * último nome recebe um registro final (A/AAAA). Os nomes da section answer
+     * vêm <b>comprimidos</b> (ponteiro 0xC0xx): é assim que o upstream real
+     * economiza bytes, e é o que o leitor de nomes precisa seguir.
+     *
+     * @param consulta   consulta recebida (a pergunta é ecoada byte a byte, como
+     *                   o servidor exige antes de repassar a resposta)
+     * @param cadeia     nomes da cadeia; o primeiro é o nome consultado
+     * @param tipoFinal  tipo do registro final (0 = nenhum registro final)
+     * @param rdataFinal dados do registro final
+     */
+    static byte[] respostaEmCadeia(byte[] consulta, String[] cadeia,
+                                   int tipoFinal, byte[] rdataFinal) {
+        int id = u16(consulta, 0);
+        int fimPergunta = fimDaPergunta(consulta);
+        byte[] pergunta = Arrays.copyOfRange(consulta, 12, fimPergunta);
+        int elos = Math.max(0, cadeia.length - 1);
+        int anCount = elos + (tipoFinal > 0 ? 1 : 0);
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        out.write(id >>> 8);
+        out.write(id & 0xFF);
+        out.write(0x81); // QR=1, RD
+        out.write(0x80); // RA
+        out.write(0);
+        out.write(1); // QDCOUNT
+        out.write(0);
+        out.write(anCount); // ANCOUNT
+        out.write(0);
+        out.write(0); // NSCOUNT
+        out.write(0);
+        out.write(0); // ARCOUNT
+        out.writeBytes(pergunta);
+
+        // Offset de cada nome da cadeia: o primeiro é o QNAME ecoado (12), os
+        // demais são gravados dentro da RDATA do CNAME que os aponta.
+        int[] offsets = new int[cadeia.length];
+        offsets[0] = 12;
+        for (int i = 0; i < elos; i++) {
+            writePointer(out, offsets[i]); // owner = nome anterior
+            out.write(0);
+            out.write(5); // TYPE CNAME
+            out.write(0);
+            out.write(1); // CLASS IN
+            out.write(0);
+            out.write(0);
+            out.write(0);
+            out.write(60); // TTL
+            byte[] alvo = encodeName(cadeia[i + 1]);
+            out.write(0);
+            out.write(alvo.length); // RDLEN
+            offsets[i + 1] = out.size();
+            out.writeBytes(alvo);
+        }
+        if (tipoFinal > 0) {
+            writePointer(out, offsets[cadeia.length - 1]);
+            out.write(tipoFinal >>> 8);
+            out.write(tipoFinal & 0xFF);
+            out.write(0);
+            out.write(1); // CLASS IN
+            out.write(0);
+            out.write(0);
+            out.write(0);
+            out.write(60); // TTL
+            out.write(rdataFinal.length >>> 8);
+            out.write(rdataFinal.length & 0xFF);
+            out.writeBytes(rdataFinal);
+        }
+        return out.toByteArray();
+    }
+
+    /** Escreve um ponteiro de compressão (0xC0xx) para o offset informado. */
+    private static void writePointer(ByteArrayOutputStream out, int offset) {
+        out.write(0xC0 | ((offset >>> 8) & 0x3F));
+        out.write(offset & 0xFF);
     }
 
     /** Offset do fim da seção question (após QTYPE/QCLASS). */

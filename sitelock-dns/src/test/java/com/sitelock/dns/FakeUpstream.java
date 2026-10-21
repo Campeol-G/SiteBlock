@@ -12,6 +12,7 @@ import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Function;
 
 /**
  * Upstream falso: um socket UDP local que responde como se fosse o DNS público.
@@ -32,13 +33,16 @@ final class FakeUpstream implements AutoCloseable {
         /** Responde com QR=0 (não é resposta). */
         SEM_QR,
         /** Não responde nada (upstream mudo). */
-        SILENCIO
+        SILENCIO,
+        /** Responde sem section answer (NXDOMAIN). */
+        SEM_ANSWER
     }
 
     private final DatagramSocket socket;
     private final List<byte[]> recebidas = Collections.synchronizedList(new ArrayList<>());
     private final List<Integer> portasDeOrigem = Collections.synchronizedList(new ArrayList<>());
     private volatile Modo modo = Modo.NORMAL;
+    private volatile Function<byte[], byte[]> respostaCustom;
     private volatile boolean fechado;
 
     FakeUpstream() throws SocketException {
@@ -74,6 +78,17 @@ final class FakeUpstream implements AutoCloseable {
         this.modo = novo;
     }
 
+    /**
+     * Resposta sob medida: o lambda recebe a consulta recebida e devolve a
+     * resposta (ex.: uma cadeia de CNAMEs montada à mão).
+     *
+     * <p>Tem precedência sobre o {@link Modo}: o modo só vale enquanto não há
+     * resposta customizada.
+     */
+    void respondeCom(Function<byte[], byte[]> resposta) {
+        this.respostaCustom = resposta;
+    }
+
     void start() {
         Thread t = new Thread(this::loop, "fake-upstream");
         t.setDaemon(true);
@@ -98,7 +113,11 @@ final class FakeUpstream implements AutoCloseable {
             if (m == Modo.SILENCIO) {
                 continue;
             }
-            byte[] resposta = responder(consulta, m);
+            Function<byte[], byte[]> custom = respostaCustom;
+            byte[] resposta = custom != null ? custom.apply(consulta) : responder(consulta, m);
+            if (resposta == null) {
+                continue;
+            }
             try {
                 socket.send(new DatagramPacket(resposta, resposta.length,
                         p.getAddress(), p.getPort()));
@@ -118,6 +137,17 @@ final class FakeUpstream implements AutoCloseable {
         byte[] pergunta = Arrays.copyOfRange(consulta, 12, fimPergunta);
         int qtype = DnsWire.u16(consulta, fimPergunta - 4);
         byte[] rdata = rdataPara(qtype);
+
+        if (modo == Modo.SEM_ANSWER) {
+            // NXDOMAIN: a pergunta é ecoada, mas a section answer vem vazia.
+            byte[] out = new byte[12 + pergunta.length];
+            DnsWire.put16(out, 0, id);
+            DnsWire.put16(out, 2, 0x8183); // QR=1, RD, RA, RCODE=3 (NXDOMAIN)
+            DnsWire.put16(out, 4, 1);  // QDCOUNT
+            DnsWire.put16(out, 6, 0);  // ANCOUNT
+            System.arraycopy(pergunta, 0, out, 12, pergunta.length);
+            return out;
+        }
 
         byte[] out = new byte[12 + pergunta.length + 12 + rdata.length];
         DnsWire.put16(out, 0, id);

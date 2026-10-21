@@ -135,11 +135,11 @@ class DnsResolverTest {
     }
 
     @Test
-    void nomeLivreComCnameParaBloqueadoAindaEhEncaminhado() {
-        // Backlog conhecido: a decisão olha só o nome consultado. A cadeia de CNAMEs
-        // é resolvida pelo upstream, que devolve o IP real do alvo na mesma resposta.
-        // Fechar isso exige inspecionar a section answer do upstream (fora do escopo
-        // da decisão).
+    void nomeLivreComAliasBloqueadoEhConsultadoNoUpstream() {
+        // POR QUE: o alias só aparece na RESPOSTA do upstream — a decisão não tem
+        // como saber que "www.microsoft.com" aponta para um nome bloqueado. Por
+        // isso a consulta sai mesmo assim; quem troca a resposta pelo sinkhole é
+        // o servidor, ao inspecionar a section answer (ver DnsAliasCnameTest).
         Map<String, BlockEntry> s = state(permanent("www.microsoft.com-c-3.edgekey.net"));
         assertEquals(FORWARD, DnsResolver.decide("www.microsoft.com", 1, s, NOW));
     }
