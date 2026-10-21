@@ -9,6 +9,9 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -235,6 +238,78 @@ class ProfileEditTest {
     @Test
     void addRejectsAnInvalidProfileName() {
         assertEquals(1, run("profile", "../evil", "add", "youtube.com"));
+    }
+
+    // ---- o relógio é injetável ----
+
+    /**
+     * O {@code add} e o {@code remove} usavam {@code Instant.now()} direto,
+     * enquanto o resto do projeto injeta {@link java.time.Clock}. Com o
+     * relógio cru não dá para testar com tempo controlado — e o que se grava
+     * depende do instante.
+     */
+    @Test
+    void addGravaComOInstanteInjetado() throws Exception {
+        block("tiktok.com");
+        salvar("trabalho");
+        Instant fixo = Instant.parse("2020-01-02T03:04:05Z");
+
+        ProfileCommand parent = new ProfileCommand();
+        parent.name = "trabalho";
+        ProfileAddCommand cmd = new ProfileAddCommand();
+        cmd.parent = parent;
+        cmd.domainsRaw = List.of("youtube.com");
+        cmd.stateFileOverride = state();
+        cmd.clockOverride = Clock.fixed(fixo, ZoneOffset.UTC);
+
+        assertEquals(0, cmd.call());
+
+        assertTrue(perfil().contains("2020-01-02T03:04:05Z"),
+                "o updatedAt tem que sair do relógio injetado: " + perfil());
+    }
+
+    @Test
+    void removeGravaComOInstanteInjetado() throws Exception {
+        block("tiktok.com", "youtube.com");
+        salvar("trabalho");
+        Instant fixo = Instant.parse("2020-01-02T03:04:05Z");
+
+        ProfileCommand parent = new ProfileCommand();
+        parent.name = "trabalho";
+        ProfileRemoveCommand cmd = new ProfileRemoveCommand();
+        cmd.parent = parent;
+        cmd.domainsRaw = List.of("youtube.com");
+        cmd.stateFileOverride = state();
+        cmd.clockOverride = Clock.fixed(fixo, ZoneOffset.UTC);
+
+        assertEquals(0, cmd.call());
+
+        assertTrue(perfil().contains("2020-01-02T03:04:05Z"),
+                "o updatedAt tem que sair do relógio injetado: " + perfil());
+    }
+
+    /**
+     * O aviso de "continua bloqueado" também depende do relógio: com o
+     * bloqueio já vencido, não há o que avisar.
+     */
+    @Test
+    void removeUsaOInjetadoParaSaberOQueContinuaBloqueado() throws Exception {
+        block("tiktok.com");
+        salvar("trabalho");
+
+        ProfileCommand parent = new ProfileCommand();
+        parent.name = "trabalho";
+        ProfileRemoveCommand cmd = new ProfileRemoveCommand();
+        cmd.parent = parent;
+        cmd.domainsRaw = List.of("tiktok.com");
+        cmd.stateFileOverride = state();
+        // O bloqueio de 4h já venceu nesse instante.
+        cmd.clockOverride = Clock.fixed(Instant.now().plusSeconds(10 * 3600), ZoneOffset.UTC);
+
+        String saida = capture(() -> cmd.call());
+
+        assertFalse(saida.toLowerCase().contains("continua bloqueado"),
+                "bloqueio vencido não pode gerar aviso: " + saida);
     }
 
     // ---- helpers ----

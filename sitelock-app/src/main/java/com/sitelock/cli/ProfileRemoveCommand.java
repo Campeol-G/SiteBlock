@@ -14,6 +14,7 @@ import picocli.CommandLine.Parameters;
 import picocli.CommandLine.ParentCommand;
 
 import java.io.IOException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -53,6 +54,9 @@ public class ProfileRemoveCommand implements Callable<Integer> {
     List<String> domainsRaw = new ArrayList<>();
 
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
+
+    /** Relógio injetado pelo teste; null = o do sistema. */
+    Clock clockOverride;
 
     /** Store injetado pelo teste; null = usa o do stateDir. */
     ProfileStore storeOverride;
@@ -113,7 +117,7 @@ public class ProfileRemoveCommand implements Callable<Integer> {
                     nadaARemover[0] = true;
                     return null;
                 }
-                profiles.put(nome, new Profile(profile.getCreatedAt(), Instant.now(), entries));
+                profiles.put(nome, new Profile(profile.getCreatedAt(), Instant.now(clock()), entries));
                 tx.save(profiles);
                 return null;
             });
@@ -159,7 +163,7 @@ public class ProfileRemoveCommand implements Callable<Integer> {
                     + "bloqueado (" + e.getMessage() + ").");
             return;
         }
-        Instant now = Instant.now();
+        Instant now = Instant.now(clock());
         List<String> continuam = new ArrayList<>();
         for (String domain : removidos) {
             BlockEntry entry = estado.get(domain);
@@ -181,6 +185,11 @@ public class ProfileRemoveCommand implements Callable<Integer> {
         }
         Duration restante = Duration.between(now, entry.getExpiresAt());
         return "restam " + DurationParser.formatRemaining(restante);
+    }
+
+    /** O relógio do comando: o injetado pelo teste, ou o da CLI. */
+    private Clock clock() {
+        return clockOverride != null ? clockOverride : CliSupport.clock();
     }
 
     private String nomeDoPerfil() {

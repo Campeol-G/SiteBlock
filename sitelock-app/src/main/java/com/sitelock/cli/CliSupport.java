@@ -76,6 +76,17 @@ final class CliSupport {
         return SiteLockPaths.getStateDir().resolve(PROFILES_FILE_NAME);
     }
 
+    /**
+     * O relógio dos comandos — o mesmo que o serviço usa.
+     *
+     * <p>POR QUE: o resto do projeto injeta {@link Clock} em vez de chamar
+     * {@code Instant.now()}, para que os testes possam usar um tempo
+     * controlado. O comando que grava um instante tem que entrar na mesma.
+     */
+    static Clock clock() {
+        return Clock.systemUTC();
+    }
+
     static BlockService newService(String hostsOverride, String stateOverride) {
         Path hostsPath = resolveHostsPath(hostsOverride);
         Path stateFile = resolveStateFile(stateOverride);
