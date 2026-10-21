@@ -112,8 +112,31 @@ class DnsPacketBuilderTest {
     }
 
     @Test
-    void servfailSemAnswersERcode2() throws Exception {
+    void respostaDeBloqueioTemBitAA() throws Exception {
+        DnsQuery q = query(0xBEEF, "www.tiktok.com", 1);
+        byte[] resp = DnsPacketBuilder.buildBlockedResponse(q);
+        int flags = u16(resp, 2);
+        assertTrue((flags & 0x0400) != 0, "AA deve ser 1: o servidor e a autoridade do nome bloqueado");
+        assertEquals(0x8580, flags, "flags devem ser QR|AA|RD|RA");
+    }
+
+    @Test
+    void respostaNodataTemBitAA() throws Exception {
+        DnsQuery q = query(0x1111, "youtube.com", 15);
+        byte[] resp = DnsPacketBuilder.buildNoDataResponse(q);
+        assertTrue((u16(resp, 2) & 0x0400) != 0, "AA deve ser 1 no NODATA de nome bloqueado");
+    }
+
+    @Test
+    void respostaDeErroNaoTemBitAA() throws Exception {
         DnsQuery q = query(0x4321, "exemplo.com", 1);
+        byte[] resp = DnsPacketBuilder.buildErrorResponse(q, 2);
+        assertEquals(0, u16(resp, 2) & 0x0400,
+                "AA deve ser 0 no SERVFAIL: nao somos autoridade do nome");
+    }
+
+    @Test
+    void servfailSemAnswersERcode2() throws Exception {        DnsQuery q = query(0x4321, "exemplo.com", 1);
         byte[] resp = DnsPacketBuilder.buildErrorResponse(q, 2);
 
         assertEquals(12 + q.questionSection().length, resp.length);

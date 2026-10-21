@@ -61,7 +61,7 @@ public final class DnsPacketBuilder {
     public static byte[] buildNoDataResponse(DnsQuery query) {
         byte[] question = query.questionSection();
         byte[] out = new byte[12 + question.length];
-        writeHeader(out, query, 0, 0);
+        writeHeader(out, query, 0, 0, true);
         System.arraycopy(question, 0, out, 12, question.length);
         return out;
     }
@@ -92,7 +92,7 @@ public final class DnsPacketBuilder {
         }
         byte[] question = query.questionSection();
         byte[] out = new byte[12 + question.length];
-        writeHeader(out, query, rcode, 0);
+        writeHeader(out, query, rcode, 0, false);
         System.arraycopy(question, 0, out, 12, question.length);
         return out;
     }
@@ -101,7 +101,7 @@ public final class DnsPacketBuilder {
         byte[] question = query.questionSection();
         // 12 (header) + question + 12 (answer fixo: ptr+type+class+ttl+rdlen) + rdata
         byte[] out = new byte[12 + question.length + 12 + rdata.length];
-        writeHeader(out, query, 0, 1);
+        writeHeader(out, query, 0, 1, true);
         int off = 12;
         System.arraycopy(question, 0, out, off, question.length);
         off += question.length;
@@ -126,13 +126,19 @@ public final class DnsPacketBuilder {
     /**
      * Header de resposta: ID ecoado, QR=1, OPCODE=0, RD copiado da pergunta,
      * RA=1 (aceitamos recursão via upstream), RCODE informado.
+     *
+     * <p>AA=1 nas respostas locais de bloqueio/NODATA: para o nome bloqueado o
+     * servidor é a autoridade. AA=0 nas respostas de erro (SERVFAIL): lá não
+     * há answer e não somos autoridade do nome.
      */
-    private static void writeHeader(byte[] out, DnsQuery query, int rcode, int anCount) {
+    private static void writeHeader(byte[] out, DnsQuery query, int rcode,
+                                    int anCount, boolean authoritative) {
         int id = query.transactionId();
         out[0] = (byte) (id >>> 8);
         out[1] = (byte) id;
         int flags = 0x8000 // QR = resposta
                 | (query.requestFlags() & 0x0100) // RD: copia o pedido do cliente
+                | (authoritative ? 0x0400 : 0) // AA = autoridade para o nome
                 | 0x0080 // RA = recursion available
                 | (rcode & 0x0F);
         out[2] = (byte) (flags >>> 8);
