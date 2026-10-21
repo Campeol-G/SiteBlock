@@ -16,7 +16,6 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -184,27 +183,40 @@ public class ProfileUnblockCommand implements Callable<Integer> {
             return 3;
         }
 
-        Map<String, BlockEntry> semOsAlvos = new HashMap<>(state);
-        for (String domain : alvos) {
-            semOsAlvos.remove(domain);
-        }
+        // A transação é o ponto de entrada único de tudo que grava estado: o
+        // load e o save acontecem dentro da mesma trava, e o hosts é escrito
+        // dentro dela também. Fora daqui, um block feito em outro terminal
+        // entre o load e o save é apagado do JSON — e o domínio continua no
+        // hosts, sem registro em lugar nenhum.
+        //
+        // A ordem é Estado → hosts: se o hosts falhar, o estado volta. O
+        // caminho inverso deixaria o domínio preso no hosts sem registro, e o
+        // sweep varre o JSON — nunca vai limpá-lo.
+        final boolean[] chegouNoHosts = {false};
         try {
-            service.getStore().save(semOsAlvos);
+            service.inTransaction(
+                    (estado, tx) -> {
+                        for (String domain : alvos) {
+                            estado.remove(domain);
+                        }
+                        tx.save(estado);
+                        return null;
+                    },
+                    (resultado, estado, tx) -> {
+                        chegouNoHosts[0] = true;
+                        service.getBlocker().unblockAll(alvos);
+                    });
         } catch (IOException e) {
-            System.err.println("Erro ao salvar o estado: " + e.getMessage());
-            return 1;
-        }
-        try {
-            service.getBlocker().unblockAll(alvos);
-        } catch (IOException e) {
-            // O hosts não aceitou: o estado tem que voltar. Sem este rollback o
-            // dominio fica preso no hosts sem registro, e nada no projeto
-            // consegue mais limpa-lo.
-            try {
-                service.getStore().save(state);
-            } catch (IOException rollback) {
+            if (!chegouNoHosts[0]) {
+                System.err.println("Erro ao salvar o estado: " + e.getMessage());
+                return 1;
+            }
+            // A transação já devolveu o estado ao que era. Se a devolução
+            // falhou, o estado mente sobre o hosts — e o domínio fica preso
+            // sem registro, que é o que ninguém no projeto consegue limpar.
+            if (e.getSuppressed().length > 0) {
                 System.err.println("Erro CRÍTICO: falha no hosts E ao reverter o estado: "
-                        + rollback.getMessage());
+                        + e.getSuppressed()[0].getMessage());
                 System.err.println("Os domínios " + String.join(", ", alvos)
                         + " podem ter ficado no arquivo hosts sem registro. "
                         + "Rode: sudo siteblock unblock " + alvos.get(0) + " --force");
