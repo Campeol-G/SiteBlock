@@ -4,12 +4,36 @@ on:
   push:
   pull_request:
 
+# Push repetido cancela o build anterior: sem isso, a fila de jobs so cresce.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    # Sem teto, um daemon travado segura o job por 6 horas (tempo padrão).
+    timeout-minutes: 30
     strategy:
+      # macOS entrou na matriz porque o README promete suporte a ele: o caminho
+      # do LaunchDaemon/launchctl nunca era exercitado por build nenhum.
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # ATENÇÃO: o mvn do runner muda de versão e o mvnw.cmd do repositório
+        # precisa de shell que saiba executar .cmd.
+        include:
+          - os: ubuntu-latest
+            mvn: ./mvnw
+            shell: bash
+            script: ./run.sh
+          - os: macos-latest
+            mvn: ./mvnw
+            shell: bash
+            script: ./run.sh
+          - os: windows-latest
+            mvn: mvnw.cmd
+            shell: cmd
+            script: cmd /c run.bat
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -17,4 +41,52 @@ jobs:
           distribution: temurin
           java-version: "26"
           cache: maven
-      - run: mvn -B test
+      # 'clean' é obrigatório: sem ele o shade re-sombreia o fat-jar anterior
+      # e o artefato final deixa de ser reproduzível.
+      - name: Build (gera o fat-jar distribuível)
+        shell: ${{ matrix.shell }}
+        run: ${{ matrix.mvn }} -B clean package
+      - name: Verifica o fat-jar
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # O passo ja roda no diretorio do workspace: nao depende de 'cd' com
+          # caminho do Windows, que o bash do Git for Windows nao entende igual.
+          JAR=""
+          for candidate in sitelock-app/target/siteblock-*.jar; do
+            case "$candidate" in
+              *-sources.jar|*-javadoc.jar) continue ;;
+            esac
+            JAR="$candidate"
+            break
+          done
+          if [ -z "$JAR" ] || [ ! -f "$JAR" ]; then
+            echo "::error::fat-jar nao encontrado em sitelock-app/target/siteblock-*.jar"
+            exit 1
+          fi
+          echo "Artefato: $JAR"
+
+          # O jar precisa responder: Main-Class ausente ou errado quebra 'java -jar'.
+          java -jar "$JAR" --version
+
+          # O manifest precisa apontar o Main-Class.
+          tmp="target/jar-check"
+          rm -rf "$tmp"
+          mkdir -p "$tmp"
+          cp "$JAR" "$tmp/app.jar"
+          (cd "$tmp" && jar xf app.jar META-INF/MANIFEST.MF)
+          grep -q '^Main-Class: com.sitelock.SiteLockApplication' "$tmp/META-INF/MANIFEST.MF"
+          echo "Main-Class: OK"
+
+          # O shade tem que ter rodado: sem as dependencias dentro, nao e o fat-jar.
+          (cd "$tmp" && jar tf app.jar > entries.txt)
+          grep -q '^picocli/CommandLine.class$' "$tmp/entries.txt"
+          grep -q '^com/sitelock/SiteLockApplication.class$' "$tmp/entries.txt"
+          echo "Conteudo do fat-jar: OK"
+
+      # O script de execucao tambem e parte do que o usuario instala: um
+      # macOS < 12.3 nao tem 'readlink -f' e o script achava o jar errado.
+      - name: Smoke test do script de execução
+        shell: bash
+        run: ${{ matrix.script }} --version

@@ -19,6 +19,9 @@
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- Timestamp fixo do build: sem ele o jar carrega a hora da máquina e dois
+         builds da mesma revisão saem com bytes diferentes. -->
+    <project.build.outputTimestamp>2026-01-01T00:00:00Z</project.build.outputTimestamp>
     <!-- Java 26: alvo oficial do projeto (linguagem e bytecode). -->
     <maven.compiler.release>26</maven.compiler.release>
     <picocli.version>4.7.6</picocli.version>
@@ -69,16 +72,100 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-compiler-plugin</artifactId>
           <version>3.13.0</version>
-          <configuration>
-            <release>26</release>
-          </configuration>
+          <!-- POR QUE: sem <configuration> aqui, o alvo vem de
+               ${maven.compiler.release}. Com <release> fixado no plugin, a
+               property morria e trocar a property nao mudava nada. -->
         </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-surefire-plugin</artifactId>
           <version>3.5.2</version>
         </plugin>
+        <!-- Versoes fixadas: sem elas cada maquina usa o plugin que veio com o
+             Maven instalado e o mesmo codigo produz jars diferentes. -->
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-resources-plugin</artifactId>
+          <version>3.4.0</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-jar-plugin</artifactId>
+          <version>3.5.0</version>
+          <configuration>
+            <!-- POR QUE: sem isto, num build sem 'clean' o jar plugin pula de
+                 recriar o jar (ele e mais novo que as classes), e o shade
+                 sombreia o fat-jar anterior: o 'original-' deixa de ser o jar
+                 thin e o artefato final muda de byte para byte. -->
+            <forceCreation>true</forceCreation>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-install-plugin</artifactId>
+          <version>3.1.4</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-deploy-plugin</artifactId>
+          <version>3.1.4</version>
+        </plugin>
       </plugins>
     </pluginManagement>
+
+    <plugins>
+      <!-- Falta de JDK ou de Maven vira mensagem clara, em vez de
+           "release version 26 not supported" no meio da compilacao. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <version>3.6.3</version>
+        <executions>
+          <execution>
+            <id>exige-java-26-e-maven-3.8</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <requireJavaVersion>
+                  <version>[26,)</version>
+                  <message>Este projeto exige Java 26 ou mais novo (a CI usa Temurin 26).</message>
+                </requireJavaVersion>
+                <requireMavenVersion>
+                  <version>[3.8,)</version>
+                  <message>Este projeto exige Maven 3.8 ou mais novo. Use o ./mvnw que vem no repositorio.</message>
+                </requireMavenVersion>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- Relatorio de cobertura. Sem gate: um limite quebraria o build por
+           motivo alheio a quem esta mexendo no codigo. -->
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>0.8.15</version>
+        <executions>
+          <execution>
+            <id>prepara-agente</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+          <execution>
+            <!-- prepare-package: roda depois do 'test' (suíte) e antes do
+                 'package', para o relatorio existir num build so de package. -->
+            <id>relatorio</id>
+            <phase>prepare-package</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
   </build>
 </project>
