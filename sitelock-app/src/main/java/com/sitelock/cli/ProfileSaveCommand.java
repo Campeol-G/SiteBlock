@@ -44,6 +44,9 @@ public class ProfileSaveCommand implements Callable<Integer> {
     @Option(names = "--hosts-file", hidden = true) String hostsFileOverride;
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
 
+    /** Store injetado pelo teste; null = usa o do stateDir. */
+    ProfileStore storeOverride;
+
     public ProfileSaveCommand() {
     }
 
@@ -64,7 +67,8 @@ public class ProfileSaveCommand implements Callable<Integer> {
             return 1;
         }
 
-        ProfileStore store = new ProfileStore(CliSupport.resolveProfilesFile(stateFileOverride));
+        ProfileStore store = storeOverride != null ? storeOverride
+                : new ProfileStore(CliSupport.resolveProfilesFile(stateFileOverride));
         BlockService service = CliSupport.newService(hostsFileOverride, stateFileOverride);
 
         final Map<String, BlockEntry> state;
@@ -100,25 +104,29 @@ public class ProfileSaveCommand implements Callable<Integer> {
             return 1;
         }
 
-        final Map<String, Profile> profiles;
+        // A leitura e a gravação das receitas dentro de uma transação: dois
+        // `profile save` simultâneos não podem se perder, e um perfil escrito
+        // por outro terminal no meio do caminho tem que continuar lá.
+        boolean[] jaExiste = {false};
         try {
-            profiles = store.load();
-        } catch (IOException e) {
-            System.err.println("Erro ao ler perfis: " + e.getMessage());
-            return 1;
-        }
-        if (profiles.containsKey(valid) && !force) {
-            System.err.println("Já existe um perfil '" + valid + "'. Use --force para sobrescrever.");
-            return 1;
-        }
-
-        Instant createdAt = profiles.containsKey(valid)
-                ? profiles.get(valid).getCreatedAt() : now;
-        try {
-            profiles.put(valid, new Profile(createdAt, now, entries));
-            store.save(profiles);
+            store.inTransaction(tx -> {
+                Map<String, Profile> profiles = tx.load();
+                if (profiles.containsKey(valid) && !force) {
+                    jaExiste[0] = true;
+                    return null;
+                }
+                Instant createdAt = profiles.containsKey(valid)
+                        ? profiles.get(valid).getCreatedAt() : now;
+                profiles.put(valid, new Profile(createdAt, now, entries));
+                tx.save(profiles);
+                return null;
+            });
         } catch (IOException e) {
             System.err.println("Erro ao salvar o perfil: " + e.getMessage());
+            return 1;
+        }
+        if (jaExiste[0]) {
+            System.err.println("Já existe um perfil '" + valid + "'. Use --force para sobrescrever.");
             return 1;
         }
 

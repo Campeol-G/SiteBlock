@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.TreeMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -96,6 +97,47 @@ class ProfileStoreTest {
         Map<String, Profile> read = store.load();
         assertEquals(1, read.size());
         assertTrue(read.containsKey("b"));
+    }
+
+    /**
+     * Apagar um perfil não pode apagar o que outro terminal escreveu.
+     *
+     * <p>O {@code delete} solto era um {@code load} seguido de um {@code save}:
+     * a receita que outro terminal gravou no meio do caminho sumia junto. O
+     * teste é determinístico — o outro escritor grava o arquivo por fora da
+     * trava, e o {@code delete} tem que sair de lá sem tocar no que não é dele.
+     */
+    @Test
+    void deleteNaoApagaOQueFoiEscritoPorOutro() throws Exception {
+        Path file = tmp.resolve("profiles.json");
+        ProfileStore store = new ProfileStore(file);
+        store.save(Map.of("x", profile(Instant.parse("2026-10-15T14:02:11Z"),
+                durations("x.com", 1000L))));
+
+        // "Outro terminal": enquanto o delete carrega o arquivo, outro escritor
+        // grava a receita "y" por fora da trava.
+        ProfileStore espiao = new ProfileStore(file) {
+            @Override
+            public Map<String, Profile> load() throws IOException {
+                Map<String, Profile> perfis = super.load();
+                Map<String, Profile> concorrente = new TreeMap<>(perfis);
+                concorrente.put("y", profile(Instant.parse("2026-10-15T14:02:11Z"),
+                        durations("y.com", 1000L)));
+                Files.writeString(file, ProfileStore.defaultMapper()
+                        .writerWithDefaultPrettyPrinter()
+                        .writeValueAsString(new ProfileDocument(
+                                ProfileDocument.CURRENT_VERSION, concorrente)),
+                        StandardCharsets.UTF_8);
+                return perfis;
+            }
+        };
+
+        espiao.delete("x");
+
+        Map<String, Profile> depois = store.load();
+        assertFalse(depois.containsKey("x"), "o perfil apagado tem que sumir: " + depois.keySet());
+        assertTrue(depois.containsKey("y"),
+                "a escrita concorrente não pode se perder: " + depois.keySet());
     }
 
     @Test
