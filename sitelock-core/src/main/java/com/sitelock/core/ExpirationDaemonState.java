@@ -10,8 +10,11 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.Optional;
 
@@ -114,8 +117,15 @@ public class ExpirationDaemonState {
     public static void write(Path stateDir, ExpirationDaemonState state) throws IOException {
         Files.createDirectories(stateDir);
         Path target = statePath(stateDir);
-        Files.writeString(target, mapper().writerWithDefaultPrettyPrinter().writeValueAsString(state),
-                StandardCharsets.UTF_8);
+        Path tmp = target.resolveSibling(target.getFileName() + ".tmp");
+        Files.writeString(tmp, mapper().writerWithDefaultPrettyPrinter().writeValueAsString(state),
+                StandardCharsets.UTF_8, StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+        try {
+            Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+        }
         SiteLockPaths.chownToUserIfConfigured(target);
     }
 

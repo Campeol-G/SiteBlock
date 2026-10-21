@@ -1,5 +1,6 @@
 package com.sitelock.core;
 
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -7,11 +8,13 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Instant;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -72,9 +75,47 @@ class ExpirationDaemonStateTest {
         assertEquals(tmp.toString(), state.getStateDir());
     }
 
+    /**
+     * A escrita do registro tem que ser atômica.
+     *
+     * <p>Um {@code Files.writeString} trunca o arquivo antes de escrever: entre
+     * o truncate e o write o {@code daemon.json} fica vazio, e quem lê nesse
+     * instante (o {@code daemon status}, o {@code daemon stop}) recebe "não
+     * há daemon" com o daemon rodando. A escrita atômica troca o arquivo
+     * inteiro: o leitor vê o estado velho ou o novo, nunca um estado pela
+     * metade.
+     */
     @Test
-    void deleteRemovesTheStateFile() throws Exception {
+    void aEscritaSubstituiOArquivoEmVezDeTruncar() throws Exception {
+        Path alvo = ExpirationDaemonState.statePath(tmp);
         ExpirationDaemonState.write(tmp, new ExpirationDaemonState(1, NOW, tmp.toString(), null));
+        String antes = identidadeDoArquivo(alvo);
+        ExpirationDaemonState.write(tmp, new ExpirationDaemonState(2, NOW, tmp.toString(), null));
+        String depois = identidadeDoArquivo(alvo);
+
+        Assumptions.assumeFalse(antes.isEmpty(), "este SO não expõe a identidade do arquivo");
+        assertNotEquals(antes, depois,
+                "a escrita tem que ser atômica: um arquivo novo substitui o antigo, "
+                        + "senão quem lê no meio da escrita vê o registro truncado");
+        assertFalse(Files.exists(alvo.resolveSibling(alvo.getFileName() + ".tmp")),
+                "o arquivo temporário tem que sumir depois da troca");
+    }
+
+    /** Identidade do arquivo: dois arquivos com a mesma identidade são o mesmo. */
+    private static String identidadeDoArquivo(Path arquivo) throws IOException {
+        Object chave = Files.readAttributes(arquivo, BasicFileAttributes.class).fileKey();
+        if (chave != null) {
+            return chave.toString();
+        }
+        try {
+            return Files.getAttribute(arquivo, "unix:ino").toString();
+        } catch (UnsupportedOperationException | IOException e) {
+            return "";
+        }
+    }
+
+    @Test
+    void deleteRemovesTheStateFile() throws Exception {        ExpirationDaemonState.write(tmp, new ExpirationDaemonState(1, NOW, tmp.toString(), null));
         ExpirationDaemonState.delete(tmp);
         assertFalse(Files.exists(ExpirationDaemonState.statePath(tmp)));
     }
