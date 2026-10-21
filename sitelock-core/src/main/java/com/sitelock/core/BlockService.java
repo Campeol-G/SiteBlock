@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * Mantém JSON ({@link BlockStore}) e arquivo hosts ({@link SiteBlocker}) em sync.
@@ -100,6 +101,64 @@ public class BlockService {
         }
         Path parent = hostsPath.getParent();
         return parent == null || Files.isWritable(parent);
+    }
+
+    /**
+     * Aplica uma mudança de estado e a escrita no hosts como uma unidade.
+     *
+     * <p>É o ponto de entrada único de tudo que grava estado: o {@code load} e o
+     * {@code save} acontecem dentro da mesma trava do {@link BlockStore}, e o
+     * hosts é escrito dentro dela também. Sem isso, um {@code block} feito em
+     * outro terminal entre o {@code load} e o {@code save} é apagado do JSON —
+     * e o domínio continua no {@code /etc/hosts}, sem registro em lugar nenhum.
+     *
+     * <p>A ordem é Estado → hosts, e ela não é negociável. O caminho inverso tem
+     * um pior modo de falha: entrada no hosts sem registro no estado significa
+     * um domínio preso para sempre, porque o {@code sweepExpired()} varre o
+     * JSON, não o hosts. A ordem escolhida tem a janela oposta — se o processo
+     * for morto entre os dois passos, o estado diz "bloqueado" e o hosts não foi
+     * escrito, ou seja, o domínio está de fato livre. Fail-open e silencioso.
+     *
+     * <p>Se a escrita no hosts falhar, o estado volta ao que era: é o
+     * rollback que impede o estado de mentir sobre o hosts.
+     *
+     * @param transform o que fazer com o estado carregado; recebe uma cópia
+     *                  que pode mutar à vontade e a transação, para gravar
+     * @param hosts     a escrita no hosts
+     */
+    public <R> R inTransaction(StateTransform<R> transform, HostsWriter<R> hosts)
+            throws IOException {
+        return store.inTransaction(tx -> {
+            Map<String, BlockEntry> before = tx.load();
+            Map<String, BlockEntry> working = new TreeMap<>(before);
+            R result = transform.apply(working, tx);
+            try {
+                hosts.write(result, working, tx);
+            } catch (IOException e) {
+                // O hosts não aceitou: o estado tem que voltar, senão o JSON
+                // diz "bloqueado" e o hosts não tem a linha.
+                try {
+                    tx.save(before);
+                } catch (IOException rollback) {
+                    e.addSuppressed(rollback);
+                }
+                throw e;
+            }
+            return result;
+        });
+    }
+
+    /** O que se faz com o estado carregado, dentro da transação. */
+    @FunctionalInterface
+    public interface StateTransform<R> {
+        R apply(Map<String, BlockEntry> state, BlockStore.Transaction tx) throws IOException;
+    }
+
+    /** A escrita no hosts, dentro da transação. */
+    @FunctionalInterface
+    public interface HostsWriter<R> {
+        void write(R result, Map<String, BlockEntry> state, BlockStore.Transaction tx)
+                throws IOException;
     }
 
     public BlockStore getStore() {
