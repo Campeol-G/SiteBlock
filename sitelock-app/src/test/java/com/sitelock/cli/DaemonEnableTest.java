@@ -5,7 +5,10 @@ import com.sitelock.core.AutostartInstaller;
 import com.sitelock.core.AutostartPaths;
 import com.sitelock.core.CommandRunner;
 import com.sitelock.core.OsType;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayOutputStream;
@@ -106,20 +109,19 @@ class DaemonEnableTest {
     }
 
     @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
     void enableRefusesWithoutRootAndSaysHow() throws Exception {
         // Um diretório que existe mas não é gravável é o caso real: /etc é
         // root-owned. chmod POSIX não existe no Windows, que também roda a CI —
-        // mesmo truque de HostsFileManagerPermsTest.
+        // lá o teste é pulado, não verde sem verificação.
+        Assumptions.assumeFalse("root".equals(System.getProperty("user.name")),
+                "root ignora permissão: o diretório sem escrita continuaria gravável");
         Path semPermissao = tmp.resolve("sem-permissao");
-        try {
-            // Só `etc` existe e é somente-leitura: é ele que a checagem de
-            // escrita encontra subindo a partir de etc/systemd/system.
-            Files.createDirectories(semPermissao.resolve("etc"));
-            Files.setPosixFilePermissions(semPermissao.resolve("etc"),
-                    PosixFilePermissions.fromString("r-xr-xr-x"));
-        } catch (UnsupportedOperationException e) {
-            return;
-        }
+        // Só `etc` existe e é somente-leitura: é ele que a checagem de
+        // escrita encontra subindo a partir de etc/systemd/system.
+        Files.createDirectories(semPermissao.resolve("etc"));
+        Files.setPosixFilePermissions(semPermissao.resolve("etc"),
+                PosixFilePermissions.fromString("r-xr-xr-x"));
 
         Resultado r = rodar(new DaemonEnableCommand(OsType.LINUX, tmp.resolve("sem-permissao"),
                 jarDeExemplo().toString(), runner)::call);
@@ -143,19 +145,16 @@ class DaemonEnableTest {
     }
 
     @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
     void enableNoWindowsRecusaSemElevacaoQuandoODiretorioDoJarNaoEhGravavel() throws Exception {
         // No Windows não existe artefato em arquivo: o que precisa ser
         // gravável é o diretório onde o jar é instalado.
+        Assumptions.assumeFalse("root".equals(System.getProperty("user.name")),
+                "root ignora permissão: o diretório sem escrita continuaria gravável");
         Path raizWin = tmp.resolve("sys-win");
         Path dir = raizWin.resolve("ProgramData/SiteBlock");
         Files.createDirectories(dir);
-        try {
-            Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("r-xr-xr-x"));
-        } catch (UnsupportedOperationException e) {
-            // Sem POSIX não há como simular diretório sem escrita (o CI também
-            // roda no Windows). Mesma técnica de enableRefusesWithoutRootAndSaysHow.
-            return;
-        }
+        Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("r-xr-xr-x"));
 
         Resultado r = rodar(new DaemonEnableCommand(OsType.WINDOWS, raizWin,
                 jarDeExemplo().toString(), runner)::call);

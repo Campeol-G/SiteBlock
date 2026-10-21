@@ -80,6 +80,7 @@ sudo ./run.sh unblock tiktok.com --force
 
 # Servidor DNS para a rede local
 sudo ./run.sh dns start      # bloqueia também no celular/tablet/console
+sudo ./run.sh dns start --allow-from 192.168.1.50,10.8.0.0/24   # libera outras origens
 ./run.sh dns status
 sudo ./run.sh dns stop
 sudo ./run.sh dns stop --force  # encerra antes do prazo, com confirmação
@@ -164,6 +165,9 @@ Coisas que **não** funcionam, e é bom saber antes:
   que ele alcança a rede local — e é assim que ele vira um resolver aberto se
   o roteador deixar a porta 53 passar para a internet. **Não exponha a porta
   53 para fora da sua rede.**
+- **O servidor DNS recusa quem não está na rede local.** As origens de fora são
+  ignoradas em silêncio, e o `--allow-from` (no `dns start`) é quem libera
+  mais alguma.
 - **App com DNS próprio ou IP fixo fura.** Alguns apps (principalmente Android
   e Electron) resolvem por conta própria e ignoram o hosts.
 - **Modo anônimo, extensões e alguns navegadores** podem ignorar o hosts.
@@ -249,6 +253,24 @@ consertar.
 O modo DNS é separado: ele roda um servidor que responde no seu IP, e os
 aparelhos da rede precisam apontar para ele. Cobre mais aparelhos do que o
 hosts, ao custo de configurar cada dispositivo.
+
+O servidor atende **UDP e TCP na mesma porta**. O TCP não é enfeite: quando a
+resposta não cabe num pacote UDP, o servidor devolve `TC=1` e o cliente refaz
+a mesma consulta por TCP (RFC 7766). Sem o listener TCP, a resolução falha
+justamente nas respostas grandes.
+
+Quem pode consultar o servidor é definido na hora de subir. Por padrão, só
+quem está na rede local (loopback, link-local, faixas RFC1918, IPv6 ULA e os
+próprios endereços da máquina); o resto é recusado em silêncio. Para liberar
+mais alguma origem — um celular em outra rede, um servidor da empresa — use o
+`--allow-from` com IP ou CIDR, separado por vírgula:
+
+```bash
+sudo siteblock dns start --allow-from 192.168.1.50,10.8.0.0/24
+```
+
+A lista é validada antes do servidor subir: erro de digitação aparece na hora,
+e não depois.
 
 ## Desenvolvimento
 

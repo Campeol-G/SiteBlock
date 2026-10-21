@@ -42,18 +42,39 @@ class DurationParserTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"", "  ", "abc", "30", "30s", "1w", "1H", "30M", "1h 30m",
+    @ValueSource(strings = {"abc", "30", "30s", "1w", "1H", "30M", "1h 30m",
             "1h30", "h30m", "-5m", "0m", "0h", "0d", "1d2h30m5s", "1.5h", "--for"})
     void rejectsInvalidFormats(String input) {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                 () -> DurationParser.parse(input));
-        assertTrue(e.getMessage().contains("30m"),
-                "mensagem deveria conter exemplo, mas foi: " + e.getMessage());
+        // POR QUE: a mensagem tem que citar a entrada rejeitada. Sem isso a
+        // asserção só conferia o exemplo fixo da ajuda — que vale para
+        // qualquer entrada, e portanto não prova nada.
+        assertTrue(e.getMessage().contains("'" + input + "'"),
+                "a mensagem tem que citar a entrada rejeitada, mas foi: " + e.getMessage());
+        assertTrue(e.getMessage().contains(DurationParser.FORMAT_HELP),
+                "a mensagem tem que dizer o formato esperado, mas foi: " + e.getMessage());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "  "})
+    void rejectsBlankInputSayingItIsEmpty(String input) {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> DurationParser.parse(input));
+        assertTrue(e.getMessage().contains("vazia"),
+                "a mensagem tem que dizer que a duração está vazia, mas foi: " + e.getMessage());
+        assertTrue(e.getMessage().contains(DurationParser.FORMAT_HELP),
+                "a mensagem tem que dizer o formato esperado, mas foi: " + e.getMessage());
     }
 
     @Test
     void rejectsNull() {
-        assertThrows(IllegalArgumentException.class, () -> DurationParser.parse(null));
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> DurationParser.parse(null));
+        assertTrue(e.getMessage().contains("vazia"),
+                "a mensagem tem que dizer que a duração está vazia, mas foi: " + e.getMessage());
+        assertTrue(e.getMessage().contains(DurationParser.FORMAT_HELP),
+                "a mensagem tem que dizer o formato esperado, mas foi: " + e.getMessage());
     }
 
     @Test
