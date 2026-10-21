@@ -9,6 +9,8 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
@@ -17,6 +19,7 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Estado do daemon de expiração em {@code ~/.sitelock/daemon.json}.
@@ -121,6 +124,16 @@ public class ExpirationDaemonState {
 
     public static final String STATE_FILE_NAME = "daemon.json";
     public static final String LOG_FILE_NAME = "daemon.log";
+    public static final String LOCK_FILE_NAME = "daemon.json.lock";
+
+    /**
+     * Serializa as escritas dentro da MESMA JVM.
+     *
+     * <p>Lock de arquivo é por JVM, não por canal: na mesma JVM um segundo
+     * {@code lock()} estoura. A trava local é o que evita isso; o lock de
+     * arquivo é o que serializa contra os OUTROS processos.
+     */
+    private static final ReentrantLock TRAVA_DA_JVM = new ReentrantLock();
 
     public static Path statePath(Path stateDir) {
         return stateDir.resolve(STATE_FILE_NAME);
@@ -128,6 +141,10 @@ public class ExpirationDaemonState {
 
     public static Path logPath(Path stateDir) {
         return stateDir.resolve(LOG_FILE_NAME);
+    }
+
+    public static Path lockPath(Path stateDir) {
+        return stateDir.resolve(LOCK_FILE_NAME);
     }
 
     static ObjectMapper mapper() {
@@ -139,6 +156,12 @@ public class ExpirationDaemonState {
     }
 
     public static void write(Path stateDir, ExpirationDaemonState state) throws IOException {
+        comTrava(stateDir, () -> escreverRegistro(stateDir, state));
+    }
+
+    /** A escrita do registro em si, sem a trava: só válida dentro da trava. */
+    private static void escreverRegistro(Path stateDir, ExpirationDaemonState state)
+            throws IOException {
         Files.createDirectories(stateDir);
         Path target = statePath(stateDir);
         Path tmp = target.resolveSibling(target.getFileName() + ".tmp");
@@ -152,6 +175,25 @@ public class ExpirationDaemonState {
             Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
         }
         SiteLockPaths.chownToUserIfConfigured(target);
+        SiteLockPaths.chownToUserIfConfigured(lockPath(stateDir));
+    }
+
+    /** Executa a ação com o registro travado contra os outros processos. */
+    private static void comTrava(Path stateDir, Acao acao) throws IOException {
+        Files.createDirectories(stateDir);
+        TRAVA_DA_JVM.lock();
+        try (FileChannel canal = FileChannel.open(lockPath(stateDir),
+                StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+             FileLock ignorado = canal.lock()) {
+            acao.executar();
+        } finally {
+            TRAVA_DA_JVM.unlock();
+        }
+    }
+
+    /** Uma ação que pode falhar com IOException. */
+    private interface Acao {
+        void executar() throws IOException;
     }
 
     /**
@@ -199,15 +241,24 @@ public class ExpirationDaemonState {
         Files.deleteIfExists(statePath(stateDir));
     }
 
-    /** Atualiza só o último sweep, preservando o resto do registro. */
+    /**
+     * Atualiza só o último sweep, preservando o resto do registro.
+     *
+     * <p>Read-modify-write: sem a trava, ele lê o registro, e nesse intervalo
+     * outra escrita grava o PID novo — e o updateLastSweep devolve o registro
+     * velho por cima. O PID do daemon some, e o {@code daemon status} diz que
+     * não há daemon com ele rodando.
+     */
     public static void updateLastSweep(Path stateDir, Instant at) throws IOException {
-        Optional<ExpirationDaemonState> current = read(stateDir);
-        if (current.isEmpty()) {
-            return;
-        }
-        ExpirationDaemonState state = current.get();
-        state.setLastSweepAt(at);
-        write(stateDir, state);
+        comTrava(stateDir, () -> {
+            Optional<ExpirationDaemonState> current = read(stateDir);
+            if (current.isEmpty()) {
+                return;
+            }
+            ExpirationDaemonState state = current.get();
+            state.setLastSweepAt(at);
+            escreverRegistro(stateDir, state);
+        });
     }
 
     /**

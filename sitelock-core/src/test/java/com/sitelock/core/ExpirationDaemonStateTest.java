@@ -11,6 +11,11 @@ import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -168,6 +173,48 @@ class ExpirationDaemonStateTest {
                 "o registro tem que guardar o instante de início do PROCESSO");
         assertEquals(lido.getProcessStartedAt(), lido.getStartedAt(),
                 "o 'Subiu em:' tem que mostrar o instante de início do processo");
+    }
+
+    /**
+     * O registro não pode voltar atrás por causa de uma escrita concorrente.
+     *
+     * <p>{@code updateLastSweep} é read-modify-write: sem trava, ele lê o
+     * registro, e nesse intervalo outra escrita grava o PID novo — e o
+     * updateLastSweep devolve o registro velho por cima. O PID do daemon
+     * some, e o {@code daemon status} diz que não há daemon com ele rodando.
+     */
+    @Test
+    void escritasConcorrentesNaoRevertemOPid() throws Exception {
+        ExpirationDaemonState.write(tmp, new ExpirationDaemonState(1, NOW, tmp.toString(), null));
+
+        int voltas = 300;
+        CyclicBarrier largada = new CyclicBarrier(2);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> quemGrava = pool.submit(() -> {
+                largada.await();
+                for (int i = 0; i < voltas; i++) {
+                    ExpirationDaemonState.write(tmp,
+                            new ExpirationDaemonState(1000 + i, NOW, tmp.toString(), null));
+                }
+                return null;
+            });
+            Future<?> quemAtualiza = pool.submit(() -> {
+                largada.await();
+                for (int i = 0; i < voltas; i++) {
+                    ExpirationDaemonState.updateLastSweep(tmp, NOW.plusSeconds(i));
+                }
+                return null;
+            });
+            quemGrava.get(60, TimeUnit.SECONDS);
+            quemAtualiza.get(60, TimeUnit.SECONDS);
+        } finally {
+            pool.shutdownNow();
+        }
+
+        ExpirationDaemonState state = ExpirationDaemonState.read(tmp).orElseThrow();
+        assertEquals(1000 + voltas - 1, state.getPid(),
+                "o PID não pode voltar atrás: um updateLastSweep devolveu o registro antigo");
     }
 
     @Test
