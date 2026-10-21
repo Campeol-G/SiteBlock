@@ -213,8 +213,11 @@ public class DnsServer {
             send(DnsPacketBuilder.buildErrorResponse(query, 2), client, clientPort);
             return;
         }
-        if (decision == DnsResolver.Decision.BLOCK) {
-            byte[] response = DnsPacketBuilder.buildBlockedResponse(query);
+        // POR QUE: isBlocked() cobre BLOCK e BLOCK_NODATA. Comparar só com BLOCK
+        // deixa o tipo ≠ A/AAAA cair no encaminhamento — o cliente receberia os
+        // dados REAIS do nome bloqueado e o provedor de DNS veria a consulta.
+        if (decision.isBlocked()) {
+            byte[] response = DnsPacketBuilder.buildResponse(query, decision);
             send(response, client, clientPort);
             log("BLOQUEADO " + query.name() + " (tipo " + query.type() + ") <- "
                     + client.getHostAddress());
