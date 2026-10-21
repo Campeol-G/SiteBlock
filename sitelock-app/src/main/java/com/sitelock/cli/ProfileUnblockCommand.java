@@ -183,15 +183,12 @@ public class ProfileUnblockCommand implements Callable<Integer> {
             return 3;
         }
 
-        // A transação é o ponto de entrada único de tudo que grava estado: o
-        // load e o save acontecem dentro da mesma trava, e o hosts é escrito
-        // dentro dela também. Fora daqui, um block feito em outro terminal
-        // entre o load e o save é apagado do JSON — e o domínio continua no
-        // hosts, sem registro em lugar nenhum.
+        // POR QUE: a transação é o único ponto de entrada que grava estado —
+        // o load e o save na mesma trava, e o hosts escrito dentro dela. Fora
+        // daqui, o block de outro terminal some do JSON e o domínio fica
+        // preso no hosts sem registro.
         //
-        // A ordem é Estado → hosts: se o hosts falhar, o estado volta. O
-        // caminho inverso deixaria o domínio preso no hosts sem registro, e o
-        // sweep varre o JSON — nunca vai limpá-lo.
+        // A ordem é Estado → hosts: se o hosts falhar, o estado volta.
         final boolean[] chegouNoHosts = {false};
         try {
             service.inTransaction(

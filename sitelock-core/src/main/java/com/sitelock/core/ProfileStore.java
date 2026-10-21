@@ -213,11 +213,9 @@ public class ProfileStore {
     /**
      * A cópia de comparação do delta.
      *
-     * <p>POR QUE: a comparação é por valor, e a base do delta precisa ser o
-     * estado como ele estava <b>antes</b> da mudança. Guardando os mesmos
-     * objetos que foram carregados, uma alteração feita no lugar — no perfil
-     * ou na entrada dele — mudaria a base junto, e o delta não veria
-     * mudança nenhuma: a receita alterada nunca chegaria ao disco.
+     * <p>POR QUE: a base do delta tem que ser o estado como ele estava antes
+     * da mudança. Guardando os mesmos objetos carregados, uma alteração feita
+     * no lugar mudaria a base junto — e o delta não veria mudança nenhuma.
      */
     private static Map<String, Profile> copia(Map<String, Profile> perfis) {
         Map<String, Profile> copia = new TreeMap<>();
