@@ -9,6 +9,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintStream;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
@@ -16,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -47,12 +50,17 @@ class DnsServerTest {
     }
 
     private DnsServer subirServidor(FakeUpstream upstream, String... bloqueados) throws Exception {
+        return subirServidor(upstream, 2000, bloqueados);
+    }
+
+    private DnsServer subirServidor(FakeUpstream upstream, int timeoutUpstreamMs,
+                                    String... bloqueados) throws Exception {
         Path estado = DnsTestSupport.arquivoDeBloqueios(tmp, bloqueados);
         int porta = DnsTestSupport.portaLivre();
         InetAddress enderecoUpstream = upstream == null
                 ? InetAddress.getLoopbackAddress() : upstream.endereco();
         int portaUpstream = upstream == null ? 53 : upstream.porta();
-        DnsServer server = new DnsServer(porta, enderecoUpstream, portaUpstream, 2000,
+        DnsServer server = new DnsServer(porta, enderecoUpstream, portaUpstream, timeoutUpstreamMs,
                 new BlockStore(estado), Clock.systemUTC(), List.of());
         Thread t = new Thread(server::serveForever, "servidor-de-teste");
         t.setDaemon(true);
@@ -248,6 +256,54 @@ class DnsServerTest {
             server.stop();
             upstream.close();
         }
+    }
+
+    /**
+     * Uma rajada de consultas não pode criar uma thread por consulta nem um
+     * socket por consulta: o pool antigo ("cached") crescia sem teto e cada
+     * encaminhamento abria um socket novo — uma rajada esgota as portas
+     * efêmeras do SO.
+     */
+    @Test
+    void rajadaNaoCriaUmaThreadNemUmSocketPorConsulta() throws Exception {
+        FakeUpstream upstream = new FakeUpstream();
+        upstream.modo(FakeUpstream.Modo.SILENCIO); // segura cada consulta até o timeout
+        upstream.start();
+        DnsServer server = subirServidor(upstream, 300, "youtube.com");
+        try {
+            int antes = contaThreadsDoPool();
+            byte[] consulta = DnsWire.query(0x9999, "exemplo.com", 1);
+            try (DatagramSocket cliente = new DatagramSocket()) {
+                for (int i = 0; i < 40; i++) {
+                    cliente.send(new DatagramPacket(consulta, consulta.length,
+                            InetAddress.getLoopbackAddress(), server.getPort()));
+                }
+            }
+            Thread.sleep(1000);
+
+            int novas = contaThreadsDoPool() - antes;
+            assertTrue(novas <= 16,
+                    "o pool tem que ser limitado (16 threads), mas criou " + novas);
+
+            Set<Integer> portas = upstream.portasDeOrigem();
+            assertTrue(portas.size() <= 8,
+                    "o socket do upstream tem que ser reaproveitado (8 sockets), mas foram "
+                            + portas.size() + " portas diferentes");
+        } finally {
+            server.stop();
+            upstream.close();
+        }
+    }
+
+    /** Threads do pool de UDP (o de TCP tem outro prefixo). */
+    private static int contaThreadsDoPool() {
+        int total = 0;
+        for (Thread t : Thread.getAllStackTraces().keySet()) {
+            if (t.getName().matches("sitelock-dns-\\d+")) {
+                total++;
+            }
+        }
+        return total;
     }
 
     /**

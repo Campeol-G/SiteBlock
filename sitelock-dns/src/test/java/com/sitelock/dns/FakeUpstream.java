@@ -9,7 +9,9 @@ import java.net.SocketTimeoutException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Upstream falso: um socket UDP local que responde como se fosse o DNS público.
@@ -35,6 +37,7 @@ final class FakeUpstream implements AutoCloseable {
 
     private final DatagramSocket socket;
     private final List<byte[]> recebidas = Collections.synchronizedList(new ArrayList<>());
+    private final List<Integer> portasDeOrigem = Collections.synchronizedList(new ArrayList<>());
     private volatile Modo modo = Modo.NORMAL;
     private volatile boolean fechado;
 
@@ -54,6 +57,16 @@ final class FakeUpstream implements AutoCloseable {
     List<byte[]> consultasRecebidas() {
         synchronized (recebidas) {
             return List.copyOf(recebidas);
+        }
+    }
+
+    /**
+     * Portas de origem das consultas recebidas — ou seja, quantos sockets
+     * diferentes o servidor abriu para falar com o upstream.
+     */
+    Set<Integer> portasDeOrigem() {
+        synchronized (portasDeOrigem) {
+            return new LinkedHashSet<>(portasDeOrigem);
         }
     }
 
@@ -80,6 +93,7 @@ final class FakeUpstream implements AutoCloseable {
             }
             byte[] consulta = Arrays.copyOf(p.getData(), p.getLength());
             recebidas.add(consulta);
+            portasDeOrigem.add(p.getPort());
             Modo m = modo;
             if (m == Modo.SILENCIO) {
                 continue;

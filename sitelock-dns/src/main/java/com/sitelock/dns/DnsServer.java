@@ -22,10 +22,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -67,8 +68,27 @@ public class DnsServer {
      */
     static final int TCP_READ_TIMEOUT_MS = 5000;
 
+    /**
+     * Threads que atendem consultas UDP ao mesmo tempo.
+     *
+     * <p>POR QUE: o pool antigo era "cached" (cresce até o limite da máquina).
+     * Uma rajada — um app com retry agressivo, ou alguém na LAN — criava
+     * milhares de threads. O pool é limitado, e o que não entra na fila é
+     * descartado: o cliente retransmite por conta própria.
+     */
+    static final int UDP_POOL_SIZE = 16;
+
+    /** Fila de consultas UDP à espera de thread. */
+    static final int UDP_QUEUE_SIZE = 128;
+
+    /** Sockets conectados ao upstream, reaproveitados entre consultas. */
+    static final int UPSTREAM_SOCKETS = 8;
+
     /** Threads que atendem conexões TCP ao mesmo tempo. */
     static final int TCP_POOL_SIZE = 8;
+
+    /** Fila de conexões TCP à espera de thread. */
+    static final int TCP_QUEUE_SIZE = 64;
 
     private final int port;
     private final InetAddress upstream;
@@ -84,6 +104,7 @@ public class DnsServer {
     private volatile ExecutorService pool;
     private volatile ServerSocket tcpServer;
     private volatile ExecutorService tcpPool;
+    private volatile UpstreamClient upstreamClient;
 
     /** Última vez que cada origem recusada foi registrada (para não inundar o log). */
     private final Map<String, Long> ultimaRecusa = new ConcurrentHashMap<>();
@@ -205,6 +226,16 @@ public class DnsServer {
         this.socket = ds;
         ServerSocket tcp = bindTcp();
         this.tcpServer = tcp;
+        final UpstreamClient cliente;
+        try {
+            cliente = new UpstreamClient(upstream, upstreamPort, upstreamTimeoutMs, UPSTREAM_SOCKETS);
+        } catch (IOException e) {
+            closeQuietly(ds);
+            closeQuietly(tcp);
+            throw new DnsServerException("Falha ao abrir o socket do upstream "
+                    + upstream.getHostAddress() + ":" + upstreamPort + ": " + e.getMessage(), e);
+        }
+        this.upstreamClient = cliente;
         this.pool = newPool();
         this.tcpPool = newTcpPool();
         startTcpAcceptor(tcp);
@@ -241,6 +272,7 @@ public class DnsServer {
         } finally {
             closeQuietly(ds);
             closeQuietly(tcp);
+            cliente.close();
         }
     }
 
@@ -294,6 +326,10 @@ public class DnsServer {
         ServerSocket tcp = tcpServer;
         if (tcp != null && !tcp.isClosed()) {
             closeQuietly(tcp);
+        }
+        UpstreamClient cliente = upstreamClient;
+        if (cliente != null) {
+            cliente.close();
         }
         shutdown(pool);
         shutdown(tcpPool);
@@ -359,7 +395,11 @@ public class DnsServer {
         }
 
         try {
-            return DnsResolver.forwardRaw(data, data.length, upstream, upstreamPort, upstreamTimeoutMs);
+            UpstreamClient cliente = upstreamClient;
+            if (cliente == null) {
+                return DnsResolver.forwardRaw(data, data.length, upstream, upstreamPort, upstreamTimeoutMs);
+            }
+            return cliente.encaminhar(data, data.length);
         } catch (SocketTimeoutException e) {
             log("timeout do upstream " + upstream.getHostAddress() + " para " + query.name()
                     + " (SERVFAIL)");
@@ -526,20 +566,6 @@ public class DnsServer {
         acceptor.start();
     }
 
-    private static ExecutorService newTcpPool() {
-        ThreadFactory factory = new ThreadFactory() {
-            private final AtomicInteger seq = new AtomicInteger();
-
-            @Override
-            public Thread newThread(Runnable r) {
-                Thread t = new Thread(r, "sitelock-dns-tcp-" + seq.incrementAndGet());
-                t.setDaemon(true);
-                return t;
-            }
-        };
-        return Executors.newFixedThreadPool(TCP_POOL_SIZE, factory);
-    }
-
     /**
      * Troca exceções cruas de bind por mensagens acionáveis.
      * A porta 53 é privilegiada no Linux: só root faz bind abaixo de 1024.
@@ -567,17 +593,30 @@ public class DnsServer {
     }
 
     private static ExecutorService newPool() {
+        return newPool(UDP_POOL_SIZE, UDP_QUEUE_SIZE, "sitelock-dns-");
+    }
+
+    private static ExecutorService newTcpPool() {
+        return newPool(TCP_POOL_SIZE, TCP_QUEUE_SIZE, "sitelock-dns-tcp-");
+    }
+
+    /**
+     * Pool limitado: número fixo de threads, fila com teto e rejeição quando
+     * enche (o pacote é descartado — o cliente retransmite).
+     */
+    private static ExecutorService newPool(int threads, int fila, String nome) {
         ThreadFactory factory = new ThreadFactory() {
             private final AtomicInteger seq = new AtomicInteger();
 
             @Override
             public Thread newThread(Runnable r) {
-                Thread t = new Thread(r, "sitelock-dns-" + seq.incrementAndGet());
+                Thread t = new Thread(r, nome + seq.incrementAndGet());
                 t.setDaemon(true);
                 return t;
             }
         };
-        return Executors.newCachedThreadPool(factory);
+        return new ThreadPoolExecutor(threads, threads, 60L, TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(fila), factory, new ThreadPoolExecutor.AbortPolicy());
     }
 
     /**
