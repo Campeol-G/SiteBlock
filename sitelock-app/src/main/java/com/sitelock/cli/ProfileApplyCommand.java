@@ -17,9 +17,9 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.Callable;
 
 /**
@@ -110,7 +110,11 @@ public class ProfileApplyCommand implements Callable<Integer> {
         Instant now = Instant.now(service.getClock());
         Map<String, ProfileMerge.Decision> decisions = ProfileMerge.merge(anterior, profile, now);
 
-        Map<String, BlockEntry> novoEstado = new HashMap<>(anterior);
+        // POR QUE: TreeMap e não HashMap — o estado é gravado como JSON, e o
+        // JSON tem que sair sempre na mesma ordem. Com HashMap, o apply
+        // gravava o arquivo em ordem arbitrária e o block em ordem alfabética:
+        // o mesmo arquivo, dois formatos, e um diff que não é de verdade.
+        Map<String, BlockEntry> novoEstado = new TreeMap<>(anterior);
         List<String> paraBloquear = new ArrayList<>();
         int alterados = 0;
         int mantidos = 0;

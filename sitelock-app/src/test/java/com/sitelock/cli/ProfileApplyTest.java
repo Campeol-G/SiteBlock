@@ -174,6 +174,22 @@ class ProfileApplyTest {
         assertEquals(1, apply("nao-existe"));
     }
 
+    @Test
+    void applyGravaOJsonOrdenado() throws Exception {
+        block("alfa.com", "beta.com", "mike.com", "zeta.com");
+        assertEquals(0, save("trabalho"));
+
+        assertEquals(0, apply("trabalho"));
+
+        String json = blocksJson();
+        int alfa = json.indexOf("alfa.com");
+        int beta = json.indexOf("beta.com");
+        int mike = json.indexOf("mike.com");
+        int zeta = json.indexOf("zeta.com");
+        assertTrue(alfa >= 0 && alfa < beta && beta < mike && mike < zeta,
+                "o JSON tem que sair sempre ordenado: " + json);
+    }
+
     @FunctionalInterface
     private interface ThrowingRunnable {
         void run() throws Exception;
