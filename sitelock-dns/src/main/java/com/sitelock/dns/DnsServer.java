@@ -279,14 +279,19 @@ public class DnsServer {
     /**
      * Watchdog simples: se o loop de atendimento morrer por exceção inesperada
      * (ex.: socket invalidado), espera 1s e tenta de novo até {@link #stop()}.
-     * A <b>primeira</b> falha de bind (porta em uso, sem permissão) é lançada em vez
-     * de reiniciada, para que o {@code dns start} detecte o filho morto e mostre o
-     * motivo — em vez de fingir sucesso com um daemon em loop de erro.
-     * Não cobre {@code kill -9} do processo — nesse caso o watchdog morre junto
+     *
+     * <p>A <b>primeira</b> falha derruba o processo, seja ela
+     * {@link DnsServerException} ou qualquer outra {@link RuntimeException}.
+     * Antes, a exceção genérica caía no catch de baixo e o watchdog dormia 1s
+     * e tentava de novo, para sempre: o processo ficava vivo sem nunca
+     * escutar, e o {@code dns start} — que só olhava se o filho estava vivo —
+     * imprimia "Servidor DNS iniciado".
+     *
+     * <p>Não cobre {@code kill -9} do processo — nesse caso o watchdog morre junto
      * (ver README: risco de perda de internet e como reverter).
      */
     public void runWithWatchdog() {
-        boolean firstAttempt = true;
+        boolean primeiraTentativa = true;
         while (!stopRequested) {
             try {
                 serveForever();
@@ -294,7 +299,7 @@ public class DnsServer {
                 if (stopRequested) {
                     break;
                 }
-                if (firstAttempt) {
+                if (primeiraTentativa) {
                     throw e;
                 }
                 log("queda inesperada (" + e.getMessage() + "); reiniciando em 1s...");
@@ -302,9 +307,13 @@ public class DnsServer {
                 if (stopRequested) {
                     break;
                 }
+                if (primeiraTentativa) {
+                    throw new DnsServerException("Falha inesperada no servidor DNS: "
+                            + e.getMessage(), e);
+                }
                 log("erro inesperado (" + e.getMessage() + "); reiniciando em 1s...");
             }
-            firstAttempt = false;
+            primeiraTentativa = false;
             if (!stopRequested) {
                 try {
                     Thread.sleep(1000);

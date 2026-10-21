@@ -166,7 +166,8 @@ public class DnsStartCommand implements Callable<Integer> {
         }
 
         // Dá até ~3s para o filho fazer bind; se morrer, mostra o motivo do log.
-        boolean alive = false;
+        boolean vivo = false;
+        boolean escutando = false;
         for (int i = 0; i < 6; i++) {
             try {
                 Thread.sleep(500);
@@ -174,18 +175,32 @@ public class DnsStartCommand implements Callable<Integer> {
                 Thread.currentThread().interrupt();
                 break;
             }
-            if (ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)) {
-                alive = true;
-                if (logShowsListening(logFile)) {
-                    break;
-                }
-            } else {
-                alive = false;
+            if (!ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)) {
+                vivo = false;
+                break;
+            }
+            vivo = true;
+            if (logShowsListening(logFile)) {
+                escutando = true;
                 break;
             }
         }
-        if (!alive) {
+        if (!vivo) {
             System.err.println("Erro: o servidor DNS não subiu (pid " + pid + " encerrou).");
+            printLogTail(logFile);
+            try {
+                DnsDaemonState.delete(stateDir);
+            } catch (IOException ignored) {
+            }
+            return 1;
+        }
+        // O processo vivo não é o mesmo que servidor escutando: o daemon pode
+        // estar vivo e nunca abrir a porta (o watchdog dormia e tentava de novo,
+        // para sempre). Só a marca no log prova que está atendendo.
+        if (!escutando) {
+            System.err.println("Erro: o servidor DNS não subiu: o processo (pid " + pid
+                    + ") está vivo, mas não anunciou que está escutando.");
+            process.destroyForcibly();
             printLogTail(logFile);
             try {
                 DnsDaemonState.delete(stateDir);
