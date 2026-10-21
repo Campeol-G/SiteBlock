@@ -199,6 +199,23 @@ O daemon roda como root, porque precisa escrever no `/etc/hosts`. Ele grava os
 caminhos no artefato de inicialização e devolve a posse dos arquivos que escreve
 para o seu usuário, para que `status` funcione sem elevação.
 
+O `daemon enable` também **instala uma cópia do jar** num diretório do root
+(`/opt/sitelock` no Linux, `/usr/local/lib/sitelock` no macOS,
+`%ProgramData%\SiteBlock` no Windows) e aponta a inicialização para lá. Não
+aponta para o jar do build porque `mvn clean` apaga o `target/` — e uma
+inicialização apontando para o nada entra em loop de crash, e o prazo dos
+bloqueios para de ser cumprido sem nenhuma mensagem que explique o motivo.
+
+Depois de recompilar, rode o `enable` de novo para atualizar a cópia:
+
+```bash
+mvn package
+sudo siteblock daemon enable
+```
+
+Se a cópia sumir, o `daemon status` diz isso explicitamente e diz como
+consertar.
+
 O modo DNS é separado: ele roda um servidor que responde no seu IP, e os
 aparelhos da rede precisam apontar para ele. Cobre mais aparelhos do que o
 hosts, ao custo de configurar cada dispositivo.

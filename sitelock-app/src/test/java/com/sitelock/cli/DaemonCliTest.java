@@ -1,9 +1,11 @@
 package com.sitelock.cli;
 
 import com.sitelock.core.BlockEntry;
+import com.sitelock.core.AutostartInstaller;
 import com.sitelock.core.BlockStore;
 import com.sitelock.core.ExpirationDaemonLock;
 import com.sitelock.core.ExpirationDaemonState;
+import com.sitelock.core.OsType;
 import com.sitelock.core.HostsFileManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -378,6 +380,30 @@ class DaemonCliTest {
         Capture saida = captureOut(() -> new DaemonStatusCommand(stateFile().toString()).call());
         assertEquals(0, saida.exit());
         assertTrue(saida.texto().contains("não está rodando"), saida.texto());
+    }
+
+    @Test
+    void statusSaysTheInstalledJarIsMissing() throws Exception {
+        // O sintoma do mvn clean: a unit aponta para um jar que não existe
+        // mais. Sem esta linha, o status só diria "não está rodando" e a
+        // pessoa não teria por onde começar.
+        semear(prazos("permanente.com", null));
+        Path jar = AutostartInstaller.installJarPath(OsType.detect(), Path.of("/"));
+        boolean havia = Files.exists(jar);
+        if (havia) {
+            Files.move(jar, jar.resolveSibling("siteblock.jar.bak"));
+        }
+        try {
+            Capture r = captureOut(() -> new DaemonStatusCommand(stateFile().toString()).call());
+            assertTrue(r.texto().contains("NÃO EXISTE") || r.texto().contains("não existe mais"),
+                    r.texto());
+            assertTrue(r.texto().contains("daemon enable"),
+                    "tem que dizer como consertar: " + r.texto());
+        } finally {
+            if (havia) {
+                Files.move(jar.resolveSibling("siteblock.jar.bak"), jar);
+            }
+        }
     }
 
     @Test

@@ -34,6 +34,81 @@ public final class AutostartInstaller {
     }
 
     /**
+ * Onde o jar do daemon é instalado.
+     *
+     * <p>Um diretório do sistema, que só o root escreve. Duas coisas se
+     * resolvem de uma vez:
+     *
+     * <ul>
+     *   <li><b>{@code mvn clean} não derruba mais o daemon.</b> A unit apontava
+     *       para {@code ~/Projects/.../target/siteblock-1.0.0.jar}, e
+     *       {@code target/} é apagado por {@code mvn clean}. A unit passava a
+     *       apontar para o nada, o systemd entrava em loop de crash, e o prazo
+     *       dos bloqueios parava de ser cumprido sem nenhuma mensagem que
+     *       explicasse o motivo.</li>
+     *   <li><b>O daemon deixa de executar código que o usuário pode trocar.</b>
+     *       O jar original vive num diretório gravável por construção — era
+     *       o motivo do aviso de elevação. A cópia vive num diretório do
+     *       root.</li>
+     * </ul>
+     *
+     * @param systemRoot {@code /} em produção; raiz de teste nos testes
+     */
+    public static Path installDir(OsType os, Path systemRoot) {
+        Path root = systemRoot == null ? Path.of("/") : systemRoot;
+        if (os != null && os.isWindows()) {
+            return root.resolve("ProgramData/SiteBlock");
+        }
+        if (os != null && os.isMac()) {
+            return root.resolve("usr/local/lib/sitelock");
+        }
+        return root.resolve("opt/sitelock");
+    }
+
+    /** O caminho do jar instalado. */
+    public static Path installJarPath(OsType os, Path systemRoot) {
+        return installDir(os, systemRoot).resolve("siteblock.jar");
+    }
+
+    /**
+     * Copia o jar para o local estável.
+     *
+     * <p>Sempre sobrescreve: reinstalar é como o daemon passa a rodar a versão
+     * nova depois de um rebuild. Copiar o jar para cima de si mesmo é pulado —
+     * o destino some no meio da cópia e o daemon fica sem executável.
+     *
+     * @param origem jar a instalar; null ou inexistente = erro
+     */
+    public static InstallResult installJar(OsType os, Path systemRoot, Path origem) {
+        if (origem == null) {
+            return new InstallResult(false,
+                    "Não sei qual jar instalar. Rode a partir do siteblock empacotado, ou "
+                            + "informe o caminho: siteblock daemon enable --jar <caminho>");
+        }
+        Path origemAbs = origem.toAbsolutePath();
+        if (!Files.exists(origemAbs)) {
+            return new InstallResult(false, "O jar " + origemAbs + " não existe. "
+                    + "Rode 'mvn package' para gerar, ou informe outro caminho com --jar.");
+        }
+        Path destino = installJarPath(os, systemRoot);
+        if (destino.toAbsolutePath().equals(origemAbs)) {
+            return new InstallResult(true, "O jar já está no lugar: " + destino);
+        }
+        try {
+            Path parent = destino.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            Files.copy(origemAbs, destino,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            return new InstallResult(true, destino.toString());
+        } catch (IOException e) {
+            return new InstallResult(false,
+                    "Falha ao instalar o jar em " + destino + ": " + e.getMessage());
+        }
+    }
+
+    /**
      * Onde vive o artefato neste SO.
      *
      * <p>No Windows não existe arquivo: é a Tarefa do Agendador que guarda a

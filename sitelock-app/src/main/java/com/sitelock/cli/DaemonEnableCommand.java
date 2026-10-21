@@ -26,6 +26,14 @@ import java.util.concurrent.Callable;
  * {@code SUDO_USER}, e aí {@code user.home} é {@code /root} — o daemon leria um
  * {@code blocks.json} que não é o do {@code sudo siteblock block}, e a feature
  * inteira viraria um no-op silencioso.
+ *
+ * <p>O jar também é <b>instalado</b>, não apontado de onde está. A unit
+ * apontava para {@code target/siteblock-1.0.0.jar}, e um {@code mvn clean}
+ * apagava o {@code target/}: a unit passava a apontar para o nada, o systemd
+ * entrava em loop de crash e o prazo dos bloqueios parava de ser cumprido sem
+ * mensagem que explicasse. A cópia mora num diretório do root, que só o root
+ * escreve — o que também resolve o outro aviso do projeto, o de o daemon
+ * executar código de um caminho que o usuário pode trocar.
  */
 @Command(name = "enable",
         description = "Instala o daemon de expiracao para subir a cada boot.",
@@ -90,8 +98,23 @@ public class DaemonEnableCommand implements Callable<Integer> {
                 usuarioReal(),
                 os);
 
+        // O jar é instalado antes do artefato, para que a unit aponte para a
+        // cópia estável e não para o caminho de build.
+        Path origem = caminhoDoJar() != null ? Paths.get(caminhoDoJar()) : null;
+        AutostartInstaller.InstallResult copia =
+                AutostartInstaller.installJar(os, systemRoot, origem);
+        if (!copia.success()) {
+            System.err.println("Erro: " + copia.detail());
+            return 1;
+        }
+        String jarInstalado = copia.detail();
+
+        AutostartPaths caminhosFinais = new AutostartPaths(
+                caminhos.stateDir(), caminhos.hostsFile(), caminhos.javaBin(),
+                jarInstalado, caminhos.classpath(), caminhos.realUserName(), os);
+
         AutostartInstaller installer = new AutostartInstaller(os, systemRoot, runnerOverride);
-        AutostartInstaller.InstallResult result = installer.install(caminhos);
+        AutostartInstaller.InstallResult result = installer.install(caminhosFinais);
         if (!result.success()) {
             System.err.println("Erro ao instalar o autostart: " + result.detail());
             return 1;
@@ -99,10 +122,13 @@ public class DaemonEnableCommand implements Callable<Integer> {
 
         System.out.println("Daemon de expiração instalado para subir a cada boot.");
         System.out.println("Artefato: " + artefato);
-        String aviso = avisoCaminhoGravavel();
+        System.out.println("Jar do daemon: " + jarInstalado);
+        String aviso = avisoDonoDoInstall(os, systemRoot);
         if (aviso != null) {
             System.out.println(aviso);
         }
+        System.out.println("Depois de recompilar (mvn package), rode de novo: "
+                + "sudo " + CliSupport.sudoCommand("daemon enable"));
         System.out.println("Confira com: siteblock daemon status");
         return 0;
     }
@@ -185,30 +211,28 @@ private String usuarioReal() {
     }
 
     /**
-     * O daemon roda como root e executa código de um caminho que o usuário pode
-     * trocar. Isto é aviso, nunca recusa: no install documentado o jar vive em
-     * ~/Projects/.../target/, gravável por construção, e um portão rígido
-     * quebraria o caminho de instalação no primeiro dia. O alvo é o usuário
-     * distraído — quem quer burlar já edita o /etc/hosts com sudo.
+     * O jar do daemon fica num diretório que só o root escreve — e é isso que
+     * o aviso antigo cobria, com o caminho do build no lugar.
+     *
+     * <p>Agora o aviso é o oposto: se o diretório de instalação NÃO for do
+     * root, a proteção não vale nada, porque o usuário pode trocar o jar que o
+     * daemon executa. Isso acontece quando o diretório já existia e era do
+     * usuário — e aí é preciso dizer, porque é a diferença entre o daemon
+     * executar código do root e executar código do usuário como root.
      */
-    private String avisoCaminhoGravavel() {
-        String jar = caminhoDoJar();
-        if (jar == null) {
-            return null;
-        }
-        Path p;
+    private String avisoDonoDoInstall(OsType os, Path systemRoot) {
+        Path dir = AutostartInstaller.installDir(os, systemRoot);
         try {
-            p = Paths.get(jar).toAbsolutePath();
-        } catch (RuntimeException e) {
-            return null;
+            String dono = Files.getOwner(dir).getName();
+            if (!"root".equals(dono.toLowerCase(java.util.Locale.ROOT))) {
+                return "Aviso: " + dir + " pertence a " + dono + ", não ao root. O daemon roda como "
+                        + "root e vai executar um jar que você pode trocar. Apague o diretório e "
+                        + "rode o enable de novo, ou use: sudo chmod 755 " + dir;
+            }
+        } catch (Exception e) {
+            // Sem permissão de ler o dono: não dá para afirmar nada, e o aviso
+            // padrão seria alarmar sem motivo.
         }
-        Path parent = p.getParent();
-        if (parent == null || !Files.isWritable(parent)) {
-            return null;
-        }
-        return "Aviso: o daemon roda como root e vai executar o jar em " + p
-                + ", dentro de um diretório que você pode alterar. Se isso te incomodar, "
-                + "copie o jar para um diretório que só o root escreva e rode: "
-                + "sudo siteblock daemon enable --jar /opt/sitelock/siteblock.jar";
+        return null;
     }
 }

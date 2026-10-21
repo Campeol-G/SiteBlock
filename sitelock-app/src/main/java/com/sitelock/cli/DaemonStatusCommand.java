@@ -8,6 +8,7 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -43,6 +44,10 @@ public class DaemonStatusCommand implements Callable<Integer> {
     @Override
     public Integer call() {
         Path stateDir = CliSupport.stateDirFor(stateFileOverride);
+        OsType os = OsType.detect();
+        Path jarInstalado = AutostartInstaller.installJarPath(os, Path.of("/"));
+        boolean autostart = AutostartInstaller.isEnabled(os, Path.of("/"));
+        boolean jarExiste = Files.exists(jarInstalado);
 
         Optional<ExpirationDaemonState> state;
         try {
@@ -54,9 +59,19 @@ public class DaemonStatusCommand implements Callable<Integer> {
 
         if (state.isEmpty()) {
             System.out.println("Daemon de expiração: não está rodando.");
-            System.out.println("Autostart: " + (AutostartInstaller.isEnabled(OsType.detect(), Path.of("/"))
-                    ? "instalado" : "não instalado"));
+            System.out.println("Autostart: " + (autostart ? "instalado" : "não instalado"));
             System.out.println("Estado lido de: " + stateDir);
+            if (autostart) {
+                System.out.println("Jar do daemon: " + jarInstalado
+                        + (jarExiste ? "" : "  ← NÃO EXISTE"));
+            }
+            if (autostart && !jarExiste) {
+                // A causa provável: a unit aponta para um jar que sumiu. Sem
+                // esta linha, o sintoma é "o daemon não sobe" e a pessoa não
+                // tem por onde começar.
+                System.out.println("O jar do daemon não existe mais. Reinstale com: "
+                        + "sudo siteblock daemon enable");
+            }
             System.out.println("Enquanto não houver daemon, um bloqueio com prazo só é liberado "
                     + "quando você roda outro comando do siteblock.");
             System.out.println("Para subir sozinho a cada boot: sudo siteblock daemon enable");
@@ -72,8 +87,15 @@ public class DaemonStatusCommand implements Callable<Integer> {
         System.out.println("Último sweep que liberou algo: " + (s.getLastSweepAt() == null
                 ? "nenhum desde que subiu" : HORA.format(s.getLastSweepAt())));
         System.out.println("Estado lido de: " + s.getStateDir());
-        System.out.println("Autostart: " + (AutostartInstaller.isEnabled(OsType.detect(), Path.of("/"))
-                ? "instalado" : "não instalado"));
+        System.out.println("Autostart: " + (autostart ? "instalado" : "não instalado"));
+        if (autostart) {
+            System.out.println("Jar do daemon: " + jarInstalado
+                    + (jarExiste ? "" : "  ← NÃO EXISTE"));
+            if (!jarExiste) {
+                System.out.println("O jar do daemon não existe mais — é por isso que ele não sobe. "
+                        + "Reinstale com: sudo siteblock daemon enable");
+            }
+        }
         if (!vivo) {
             System.out.println("O PID registrado não está mais vivo. Suba com: "
                     + "sudo siteblock daemon start");

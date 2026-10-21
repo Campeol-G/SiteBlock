@@ -67,6 +67,14 @@ class DaemonEnableTest {
         return tmp.resolve("sys");
     }
 
+    /** Um jar de verdade: o enable copia o arquivo, e copia de arquivo inexistente falha. */
+    private Path jarDeExemplo() throws Exception {
+        Path jar = tmp.resolve("build/siteblock-1.0.0.jar");
+        Files.createDirectories(jar.getParent());
+        Files.writeString(jar, "jar de mentira");
+        return jar;
+    }
+
     private Path artefato(OsType os) {
         return AutostartInstaller.artifactPath(os, raiz());
     }
@@ -76,8 +84,8 @@ class DaemonEnableTest {
     }
 
     @Test
-    void enableWritesTheArtifactAndCallsTheScheduler() {
-        Resultado r = rodar(enable(OsType.LINUX, "/opt/sitelock/siteblock.jar")::call);
+    void enableWritesTheArtifactAndCallsTheScheduler() throws Exception {
+        Resultado r = rodar(enable(OsType.LINUX, jarDeExemplo().toString())::call);
 
         assertEquals(0, r.exit(), r.texto());
         assertTrue(Files.exists(artefato(OsType.LINUX)), "a unit tem que existir depois do enable");
@@ -89,8 +97,8 @@ class DaemonEnableTest {
     }
 
     @Test
-    void enableEmbedsThePinnedPaths() {
-        rodar(enable(OsType.LINUX, "/opt/sitelock/siteblock.jar")::call);
+    void enableEmbedsThePinnedPaths() throws Exception {
+        rodar(enable(OsType.LINUX, jarDeExemplo().toString())::call);
 
         String unit = ler(artefato(OsType.LINUX));
         assertTrue(unit.contains("-Dsitelock.stateDir="), unit);
@@ -114,7 +122,7 @@ class DaemonEnableTest {
         }
 
         Resultado r = rodar(new DaemonEnableCommand(OsType.LINUX, tmp.resolve("sem-permissao"),
-                "/opt/sitelock/siteblock.jar", runner)::call);
+                jarDeExemplo().toString(), runner)::call);
 
         assertEquals(1, r.exit(), r.texto());
         assertTrue(r.texto().toLowerCase().contains("sudo")
@@ -124,9 +132,9 @@ class DaemonEnableTest {
     }
 
     @Test
-    void linuxWithoutSystemdPrintsManualInstructions() {
+    void linuxWithoutSystemdPrintsManualInstructions() throws Exception {
         DaemonEnableCommand cmd = new DaemonEnableCommand(OsType.LINUX, raiz(),
-                "/opt/sitelock/siteblock.jar", runner, false);
+                jarDeExemplo().toString(), runner, false);
 
         Resultado r = rodar(cmd::call);
 
@@ -139,21 +147,47 @@ class DaemonEnableTest {
     }
 
     @Test
-    void enableWarnsAboutWritableJarPath() throws Exception {
-        Path jarGravavel = Files.createDirectories(tmp.resolve("Meu SiteBlock")).resolve("siteblock.jar");
-        Files.writeString(jarGravavel, "x");
+    void enableInstallsTheJarInAStableLocationAndPointsThere() throws Exception {
+        Path origem = jarDeExemplo();
+        Resultado r = rodar(enable(OsType.LINUX, origem.toString())::call);
 
-        Resultado r = rodar(enable(OsType.LINUX, jarGravavel.toString())::call);
+        assertEquals(0, r.exit(), r.texto());
+        Path estavel = AutostartInstaller.installJarPath(OsType.LINUX, raiz());
+        assertTrue(Files.exists(estavel), "o jar tem que estar em " + estavel);
+        assertTrue(r.texto().contains(estavel.toString()), r.texto());
 
-        assertEquals(0, r.exit(), "instalar mesmo assim é o esperado: " + r.texto());
-        assertTrue(r.texto().contains(jarGravavel.toString()),
-                "o aviso precisa dizer qual caminho: " + r.texto());
-        assertTrue(r.texto().contains("root"), r.texto());
+        String unit = ler(AutostartInstaller.artifactPath(OsType.LINUX, raiz()));
+        assertTrue(unit.contains(estavel.toString()),
+                "a unit tem que apontar para a cópia estável: " + unit);
+        assertFalse(unit.contains(origem.toString()),
+                "a unit não pode apontar para o jar de build — é o que o mvn clean apaga: " + unit);
     }
 
     @Test
-    void disableRemovesTheArtifact() {
-        rodar(enable(OsType.LINUX, "/opt/sitelock/siteblock.jar")::call);
+    void enableRefreshesTheInstalledCopyOnASecondRun() throws Exception {
+        Path origem = jarDeExemplo();
+        assertEquals(0, rodar(enable(OsType.LINUX, origem.toString())::call).exit());
+
+        Files.writeString(origem, "versao nova", StandardCharsets.UTF_8);
+        assertEquals(0, rodar(enable(OsType.LINUX, origem.toString())::call).exit());
+
+        assertEquals("versao nova", Files.readString(
+                AutostartInstaller.installJarPath(OsType.LINUX, raiz()), StandardCharsets.UTF_8),
+                "reinstalar tem que atualizar a cópia — é assim que o daemon roda a versão nova");
+    }
+
+    @Test
+    void enableFailsClearlyWhenTheSourceJarIsMissing() {
+        Resultado r = rodar(enable(OsType.LINUX, tmp.resolve("nao-existe.jar").toString())::call);
+
+        assertEquals(1, r.exit(), r.texto());
+        assertTrue(r.texto().contains("nao-existe.jar"), r.texto());
+        assertTrue(r.texto().contains("mvn package"), "tem que dizer como gerar o jar: " + r.texto());
+    }
+
+    @Test
+    void disableRemovesTheArtifact() throws Exception {
+        rodar(enable(OsType.LINUX, jarDeExemplo().toString())::call);
         assertTrue(Files.exists(artefato(OsType.LINUX)));
 
         Resultado r = rodar(new DaemonDisableCommand(OsType.LINUX, raiz(), runner)::call);
@@ -171,8 +205,8 @@ class DaemonEnableTest {
     }
 
     @Test
-    void macOsArtifactIsAPlist() {
-        rodar(enable(OsType.MACOS, "/opt/sitelock/siteblock.jar")::call);
+    void macOsArtifactIsAPlist() throws Exception {
+        rodar(enable(OsType.MACOS, jarDeExemplo().toString())::call);
 
         assertTrue(Files.exists(artefato(OsType.MACOS)));
         String plist = ler(artefato(OsType.MACOS));
