@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -112,6 +113,61 @@ class ExpirationDaemonStateTest {
         } catch (UnsupportedOperationException | IOException e) {
             return "";
         }
+    }
+
+    /**
+     * O SO recicla PID: o daemon morreu e o número foi dado a outro
+     * processo. Um "o PID existe" mente, e o {@code daemon stop} manda um
+     * SIGTERM num processo que não é o SiteLock.
+     */
+    @Test
+    void umPidRecicladoNaoPassaPorDaemonVivo() {
+        ExpirationDaemonState reciclado = new ExpirationDaemonState(
+                ProcessHandle.current().pid(), NOW, "/x", null, NOW);
+
+        assertFalse(ExpirationDaemonState.isAlive(reciclado),
+                "o PID existe, mas não é o processo que o registro descreve");
+    }
+
+    @Test
+    void oProcessoQueGravouORegistroEstaVivo() {
+        Instant inicio = ProcessHandle.current().info().startInstant().orElseThrow();
+        ExpirationDaemonState state = new ExpirationDaemonState(
+                ProcessHandle.current().pid(), inicio, "/x", null, inicio);
+
+        assertTrue(ExpirationDaemonState.isAlive(state),
+                "o processo que escreveu o registro tem que ser reconhecido como vivo");
+    }
+
+    @Test
+    void registroAntigoSemOInstanteContinuaFuncionando() throws Exception {
+        // Um daemon.json escrito por uma versão antiga não tem o instante de
+        // início: sem ele, sobra a checagem do PID.
+        Files.writeString(ExpirationDaemonState.statePath(tmp),
+                "{\"pid\":" + ProcessHandle.current().pid()
+                        + ",\"startedAt\":\"2026-10-15T12:00:00Z\",\"stateDir\":\"/x\"}",
+                StandardCharsets.UTF_8);
+
+        ExpirationDaemonState state = ExpirationDaemonState.read(tmp).orElseThrow();
+
+        assertNull(state.getProcessStartedAt(), "o registro antigo não tem o campo novo");
+        assertTrue(ExpirationDaemonState.isAlive(state),
+                "um registro antigo tem que continuar funcionando: só a checagem do PID");
+    }
+
+    @Test
+    void aEscritaGravaOInstanteDeInicioDoProcesso() throws Exception {
+        ExpirationDaemonState state = new ExpirationDaemonState(
+                ProcessHandle.current().pid(), NOW, tmp.toString(), null);
+
+        ExpirationDaemonState.write(tmp, state);
+
+        ExpirationDaemonState lido = ExpirationDaemonState.read(tmp).orElseThrow();
+        assertEquals(ProcessHandle.current().info().startInstant().orElseThrow(),
+                lido.getProcessStartedAt(),
+                "o registro tem que guardar o instante de início do PROCESSO");
+        assertEquals(lido.getProcessStartedAt(), lido.getStartedAt(),
+                "o 'Subiu em:' tem que mostrar o instante de início do processo");
     }
 
     @Test
