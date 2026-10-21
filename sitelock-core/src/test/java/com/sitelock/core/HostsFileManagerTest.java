@@ -92,6 +92,62 @@ class HostsFileManagerTest {
         assertDoesNotThrow(() -> HostsFileManager.addDomain(null, "a.com"));
     }
 
+    @Test
+    void removeKeepsUserLinesOutsideTheBlock() {
+        String content = "127.0.0.1 tiktok.com\n"
+                + "10.0.0.5 intranet.local\n"
+                + "# SITELOCK-START\n"
+                + "127.0.0.1 youtube.com\n"
+                + "::1 youtube.com\n"
+                + "# SITELOCK-END\n";
+
+        String out = HostsFileManager.removeDomain(content, "tiktok.com");
+
+        assertTrue(out.contains("127.0.0.1 tiktok.com"),
+                "linha do usuário fora do bloco não pode ser apagada: " + out);
+        assertTrue(out.contains("10.0.0.5 intranet.local"), out);
+        assertTrue(out.contains("127.0.0.1 youtube.com"), out);
+    }
+
+    @Test
+    void removeDoesNotRewriteUserLinesOutsideTheBlock() {
+        String content = "127.0.0.1 tiktok.com intranet.local\n"
+                + "# SITELOCK-START\n"
+                + "127.0.0.1 youtube.com\n"
+                + "# SITELOCK-END\n";
+
+        String out = HostsFileManager.removeDomain(content, "tiktok.com");
+
+        assertTrue(out.contains("127.0.0.1 tiktok.com intranet.local"),
+                "linha do usuário fora do bloco não pode ser reescrita: " + out);
+    }
+
+    @Test
+    void removeDeletesDomainFromSharedLineInsideBlock() {
+        String content = "# SITELOCK-START\n"
+                + "127.0.0.1 tiktok.com www.tiktok.com\n"
+                + "# SITELOCK-END\n";
+
+        String out = HostsFileManager.removeDomain(content, "tiktok.com");
+
+        assertFalse(out.contains("tiktok.com"), out);
+    }
+
+    @Test
+    void removeKeepsCommentsInsideBlock() {
+        String content = "# SITELOCK-START\n"
+                + "# bloqueio manual\n"
+                + "127.0.0.1 youtube.com\n"
+                + "127.0.0.1 tiktok.com\n"
+                + "# SITELOCK-END\n";
+
+        String out = HostsFileManager.removeDomain(content, "tiktok.com");
+
+        assertTrue(out.contains("# bloqueio manual"), out);
+        assertTrue(out.contains("127.0.0.1 youtube.com"), out);
+        assertFalse(out.contains("127.0.0.1 tiktok.com"), out);
+    }
+
     private static int countOccurrences(String haystack, String needle) {
         int count = 0;
         int idx = 0;

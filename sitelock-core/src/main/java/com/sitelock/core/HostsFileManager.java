@@ -114,53 +114,57 @@ public final class HostsFileManager {
         String content = hostsContent == null ? "" : hostsContent;
         List<String> hosts = managedHosts(domain);
 
-        int start = content.indexOf(START_MARKER);
-        int end = content.indexOf(END_MARKER);
-
-        if (start >= 0 && end > start) {
-            String head = content.substring(0, start);
-            String block = content.substring(start, end);
-            String tail = content.substring(end + END_MARKER.length());
-
-            List<String> blockLines = new ArrayList<>(Arrays.asList(block.split("\n", -1)));
-            List<String> kept = new ArrayList<>();
-            for (String line : blockLines) {
-                if (line.contains(START_MARKER)) {
-                    kept.add(line);
-                    continue;
-                }
-                String stripped = stripHostnames(line, hosts);
-                if (stripped != null) {
-                    if (!stripped.isEmpty() || isCommentOrBlank(line)) {
-                        kept.add(line);
-                    } else if (!stripped.equals(line)) {
-                        if (!stripped.isBlank()) {
-                            kept.add(stripped);
-                        }
-                    } else {
-                        kept.add(line);
-                    }
-                }
-            }
-
-            while (!kept.isEmpty() && kept.get(kept.size() - 1).isEmpty()) {
-                kept.remove(kept.size() - 1);
-            }
-
-            boolean hasEntry = kept.stream().anyMatch(HostsFileManager::isEntryLine);
-            String newBlock;
-            if (!hasEntry) {
-                newBlock = "";
-            } else {
-                newBlock = String.join("\n", kept) + "\n" + END_MARKER;
-            }
-
-            String result = head + newBlock + tail;
-            result = removeOrphanLines(result, hosts);
-            return tidyBlankLines(result);
+        List<String> all = splitLines(content);
+        int start = indexOfMarker(all, START_MARKER, 0);
+        int end = indexOfMarker(all, END_MARKER, start + 1);
+        if (start < 0 || end < 0) {
+            // POR QUE: o SiteBlock só reescreve o bloco que ele mesmo escreveu.
+            // Linha do usuário fora dele é intocável, mesmo que cite o domínio.
+            return content;
         }
 
-        return tidyBlankLines(removeOrphanLines(content, hosts));
+        List<String> kept = new ArrayList<>();
+        for (String line : all.subList(start + 1, end)) {
+            String stripped = stripHostnames(line, hosts);
+            if (stripped == null) {
+                continue;
+            }
+            if (stripped.equals(line)) {
+                kept.add(line);
+            } else if (!stripped.isEmpty()) {
+                kept.add(stripped);
+            }
+        }
+        while (!kept.isEmpty() && kept.get(kept.size() - 1).isEmpty()) {
+            kept.remove(kept.size() - 1);
+        }
+
+        List<String> out = new ArrayList<>(all.subList(0, start));
+        boolean hasEntry = kept.stream().anyMatch(HostsFileManager::isEntryLine);
+        if (hasEntry) {
+            out.add(all.get(start));
+            out.addAll(kept);
+            out.add(all.get(end));
+        }
+        out.addAll(all.subList(end + 1, all.size()));
+        return joinLines(out);
+    }
+
+    private static List<String> splitLines(String content) {
+        return new ArrayList<>(Arrays.asList(content.split("\n", -1)));
+    }
+
+    private static String joinLines(List<String> lines) {
+        return String.join("\n", lines);
+    }
+
+    private static int indexOfMarker(List<String> lines, String marker, int from) {
+        for (int i = from; i < lines.size(); i++) {
+            if (lines.get(i).contains(marker)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private static boolean containsHostWithIp(String block, String ip, String host) {
@@ -227,37 +231,12 @@ public final class HostsFileManager {
         return String.join(" ", remaining);
     }
 
-    private static boolean isCommentOrBlank(String line) {
-        String t = line.strip();
-        return t.isEmpty() || t.startsWith("#");
-    }
-
     private static boolean isEntryLine(String line) {
         String t = line.strip();
         if (t.isEmpty() || t.startsWith("#")) {
             return false;
         }
         return t.split("\\s+").length >= 2;
-    }
-
-    private static String removeOrphanLines(String content, List<String> hosts) {
-        String[] lines = content.split("\n", -1);
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < lines.length; i++) {
-            String rewritten = stripHostnames(lines[i], hosts);
-            if (rewritten == null) {
-                continue;
-            }
-            sb.append(rewritten);
-            if (i < lines.length - 1) {
-                sb.append('\n');
-            }
-        }
-        return sb.toString();
-    }
-
-    private static String tidyBlankLines(String s) {
-        return s.replaceAll("\n{3,}", "\n\n");
     }
 
     public static boolean isWritable(Path hostsPath) {
