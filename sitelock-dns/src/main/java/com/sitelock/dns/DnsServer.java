@@ -10,8 +10,14 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -50,10 +56,14 @@ public class DnsServer {
     private final BlockStore store;
     private final Clock clock;
     private final DnsResolver resolver;
+    private final SourcePolicy policy;
 
     private volatile boolean stopRequested = false;
     private volatile DatagramSocket socket;
     private volatile ExecutorService pool;
+
+    /** Última vez que cada origem recusada foi registrada (para não inundar o log). */
+    private final Map<String, Long> ultimaRecusa = new ConcurrentHashMap<>();
 
     public DnsServer(int port, InetAddress upstream, BlockStore store, Clock clock) {
         this(port, upstream, DEFAULT_UPSTREAM_TIMEOUT_MS, store, clock);
@@ -61,6 +71,30 @@ public class DnsServer {
 
     public DnsServer(int port, InetAddress upstream, int upstreamTimeoutMs,
                      BlockStore store, Clock clock) {
+        this(port, upstream, upstreamTimeoutMs, store, clock, List.of());
+    }
+
+    /**
+     * @param allowFrom origens liberadas além das locais (endereço ou CIDR,
+     *                  separados por vírgula)
+     */
+    public DnsServer(int port, InetAddress upstream, BlockStore store, Clock clock,
+                     List<String> allowFrom) {
+        this(port, upstream, DEFAULT_UPSTREAM_TIMEOUT_MS, store, clock, allowFrom);
+    }
+
+    /**
+     * @param allowFrom origens liberadas além das locais (endereço ou CIDR,
+     *                  separados por vírgula)
+     */
+    public DnsServer(int port, InetAddress upstream, int upstreamTimeoutMs,
+                     BlockStore store, Clock clock, List<String> allowFrom) {
+        this(port, upstream, upstreamTimeoutMs, store, clock, SourcePolicy.padrao(allowFrom));
+    }
+
+    /** Construtor com a política de origem já pronta (usado nos testes). */
+    DnsServer(int port, InetAddress upstream, int upstreamTimeoutMs,
+              BlockStore store, Clock clock, SourcePolicy policy) {
         if (port < 1 || port > 65535) {
             throw new IllegalArgumentException("porta inválida: " + port);
         }
@@ -76,6 +110,7 @@ public class DnsServer {
         this.store = store;
         this.clock = clock;
         this.resolver = new DnsResolver(store, clock);
+        this.policy = policy;
     }
 
     public int getPort() {
@@ -84,6 +119,30 @@ public class DnsServer {
 
     public InetAddress getUpstream() {
         return upstream;
+    }
+
+    /**
+     * Valida a lista de origens do {@code --allow-from} (separada por vírgula).
+     *
+     * <p>ATENÇÃO: a validação acontece na CLI, antes de forkar — um erro de
+     * digitação no endereço não pode derrubar o daemon depois de subir.
+     *
+     * @throws IllegalArgumentException se alguma entrada não for IP ou CIDR válido
+     */
+    public static List<String> parseAllowFrom(String texto) {
+        List<String> origens = new ArrayList<>();
+        if (texto == null || texto.isBlank()) {
+            return origens;
+        }
+        for (String parte : texto.split(",")) {
+            String limpa = parte.trim();
+            if (limpa.isEmpty()) {
+                continue;
+            }
+            Cidr.parse(limpa); // valida: lança com mensagem clara
+            origens.add(limpa);
+        }
+        return origens;
     }
 
     /** Registra hook de encerramento controlado (fecha socket + pool no SIGTERM/Ctrl+C). */
@@ -100,7 +159,10 @@ public class DnsServer {
         DatagramSocket ds = bind();
         this.socket = ds;
         this.pool = newPool();
-        log("ouvindo em 0.0.0.0:" + port + " (upstream " + upstream.getHostAddress() + ")");
+        log("ouvindo em 0.0.0.0:" + port + " (upstream " + upstream.getHostAddress()
+                + ") — aceitando origens locais"
+                + (policy.extras().isEmpty() ? ""
+                : " + extras " + String.join(", ", policy.extras())));
         System.out.println("SITELOCK_DNS_LISTENING port=" + port);
         try {
             while (!stopRequested) {
@@ -194,6 +256,10 @@ public class DnsServer {
     }
 
     private void handlePacket(byte[] data, InetAddress client, int clientPort) {
+        if (!policy.isAllowed(client)) {
+            registrarOrigemRecusada(client);
+            return; // silêncio: responder seria justamente amplificar
+        }
         final DnsQuery query;
         try {
             query = DnsPacketParser.parse(data, data.length);
@@ -305,6 +371,214 @@ public class DnsServer {
             }
         };
         return Executors.newCachedThreadPool(factory);
+    }
+
+    /**
+     * Registra a origem recusada, sem repetir a cada pacote.
+     *
+     * <p>POR QUE: uma varredura na porta gera milhares de pacotes; um log por
+     * pacote enche o disco. O nome consultado não aparece aqui de propósito:
+     * recusar é decisão de origem, e o log não vira canal de consulta.
+     */
+    private void registrarOrigemRecusada(InetAddress client) {
+        String ip = client.getHostAddress();
+        long agora = System.currentTimeMillis();
+        if (ultimaRecusa.size() > 1000) {
+            ultimaRecusa.clear();
+        }
+        Long anterior = ultimaRecusa.put(ip, agora);
+        if (anterior == null || agora - anterior > 10_000) {
+            log("origem recusada " + ip + " (não é local e não está em --allow-from)");
+        }
+    }
+
+    /**
+     * Quem pode consultar este servidor.
+     *
+     * <p>POR QUE: escutar em 0.0.0.0 sem olhar a origem transforma a máquina
+     * num resolvedor aberto — qualquer um da internet a usa como reflexo de
+     * DDoS (a resposta do upstream sai com o IP dela) e para saber o que as
+     * máquinas da rede consultam. O padrão aceita só origem local (loopback,
+     * link-local, RFC1918, IPv6 ULA e os próprios endereços da máquina) e
+     * recusa o resto <b>em silêncio</b>: responder seria o que amplifica.
+     */
+    public static final class SourcePolicy {
+
+        /** Redes liberadas por padrão: loopback, link-local, RFC1918 e ULA. */
+        private static final List<String> REDES_PADRAO = List.of(
+                "127.0.0.0/8",     // loopback IPv4
+                "::1/128",         // loopback IPv6
+                "169.254.0.0/16",  // link-local IPv4 (hotspot, PPPoE)
+                "fe80::/10",       // link-local IPv6
+                "10.0.0.0/8",      // RFC1918
+                "172.16.0.0/12",   // RFC1918
+                "192.168.0.0/16",  // RFC1918
+                "fc00::/7");       // ULA IPv6 (equivalente do RFC1918)
+
+        private final List<Cidr> redes;
+        private final Set<InetAddress> exatos;
+        private final List<String> extras;
+
+        private SourcePolicy(List<Cidr> redes, Set<InetAddress> exatos, List<String> extras) {
+            this.redes = List.copyOf(redes);
+            this.exatos = Set.copyOf(exatos);
+            this.extras = List.copyOf(extras);
+        }
+
+        /** Política padrão: redes locais + endereços da máquina + --allow-from. */
+        public static SourcePolicy padrao(List<String> allowFrom) {
+            List<Cidr> redes = new ArrayList<>();
+            for (String rede : REDES_PADRAO) {
+                redes.add(Cidr.parse(rede));
+            }
+            List<String> extras = new ArrayList<>();
+            for (String extra : allowFrom) {
+                for (String parte : extra.split(",")) {
+                    if (!parte.isBlank()) {
+                        redes.add(Cidr.parse(parte));
+                        extras.add(parte.trim());
+                    }
+                }
+            }
+            return new SourcePolicy(redes, Set.copyOf(NetworkUtils.localAddresses()), extras);
+        }
+
+        /** Política que não aceita ninguém (usado nos testes). */
+        static SourcePolicy nenhuma() {
+            return new SourcePolicy(List.of(), Set.of(), List.of());
+        }
+
+        /** Origens liberadas além das locais (para o log). */
+        public List<String> extras() {
+            return extras;
+        }
+
+        /** true se a origem pode consultar este servidor. */
+        public boolean isAllowed(InetAddress origem) {
+            if (origem == null) {
+                return false;
+            }
+            if (exatos.contains(origem)) {
+                return true; // endereço da própria máquina
+            }
+            for (Cidr rede : redes) {
+                if (rede.matches(origem)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Uma rede em notação CIDR (ou um endereço único, tratado como /32 ou /128).
+     */
+    static final class Cidr {
+
+        private final byte[] rede;
+        private final int bits;
+
+        private Cidr(byte[] rede, int bits) {
+            this.rede = rede;
+            this.bits = bits;
+        }
+
+        /**
+         * @throws IllegalArgumentException se o texto não for um IP ou CIDR válido
+         */
+        static Cidr parse(String texto) {
+            String limpo = texto == null ? "" : texto.trim();
+            if (limpo.isEmpty()) {
+                throw new IllegalArgumentException("endereço vazio em --allow-from");
+            }
+            int barra = limpo.indexOf('/');
+            String parteEndereco = barra < 0 ? limpo : limpo.substring(0, barra);
+            String parteBits = barra < 0 ? null : limpo.substring(barra + 1);
+            InetAddress endereco = enderecoLiteral(parteEndereco);
+            byte[] bytes = endereco.getAddress();
+            int maximo = bytes.length * 8;
+            int bits = maximo;
+            if (parteBits != null) {
+                try {
+                    bits = Integer.parseInt(parteBits.trim());
+                } catch (NumberFormatException e) {
+                    throw new IllegalArgumentException("máscara inválida em --allow-from: " + texto);
+                }
+                if (bits < 0 || bits > maximo) {
+                    throw new IllegalArgumentException("máscara fora de faixa em --allow-from: " + texto);
+                }
+            }
+            byte[] base = new byte[bytes.length];
+            System.arraycopy(bytes, 0, base, 0, bytes.length);
+            for (int i = 0; i < base.length; i++) {
+                int validos = Math.max(0, Math.min(8, bits - i * 8));
+                int mascara = validos == 0 ? 0xFF : (0xFF << (8 - validos)) & 0xFF;
+                base[i] = (byte) (base[i] & mascara);
+            }
+            return new Cidr(base, bits);
+        }
+
+        boolean matches(InetAddress endereco) {
+            byte[] bytes = endereco.getAddress();
+            if (bytes.length != rede.length) {
+                return false; // IPv4 não casa com rede IPv6 (e vice-versa)
+            }
+            int bytesCheios = bits / 8;
+            int bitsSoltos = bits % 8;
+            for (int i = 0; i < bytesCheios; i++) {
+                if (bytes[i] != rede[i]) {
+                    return false;
+                }
+            }
+            if (bitsSoltos > 0) {
+                int mascara = (0xFF << (8 - bitsSoltos)) & 0xFF;
+                if ((bytes[bytesCheios] & mascara) != (rede[bytesCheios] & mascara)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        /**
+         * Converte o texto em endereço, sem nunca consultar o DNS.
+         *
+         * <p>POR QUE: {@code InetAddress.getByName} resolve nomes e um hostname
+         * esquecido travaria o servidor na primeira query (o DNS público pode
+         * estar justamente bloqueado).
+         */
+        private static InetAddress enderecoLiteral(String texto) {
+            String t = texto.trim();
+            if (t.indexOf(':') >= 0) {
+                try {
+                    return InetAddress.getByName(t);
+                } catch (UnknownHostException e) {
+                    throw new IllegalArgumentException("endereço IPv6 inválido: " + texto);
+                }
+            }
+            String[] partes = t.split("\\.");
+            if (partes.length != 4) {
+                throw new IllegalArgumentException(
+                        "endereço inválido em --allow-from (use IP ou CIDR, sem nome): " + texto);
+            }
+            byte[] bytes = new byte[4];
+            for (int i = 0; i < 4; i++) {
+                int valor;
+                try {
+                    valor = Integer.parseInt(partes[i]);
+                } catch (NumberFormatException e) {
+                    throw new IllegalArgumentException("endereço inválido em --allow-from: " + texto);
+                }
+                if (valor < 0 || valor > 255) {
+                    throw new IllegalArgumentException("endereço inválido em --allow-from: " + texto);
+                }
+                bytes[i] = (byte) valor;
+            }
+            try {
+                return InetAddress.getByAddress(bytes);
+            } catch (UnknownHostException e) {
+                throw new IllegalArgumentException("endereço inválido em --allow-from: " + texto);
+            }
+        }
     }
 
     private static void closeQuietly(DatagramSocket ds) {

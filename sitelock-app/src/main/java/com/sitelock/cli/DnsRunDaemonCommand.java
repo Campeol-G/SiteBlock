@@ -31,6 +31,10 @@ public class DnsRunDaemonCommand implements Callable<Integer> {
     @Option(names = "--for") String forDuration;
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
 
+    @Option(names = "--allow-from", paramLabel = "<lista>",
+            description = "Origens liberadas além das locais (IP ou CIDR, separados por vírgula).")
+    String allowFrom;
+
     public DnsRunDaemonCommand() {
     }
 
@@ -57,8 +61,17 @@ public class DnsRunDaemonCommand implements Callable<Integer> {
                 ? Path.of(stateFileOverride)
                 : stateDir.resolve("blocks.json");
 
+        final java.util.List<String> origensLiberadas;
+        try {
+            origensLiberadas = com.sitelock.dns.DnsServer.parseAllowFrom(allowFrom);
+        } catch (IllegalArgumentException e) {
+            System.err.println("[sitelock-dns] " + e.getMessage());
+            return 2;
+        }
+
         com.sitelock.dns.DnsServer server = new com.sitelock.dns.DnsServer(
-                port, upstreamAddr, new com.sitelock.core.BlockStore(stateFile), Clock.systemUTC());
+                port, upstreamAddr, new com.sitelock.core.BlockStore(stateFile), Clock.systemUTC(),
+                origensLiberadas);
         server.installShutdownHook();
 
         java.util.concurrent.ScheduledExecutorService scheduler = null;

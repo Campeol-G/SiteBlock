@@ -4,13 +4,20 @@ import com.sitelock.core.BlockStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.net.InetAddress;
+import java.net.SocketTimeoutException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Clock;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * O servidor DNS de verdade, em socket de verdade (loopback, porta alta).
@@ -72,6 +79,41 @@ class DnsServerTest {
             assertArrayEquals(new byte[]{0, 0, 0, 0}, r.primeiroRdata(),
                     "sinkhole IPv4 é 0.0.0.0");
         } finally {
+            server.stop();
+        }
+    }
+
+    /**
+     * Origem de fora não recebe nada: responder seria amplificar a consulta
+     * para a vítima e revelaria o que a rede consulta.
+     */
+    @Test
+    void origemRecusadaNaoRecebeResposta() throws Exception {
+        Path estado = DnsTestSupport.arquivoDeBloqueios(tmp, "youtube.com");
+        int porta = DnsTestSupport.portaLivre();
+        DnsServer server = new DnsServer(porta, InetAddress.getLoopbackAddress(), 500,
+                new BlockStore(estado), Clock.systemUTC(), DnsServer.SourcePolicy.nenhuma());
+
+        ByteArrayOutputStream log = new ByteArrayOutputStream();
+        PrintStream original = System.out;
+        System.setOut(new PrintStream(log, true, StandardCharsets.UTF_8));
+        try {
+            Thread t = new Thread(server::serveForever, "servidor-de-teste");
+            t.setDaemon(true);
+            t.start();
+            DnsTestSupport.esperaMarca(log, "SITELOCK_DNS_LISTENING", 5000);
+
+            assertThrows(SocketTimeoutException.class, () -> DnsTestSupport.consultar(porta,
+                    DnsWire.query(0x3333, "youtube.com", 1), 1000),
+                    "origem recusada não pode receber resposta");
+
+            String texto = log.toString(StandardCharsets.UTF_8);
+            assertTrue(texto.contains("origem recusada"),
+                    "o log precisa registrar a recusa: " + texto);
+            assertFalse(texto.contains("BLOQUEADO"),
+                    "consulta recusada não pode ser atendida: " + texto);
+        } finally {
+            System.setOut(original);
             server.stop();
         }
     }

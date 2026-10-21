@@ -5,6 +5,7 @@ import com.sitelock.core.BlockStore;
 import com.sitelock.core.DurationParser;
 import com.sitelock.core.PermissionAdvisor;
 import com.sitelock.dns.DnsDaemonState;
+import com.sitelock.dns.DnsServer;
 import com.sitelock.dns.NetworkUtils;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -51,6 +52,10 @@ public class DnsStartCommand implements Callable<Integer> {
             description = "Desliga sozinho após a duração. Ex.: 30m, 2h, 1d. Omitido = até 'dns stop'.")
     String forDuration;
 
+    @Option(names = "--allow-from", paramLabel = "<lista>",
+            description = "Origens liberadas além das locais (IP ou CIDR, separados por vírgula).")
+    String allowFrom;
+
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
 
     public DnsStartCommand() {
@@ -96,6 +101,15 @@ public class DnsStartCommand implements Callable<Integer> {
             String retry = "dns start" + (forDuration != null ? " --for " + forDuration : "");
             System.err.println("Erro: " + new PermissionAdvisor().privilegedPortHint(port, retry));
             return 1;
+        }
+
+        // Valida antes de forkar: erro de digitação no --allow-from não pode
+        // aparecer só depois que o daemon já subiu.
+        try {
+            DnsServer.parseAllowFrom(allowFrom);
+        } catch (IllegalArgumentException e) {
+            System.err.println("Erro: " + e.getMessage());
+            return 2;
         }
 
         Path stateDir = DnsDaemonState.stateDirFor(stateFileOverride);
@@ -220,6 +234,10 @@ public class DnsStartCommand implements Callable<Integer> {
         if (forDuration != null) {
             cmd.add("--for");
             cmd.add(forDuration);
+        }
+        if (allowFrom != null && !allowFrom.isBlank()) {
+            cmd.add("--allow-from");
+            cmd.add(allowFrom);
         }
         if (stateFileOverride != null && !stateFileOverride.isBlank()) {
             cmd.add("--state-file");

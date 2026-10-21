@@ -6,7 +6,9 @@ import java.net.NetworkInterface;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Enumeration;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Descoberta do IP local da máquina para imprimir no terminal ao iniciar o servidor.
@@ -74,6 +76,36 @@ public final class NetworkUtils {
     public static String primaryLocalIp() {
         List<String> ips = localIPv4Addresses();
         return ips.isEmpty() ? "127.0.0.1" : ips.get(0);
+    }
+
+    /**
+     * Todos os endereços (IPv4 e IPv6) das interfaces da máquina.
+     *
+     * <p>Usado pela política de origem do servidor: uma consulta vinda do
+     * próprio endereço da máquina é local por definição, mesmo que o endereço
+     * não caia em nenhuma rede privada (num VPS com IP público, por exemplo).
+     */
+    public static Set<InetAddress> localAddresses() {
+        Set<InetAddress> enderecos = new LinkedHashSet<>();
+        try {
+            Enumeration<NetworkInterface> ifaces = NetworkInterface.getNetworkInterfaces();
+            if (ifaces == null) {
+                return Set.of();
+            }
+            for (NetworkInterface iface : Collections.list(ifaces)) {
+                try {
+                    if (!iface.isUp()) {
+                        continue;
+                    }
+                } catch (Exception e) {
+                    continue;
+                }
+                enderecos.addAll(Collections.list(iface.getInetAddresses()));
+            }
+        } catch (Exception e) {
+            return Set.of();
+        }
+        return Set.copyOf(enderecos);
     }
 
     /** Imprime o bloco de ajuda de configuração ao subir o servidor. */

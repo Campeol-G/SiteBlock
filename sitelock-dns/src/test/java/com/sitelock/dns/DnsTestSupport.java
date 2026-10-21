@@ -1,5 +1,6 @@
 package com.sitelock.dns;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
@@ -76,8 +77,20 @@ final class DnsTestSupport {
         throw new IllegalStateException("o servidor não respondeu na porta " + porta);
     }
 
-    /** Cria um blocks.json com os domínios dados. */
-    static Path arquivoDeBloqueios(Path dir, String... dominios) throws IOException {
+    /** Espera o log do servidor mostrar a marca pedida. */
+    static void esperaMarca(ByteArrayOutputStream log, String marca, long timeoutMs)
+            throws InterruptedException {
+        long fim = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < fim) {
+            if (log.toString(StandardCharsets.UTF_8).contains(marca)) {
+                return;
+            }
+            Thread.sleep(25);
+        }
+        throw new IllegalStateException("a marca '" + marca + "' não apareceu no log");
+    }
+
+    /** Cria um blocks.json com os domínios dados. */    static Path arquivoDeBloqueios(Path dir, String... dominios) throws IOException {
         Files.createDirectories(dir);
         Path arquivo = dir.resolve("blocks.json");
         StringBuilder json = new StringBuilder("{");
