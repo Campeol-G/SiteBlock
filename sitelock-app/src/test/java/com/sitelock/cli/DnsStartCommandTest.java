@@ -55,6 +55,32 @@ class DnsStartCommandTest {
         }
     }
 
+    /**
+     * Um registro corrompido não pode trancar a máquina: o usuário precisa
+     * conseguir subir o servidor DNS sem apagar arquivo à mão.
+     */
+    @Test
+    void registroCorrompidoNaoImpedeOServidorDeSubir() throws Exception {
+        Path stateFile = tmp.resolve("blocks.json");
+        Files.writeString(stateFile, "{}", StandardCharsets.UTF_8);
+        Files.writeString(tmp.resolve("dns-server.json"),
+                "{ \"pid\": 12, \"port\":", StandardCharsets.UTF_8);
+
+        int exit = new CommandLine(new DnsCommand()).execute(
+                "start",
+                "--port", String.valueOf(PORTA + 1),
+                "--upstream", "127.0.0.1",
+                "--state-file", stateFile.toString());
+        try {
+            assertEquals(0, exit,
+                    "um registro corrompido não pode impedir o servidor DNS de subir");
+            DnsDaemonState state = DnsDaemonState.read(tmp).orElseThrow();
+            assertTrue(state.getPid() > 0, "o registro novo tem que valer");
+        } finally {
+            encerrar(tmp);
+        }
+    }
+
     /** Derruba o daemon que o teste subiu (o PID está no registro de estado). */
     private void encerrar(Path estado) {
         try {
