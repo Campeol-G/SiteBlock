@@ -132,6 +132,42 @@ class DaemonEnableTest {
     }
 
     @Test
+    void enableNoWindowsNaoEstouraExcecao() throws Exception {
+        // O Windows é suportado pelo projeto, e o enable estourava NPE: o
+        // artifactPath devolve null lá, e a checagem de elevação dereferenciava.
+        Resultado r = rodar(enable(OsType.WINDOWS, jarDeExemplo().toString())::call);
+
+        assertEquals(0, r.exit(), r.texto());
+        assertTrue(comandos.stream().anyMatch(c -> c.get(0).equals("schtasks")
+                && c.contains("/create")), comandos.toString());
+    }
+
+    @Test
+    void enableNoWindowsRecusaSemElevacaoQuandoODiretorioDoJarNaoEhGravavel() throws Exception {
+        // No Windows não existe artefato em arquivo: o que precisa ser
+        // gravável é o diretório onde o jar é instalado.
+        Path raizWin = tmp.resolve("sys-win");
+        Path dir = raizWin.resolve("ProgramData/SiteBlock");
+        Files.createDirectories(dir);
+        try {
+            Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("r-xr-xr-x"));
+        } catch (UnsupportedOperationException e) {
+            // Sem POSIX não há como simular diretório sem escrita (o CI também
+            // roda no Windows). Mesma técnica de enableRefusesWithoutRootAndSaysHow.
+            return;
+        }
+
+        Resultado r = rodar(new DaemonEnableCommand(OsType.WINDOWS, raizWin,
+                jarDeExemplo().toString(), runner)::call);
+
+        assertEquals(1, r.exit(), r.texto());
+        assertTrue(r.texto().toLowerCase().contains("sudo")
+                        || r.texto().toLowerCase().contains("administrador"),
+                "a saída tem que dizer como elevar: " + r.texto());
+        assertTrue(comandos.isEmpty(), "nem deve chamar o agendador: " + comandos);
+    }
+
+    @Test
     void linuxWithoutSystemdPrintsManualInstructions() throws Exception {
         DaemonEnableCommand cmd = new DaemonEnableCommand(OsType.LINUX, raiz(),
                 jarDeExemplo().toString(), runner, false);
@@ -216,6 +252,26 @@ class DaemonEnableTest {
     }
 
     @Test
+    void aUnitApontaParaOCaminhoDoJarEAoParaUmaFrase() throws Exception {
+        // Rodar o enable a partir do jar JÁ INSTALADO é o caminho natural para
+        // atualizar a versão — e é o que gerava o ExecStart inválido: o detail()
+        // do installJar era uma frase, e a unit passava a apontar para ela.
+        Path origem = jarDeExemplo();
+        assertEquals(0, rodar(enable(OsType.LINUX, origem.toString())::call).exit());
+
+        Path instalado = AutostartInstaller.installJarPath(OsType.LINUX, raiz());
+        Resultado r = rodar(enable(OsType.LINUX, instalado.toString())::call);
+
+        assertEquals(0, r.exit(), r.texto());
+        String unit = ler(artefato(OsType.LINUX));
+        assertEquals(instalado.toString(), caminhoDoJarNaUnit(unit),
+                "a unit tem que apontar para o jar: " + unit);
+        assertFalse(unit.contains("O jar já está no lugar"),
+                "a unit não pode apontar para uma frase: " + unit);
+        assertTrue(r.texto().contains("Jar: " + instalado), r.texto());
+    }
+
+    @Test
     void disableRemovesTheArtifact() throws Exception {
         rodar(enable(OsType.LINUX, jarDeExemplo().toString())::call);
         assertTrue(Files.exists(artefato(OsType.LINUX)));
@@ -254,6 +310,25 @@ class DaemonEnableTest {
         assertEquals("daemon", cmd.get(cmd.size() - 4));
         assertEquals("__run-daemon", cmd.get(cmd.size() - 3));
         assertTrue(cmd.contains("-Dsitelock.user=chico"), cmd.toString());
+    }
+
+    /** O caminho do jar na linha ExecStart da unit. */
+    private static String caminhoDoJarNaUnit(String unit) {
+        for (String linha : unit.split("\n")) {
+            if (!linha.startsWith("ExecStart=")) {
+                continue;
+            }
+            int i = linha.indexOf("-jar ");
+            if (i < 0) {
+                continue;
+            }
+            String resto = linha.substring(i + "-jar ".length()).trim();
+            if (resto.startsWith("\"")) {
+                return resto.substring(1, resto.indexOf('"', 1));
+            }
+            return resto.split("\\s+")[0];
+        }
+        throw new AssertionError("a unit não tem -jar:\n" + unit);
     }
 
     private static String ler(Path p) {

@@ -17,8 +17,24 @@ import java.util.concurrent.TimeUnit;
  */
 public final class AutostartInstaller {
 
-    /** Resultado de enable/disable: sucesso e o detalhe para o usuário. */
-    public record InstallResult(boolean success, String detail) {
+    /**
+     * Resultado de enable/disable: sucesso e o detalhe para o usuário.
+     *
+     * <p>O caminho vem separado do texto: o texto é para o olho da pessoa, e o
+     * caminho é para o artefato. Misturar os dois gerou uma unit com
+     * {@code -jar "O jar já está no lugar: /opt/sitelock/siteblock.jar"} — e a
+     * unit apontava para um caminho que não existe.
+     *
+     * @param success a operação deu certo
+     * @param detail  a mensagem para o usuário
+     * @param path    o caminho do jar ou do artefato; null quando não há
+     */
+    public record InstallResult(boolean success, String detail, Path path) {
+
+        /** Resultado sem caminho: só a mensagem. */
+        public InstallResult(boolean success, String detail) {
+            this(success, detail, null);
+        }
     }
 
     private static final int COMMAND_TIMEOUT_SECONDS = 15;
@@ -92,7 +108,7 @@ public final class AutostartInstaller {
         }
         Path destino = installJarPath(os, systemRoot);
         if (destino.toAbsolutePath().equals(origemAbs)) {
-            return new InstallResult(true, "O jar já está no lugar: " + destino);
+            return new InstallResult(true, "O jar já está no lugar: " + destino, destino);
         }
         try {
             Path parent = destino.getParent();
@@ -101,7 +117,7 @@ public final class AutostartInstaller {
             }
             Files.copy(origemAbs, destino,
                     java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            return new InstallResult(true, destino.toString());
+            return new InstallResult(true, "Jar instalado em " + destino, destino);
         } catch (IOException e) {
             return new InstallResult(false,
                     "Falha ao instalar o jar em " + destino + ": " + e.getMessage());
@@ -206,7 +222,7 @@ public final class AutostartInstaller {
         } catch (IOException e) {
             return new InstallResult(false, String.join(" ", comando) + ": " + e.getMessage());
         }
-        return new InstallResult(true, String.join(" ", comando));
+        return new InstallResult(true, String.join(" ", comando), target);
     }
 
     /** Remove o artefato e desliga o agendador. */
@@ -226,9 +242,9 @@ public final class AutostartInstaller {
         } catch (IOException e) {
             // O artefato já foi removido; o agendador não existir é o menor problema.
             return new InstallResult(true, "Artefato removido; " + String.join(" ", comando)
-                    + " não pôde ser executado (" + e.getMessage() + ").");
+                    + " não pôde ser executado (" + e.getMessage() + ").", target);
         }
-        return new InstallResult(true, String.join(" ", comando));
+        return new InstallResult(true, String.join(" ", comando), target);
     }
 
     static List<String> schedulerEnableCommand(OsType os, Path systemRoot) {
