@@ -61,8 +61,11 @@
       <!-- Fat-jar executável (java -jar sitelock-app/target/siteblock-*.jar).
            Escolha: maven-shade-plugin em vez de maven-assembly-plugin, porque o shade
            desempacota e reempacota as dependências num único JAR com merge de recursos
-           e ManifestResourceTransformer (Main-Class correto), tratando overlaps de
-           META-INF/services (picocli/jackson) que o assembly só colocaria lado a lado.
+           e ManifestResourceTransformer (Main-Class correto).
+           O merge de META-INF/services (picocli/jackson) quem faz é o
+           ServicesResourceTransformer: sem ele, dois jars que registram o mesmo
+           serviço se sobrescrevem e o módulo some em silêncio — o assembly só
+           colocaria os arquivos lado a lado.
            Uso: mvn clean package (ver run.sh/run.bat e README). -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
@@ -77,10 +80,25 @@
             <configuration>
               <createDependencyReducedPom>false</createDependencyReducedPom>
               <transformers>
+                <!-- POR QUE: sem isto, o META-INF/services de um módulo Jackson
+                     sobrescreve o do outro e o módulo some em silêncio. -->
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                   <mainClass>com.sitelock.SiteLockApplication</mainClass>
                 </transformer>
               </transformers>
+              <filters>
+                <!-- ATENÇÃO: assinatura de dependência no fat-jar deixa o jar
+                     ilegível (o JVM recusa a assinatura). -->
+                <filter>
+                  <artifact>*:*</artifact>
+                  <excludes>
+                    <exclude>META-INF/*.SF</exclude>
+                    <exclude>META-INF/*.DSA</exclude>
+                    <exclude>META-INF/*.RSA</exclude>
+                  </excludes>
+                </filter>
+              </filters>
             </configuration>
           </execution>
         </executions>
