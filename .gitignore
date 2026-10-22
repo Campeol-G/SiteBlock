@@ -20,6 +20,8 @@ logs/
 .DS_Store
 Thumbs.db
 
+/docs/superpowers/
+
 .idea/
 *.iws
 *.iml
