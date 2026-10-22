@@ -124,8 +124,9 @@ class ElevacaoComandosTest {
         System.setProperty("os.name", "Windows 11");
         Path raiz = tmp.resolve("sys");
         CommandRunner runner = c -> 0;
+        // systemd fixado como presente: o macOS da CI não tem /run/systemd/system.
         assertEquals(0, new DaemonEnableCommand(OsType.LINUX, raiz,
-                jarDeExemplo().toString(), runner).call());
+                jarDeExemplo().toString(), runner, true).call());
 
         String saida = capturar(() -> new DaemonDisableCommand(OsType.LINUX, raiz, runner).call());
 

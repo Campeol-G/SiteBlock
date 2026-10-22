@@ -83,7 +83,9 @@ class DaemonEnableTest {
     }
 
     private DaemonEnableCommand enable(OsType os, String jarPath) {
-        return new DaemonEnableCommand(os, raiz(), jarPath, runner);
+        // Fixa o systemd presente: o teste descreve o artefato, e no macOS da
+        // CI a detecção real não encontra /run/systemd/system.
+        return new DaemonEnableCommand(os, raiz(), jarPath, runner, true);
     }
 
     @Test
@@ -124,7 +126,7 @@ class DaemonEnableTest {
                 PosixFilePermissions.fromString("r-xr-xr-x"));
 
         Resultado r = rodar(new DaemonEnableCommand(OsType.LINUX, tmp.resolve("sem-permissao"),
-                jarDeExemplo().toString(), runner)::call);
+                jarDeExemplo().toString(), runner, true)::call);
 
         assertEquals(1, r.exit(), r.texto());
         assertTrue(r.texto().toLowerCase().contains("sudo")
