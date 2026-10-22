@@ -46,9 +46,49 @@ class DnsResolverTcpFallbackTest {
     }
 
     @Test
+    void respostaUdpGrandeSemTcNaoEhTruncada() throws Exception {
+        try (FakeUpstream upstream = new FakeUpstream()) {
+            upstream.respondeCom(consulta -> respostaGrande(consulta, 9000));
+            upstream.start();
+            byte[] consulta = DnsWire.query(0x4242, "grande.com", 16); // TXT
+
+            byte[] resposta = DnsResolver.forwardRaw(consulta, consulta.length,
+                    upstream.endereco(), upstream.porta(), 2000);
+
+            assertTrue(resposta.length > 8192,
+                    "o buffer antigo de 8192 truncava esta resposta: " + resposta.length);
+            assertEquals(0, DnsWire.u16(resposta, 2) & 0x0200, "TC tem que continuar zero");
+            assertEquals(0x4242, DnsWire.u16(resposta, 0), "o ID do cliente tem que voltar");
+            assertEquals(1, DnsWire.u16(resposta, 6), "a answer grande tem que chegar");
+        }
+    }
+
+    @Test
     void bufferCobreAMensagemMaximaDeDns() {
         assertEquals(65535, DnsServer.MAX_PACKET_BYTES,
                 "resposta EDNS grande não pode ser truncada pelo buffer do cliente UDP");
+    }
+
+    // Resposta TXT com rdataLen bytes de rdata, sem TC: cabe no UDP, então o
+    // resolver não pode cortá-la no buffer.
+    private static byte[] respostaGrande(byte[] consulta, int rdataLen) {
+        int fimPergunta = DnsWire.fimDaPergunta(consulta);
+        byte[] pergunta = Arrays.copyOfRange(consulta, 12, fimPergunta);
+        byte[] out = new byte[12 + pergunta.length + 12 + rdataLen];
+        DnsWire.put16(out, 0, DnsWire.u16(consulta, 0));
+        DnsWire.put16(out, 2, 0x8180); // QR=1, RD, RA, TC=0
+        DnsWire.put16(out, 4, 1);      // QDCOUNT
+        DnsWire.put16(out, 6, 1);      // ANCOUNT
+        System.arraycopy(pergunta, 0, out, 12, pergunta.length);
+        int off = 12 + pergunta.length;
+        out[off++] = (byte) 0xC0;      // nome: ponteiro para a pergunta
+        out[off++] = 0x0C;
+        DnsWire.put16(out, off, 16);   // TXT
+        DnsWire.put16(out, off + 2, 1);
+        DnsWire.put16(out, off + 4, 60);
+        DnsWire.put16(out, off + 8, rdataLen);
+        Arrays.fill(out, off + 10, off + 10 + rdataLen, (byte) 'x');
+        return out;
     }
 
     // Upstream com UDP e TCP na mesma porta: UDP responde TC=1, TCP responde
