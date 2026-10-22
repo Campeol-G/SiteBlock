@@ -56,7 +56,7 @@ public final class ExpirationDaemonLock implements AutoCloseable {
      */
     public static ExpirationDaemonLock acquire(Path stateDir) throws IOException {
         Path lockFile = lockPath(stateDir);
-        Files.createDirectories(stateDir);
+        SiteLockPaths.createDirectories(stateDir);
         FileChannel channel = FileChannel.open(lockFile,
                 StandardOpenOption.CREATE, StandardOpenOption.WRITE);
         FileLock lock = null;

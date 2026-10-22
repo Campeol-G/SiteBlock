@@ -131,13 +131,14 @@ public class DnsStartCommand implements Callable<Integer> {
         Path logFile = DnsDaemonState.logPath(stateDir);
         final Process process;
         try {
-            Files.createDirectories(stateDir);
+            SiteLockPaths.createDirectories(stateDir);
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
             pb.redirectErrorStream(true);
             // stdin: PIPE (default) com EOF imediato — o daemon nunca lê stdin,
             // e DISCARD não é válido para entrada (só saída/erro).
             process = pb.start();
+            SiteLockPaths.chownToUserIfConfigured(logFile);
             try {
                 process.getOutputStream().close();
             } catch (IOException ignored) {

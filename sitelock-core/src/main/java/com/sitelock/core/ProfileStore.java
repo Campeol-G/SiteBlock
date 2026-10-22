@@ -243,8 +243,8 @@ public class ProfileStore {
         } catch (AtomicMoveNotSupportedException e) {
             Files.move(tmp, profilesFile, StandardCopyOption.REPLACE_EXISTING);
         }
-        SiteLockPaths.chownToRealUserIfSudo(profilesFile);
-        SiteLockPaths.chownToRealUserIfSudo(lockFile);
+        SiteLockPaths.chownToUserIfConfigured(profilesFile);
+        SiteLockPaths.chownToUserIfConfigured(lockFile);
     }
 
     /** Remove um perfil. Nome ausente não é erro — apagar o que não existe é o estado desejado. */
@@ -261,7 +261,7 @@ public class ProfileStore {
     private static void ensureParentExists(Path file) throws IOException {
         Path parent = file.getParent();
         if (parent != null) {
-            Files.createDirectories(parent);
+            SiteLockPaths.createDirectories(parent);
         }
     }
 }

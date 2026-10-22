@@ -153,7 +153,7 @@ public class DnsDaemonState {
   }
 
   public static void write(Path stateDir, DnsDaemonState state) throws IOException {
-    Files.createDirectories(stateDir);
+    SiteLockPaths.createDirectories(stateDir);
     Path target = statePath(stateDir);
     Path tmp = target.resolveSibling(target.getFileName() + ".tmp");
     registrarInstanteDoProcesso(state);
@@ -168,7 +168,7 @@ public class DnsDaemonState {
     } catch (AtomicMoveNotSupportedException e) {
       Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
     }
-    SiteLockPaths.chownToRealUserIfSudo(target);
+    SiteLockPaths.chownToUserIfConfigured(target);
   }
 
   // Grava o instante de início do processo, quando o registro é sobre este

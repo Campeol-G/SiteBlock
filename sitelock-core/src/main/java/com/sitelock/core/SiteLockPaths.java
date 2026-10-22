@@ -1,5 +1,6 @@
 package com.sitelock.core;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -49,6 +50,17 @@ public final class SiteLockPaths {
     /** Arquivo de lock para serializar processos concorrentes. */
     public static Path getStateLockFile() {
         return getStateDir().resolve(BLOCKS_FILE_NAME + ".lock");
+    }
+
+    /**
+     * Cria o diretório (e os pais) e devolve a posse ao usuário real.
+     *
+     * <p>Criar {@code ~/.sitelock} como root sem este ajuste deixa o diretório
+     * inacessível para o próximo {@code status} rodando sem sudo.
+     */
+    public static void createDirectories(Path dir) throws IOException {
+        Files.createDirectories(dir);
+        chownToUserIfConfigured(dir);
     }
 
     public static Path getHostsPath() {

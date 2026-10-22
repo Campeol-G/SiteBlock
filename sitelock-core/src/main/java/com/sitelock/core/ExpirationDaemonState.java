@@ -154,7 +154,7 @@ public class ExpirationDaemonState {
     // A escrita do registro em si, sem a trava: só válida dentro da trava.
     private static void escreverRegistro(Path stateDir, ExpirationDaemonState state)
             throws IOException {
-        Files.createDirectories(stateDir);
+        SiteLockPaths.createDirectories(stateDir);
         Path target = statePath(stateDir);
         Path tmp = target.resolveSibling(target.getFileName() + ".tmp");
         registrarInstanteDoProcesso(state);
@@ -172,7 +172,7 @@ public class ExpirationDaemonState {
 
     // Executa a ação com o registro travado contra os outros processos.
     private static void comTrava(Path stateDir, Acao acao) throws IOException {
-        Files.createDirectories(stateDir);
+        SiteLockPaths.createDirectories(stateDir);
         TRAVA_DA_JVM.lock();
         try (FileChannel canal = FileChannel.open(lockPath(stateDir),
                 StandardOpenOption.CREATE, StandardOpenOption.WRITE);
