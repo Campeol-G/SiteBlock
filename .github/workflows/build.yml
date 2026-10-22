@@ -19,20 +19,14 @@ jobs:
       # do LaunchDaemon/launchctl nunca era exercitado por build nenhum.
       fail-fast: false
       matrix:
-        # ATENÇÃO: o mvn do runner muda de versão e o mvnw.cmd do repositório
-        # precisa de shell que saiba executar .cmd.
+        # ATENÇÃO: 'shell' não aceita expressão. O build usa bash em todos os
+        # SOs (o runner Windows tem Git Bash) e chama o wrapper POSIX ./mvnw.
         include:
           - os: ubuntu-latest
-            mvn: ./mvnw
-            shell: bash
             script: ./run.sh
           - os: macos-latest
-            mvn: ./mvnw
-            shell: bash
             script: ./run.sh
           - os: windows-latest
-            mvn: mvnw.cmd
-            shell: cmd
             script: cmd /c run.bat
     steps:
       - uses: actions/checkout@v4
@@ -44,8 +38,8 @@ jobs:
       # 'clean' é obrigatório: sem ele o shade re-sombreia o fat-jar anterior
       # e o artefato final deixa de ser reproduzível.
       - name: Build (gera o fat-jar distribuível)
-        shell: ${{ matrix.shell }}
-        run: ${{ matrix.mvn }} -B clean package
+        shell: bash
+        run: bash ./mvnw -B clean package
       - name: Verifica o fat-jar
         shell: bash
         run: |
