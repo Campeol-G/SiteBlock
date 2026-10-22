@@ -320,6 +320,55 @@ class DaemonCliTest {
         lock.close();
     }
 
+    @Test
+    void sigtermFazVarreduraFinalAntesDeSair() throws Exception {
+        // O daemon fica dormindo 60s. O primeiro expirado prova que o sweep
+        // inicial terminou (e o laço dormiu); aí o segundo é semeado, e só a
+        // varredura do shutdown pode removê-lo.
+        HostsFileManager.blockInFile(hosts(), tmp.resolve("hosts.backup"),
+                tmp.resolve("hosts.lock"), List.of("inicial.com"));
+        semear(prazos("inicial.com", Instant.parse("2020-01-01T00:00:00Z")));
+
+        Process p = iniciar("--interval", "60");
+        Path daemonJson = ExpirationDaemonState.statePath(stateDir());
+        int exit = -1;
+        try {
+            for (int i = 0; i < 100 && !Files.exists(daemonJson); i++) {
+                Thread.sleep(100);
+            }
+            assertTrue(Files.exists(daemonJson), "o daemon não registrou o próprio estado");
+
+            for (int i = 0; i < 100 && estado().contains("inicial.com"); i++) {
+                Thread.sleep(100);
+            }
+            assertFalse(estado().contains("inicial.com"),
+                    "o sweep inicial não terminou; o teste não consegue isolar o hook");
+            Thread.sleep(200); // deixa o laço entrar no sono longo
+
+            semear(prazos("vencido.com", Instant.parse("2020-01-01T00:00:00Z")));
+            HostsFileManager.blockInFile(hosts(), tmp.resolve("hosts.backup"),
+                    tmp.resolve("hosts.lock"), List.of("vencido.com"));
+
+            assertTrue(p.isAlive(), "o daemon morreu antes do SIGTERM:\n" + saidaDoDaemon());
+            p.destroy(); // SIGTERM: dispara o shutdown hook
+            exit = p.waitFor();
+        } finally {
+            if (p.isAlive()) {
+                p.destroyForcibly();
+                p.waitFor();
+            }
+        }
+
+        assertFalse(hostsConteudo().contains("vencido.com"),
+                "o hook de shutdown precisa liberar o expirado do hosts (exit=" + exit + "):\n"
+                        + hostsConteudo()
+                        + "\n--- estado ---\n" + estado()
+                        + "\n--- daemon ---\n" + saidaDoDaemon());
+        assertFalse(estado().contains("vencido.com"),
+                "o hook de shutdown precisa liberar o expirado do estado:\n" + estado()
+                        + "\n--- daemon ---\n" + saidaDoDaemon());
+    }
+
     // ---- comandos de ciclo de vida ----
 
     @Test

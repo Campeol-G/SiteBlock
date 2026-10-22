@@ -17,6 +17,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -45,6 +47,9 @@ public class DaemonRunCommand implements Callable<Integer> {
     boolean once;
 
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
+
+    // Serializa a varredura do laço com a varredura final do shutdown hook.
+    private final Object sweepMonitor = new Object();
 
     public DaemonRunCommand() {
     }
@@ -75,15 +80,36 @@ public class DaemonRunCommand implements Callable<Integer> {
 
         final AtomicBoolean parando = new AtomicBoolean(false);
         final CountDownLatch terminou = new CountDownLatch(1);
+        // POR QUE: a varredura final precisa RODAR UMA VEZ e nenhum dos dois
+        // lados pode encerrar antes dela. Com um CAS simples, se a main ganhasse
+        // a corrida o hook voltava na hora e a JVM encerrava no meio da
+        // varredura; a FutureTask faz todos esperarem o mesmo resultado.
+        final FutureTask<Integer> varreduraFinal = new FutureTask<>(() -> {
+            synchronized (sweepMonitor) {
+                return varrerUmaVez(CliSupport.newService(null, stateFileOverride));
+            }
+        });
+        final AtomicBoolean varreduraDisparada = new AtomicBoolean(false);
+        final Runnable dispararVarredura = () -> {
+            if (varreduraDisparada.compareAndSet(false, true)) {
+                varreduraFinal.run();
+            }
+        };
         try {
             ExpirationDaemonState.write(stateDir, new ExpirationDaemonState(
                     ProcessHandle.current().pid(), Instant.now(Clock.systemUTC()),
                     stateDir.toString(), null));
 
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            Thread hook = new Thread(() -> {
                 parando.set(true);
                 terminou.countDown();
-            }, "sitelock-sweeper-shutdown"));
+                // A varredura final roda AQUI, não só na main: no SIGTERM a JVM
+                // encerra quando os hooks terminam, e a main pode nem ser
+                // escalonada antes disso.
+                dispararVarredura.run();
+                esperarVarreduraFinal(varreduraFinal);
+            }, "sitelock-sweeper-shutdown");
+            Runtime.getRuntime().addShutdownHook(hook);
 
             System.out.println("[sitelock] daemon de expiração no ar (pid "
                     + ProcessHandle.current().pid() + ", teto de " + intervalSeconds + "s).");
@@ -107,9 +133,10 @@ public class DaemonRunCommand implements Callable<Integer> {
                 }
             }
 
-            // Varredura final: um shutdown não pode deixar expirado para trás.
-            int finalExit = varrerUmaVez(CliSupport.newService(null, stateFileOverride));
-            return finalExit;
+            // Ninguém sai daqui sem a varredura final concluída — inclusive o
+            // hook, que é quem a JVM espera no SIGTERM.
+            dispararVarredura.run();
+            return esperarVarreduraFinal(varreduraFinal);
         } catch (IOException e) {
             System.err.println("[sitelock] falha fatal no daemon: " + e.getMessage());
             return 1;
@@ -133,20 +160,23 @@ public class DaemonRunCommand implements Callable<Integer> {
     // não limpar, porque o usuário nem recebe aviso de que parou de ser avisado.
     private BlockService.SweepResult varrer() {
         try {
-            BlockService.SweepResult sweep = CliSupport.newService(null, stateFileOverride).sweepExpired();
-            if (!sweep.removed().isEmpty()) {
-                for (String domain : sweep.removed()) {
-                    System.out.println("[sitelock] expirou e foi liberado: " + domain);
+            synchronized (sweepMonitor) {
+                BlockService.SweepResult sweep =
+                        CliSupport.newService(null, stateFileOverride).sweepExpired();
+                if (!sweep.removed().isEmpty()) {
+                    for (String domain : sweep.removed()) {
+                        System.out.println("[sitelock] expirou e foi liberado: " + domain);
+                    }
+                    try {
+                        ExpirationDaemonState.updateLastSweep(stateDir(), Instant.now(Clock.systemUTC()));
+                        CliSupport.flushDnsBestEffort();
+                    } catch (IOException e) {
+                        System.err.println("[sitelock] falha ao registrar o sweep: " + e.getMessage());
+                    }
+                    System.out.flush();
                 }
-                try {
-                    ExpirationDaemonState.updateLastSweep(stateDir(), Instant.now(Clock.systemUTC()));
-                    CliSupport.flushDnsBestEffort();
-                } catch (IOException e) {
-                    System.err.println("[sitelock] falha ao registrar o sweep: " + e.getMessage());
-                }
-                System.out.flush();
+                return sweep;
             }
-            return sweep;
         } catch (CorruptedStateException e) {
             System.err.println("[sitelock] estado corrompido (" + e.getMessage()
                     + "); tentando de novo na próxima volta.");
@@ -170,6 +200,22 @@ public class DaemonRunCommand implements Callable<Integer> {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return false;
+        }
+    }
+
+    // Espera a varredura final concluir, venha ela da main ou do hook. O hook
+    // precisa esperar mesmo quando perde a corrida: se ele retornar antes, a
+    // JVM encerra o processo no meio da varredura que a main executa. Sem
+    // timeout de propósito — o preço de encerrar no meio é maior.
+    private static int esperarVarreduraFinal(FutureTask<Integer> varreduraFinal) {
+        try {
+            return varreduraFinal.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return 1;
+        } catch (ExecutionException e) {
+            System.err.println("[sitelock] varredura final falhou: " + e.getMessage());
+            return 1;
         }
     }
 
