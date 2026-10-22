@@ -83,6 +83,16 @@ class AutostartArtifactTest {
     }
 
     @Test
+    void schtasksArgsForceOverwriteExistingTask() {
+        List<String> args = AutostartArtifact.schtasksArgs(caminhos(OsType.WINDOWS));
+
+        assertEquals(1, args.stream().filter("/f"::equals).count(),
+                "sem /f o segundo daemon enable falha: " + args);
+        assertEquals("/f", args.get(args.size() - 1));
+        assertTrue(AutostartArtifact.schtasksCommand(caminhos(OsType.WINDOWS)).endsWith(" /f"));
+    }
+
+    @Test
     void windowsTriggersOnLogonNotOnBoot() {
         String cmd = AutostartArtifact.schtasksCommand(caminhos(OsType.WINDOWS));
         assertFalse(cmd.contains("/sc ONSTART"), cmd);

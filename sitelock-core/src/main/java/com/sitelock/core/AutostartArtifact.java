@@ -96,7 +96,7 @@ public final class AutostartArtifact {
      * há navegador para estar bloqueado.
      */
     public static String schtasksCommand(AutostartPaths p) {
-        return String.join(" ", schtasksArgs(p)) + " /f";
+        return String.join(" ", schtasksArgs(p));
     }
 
     /** O mesmo comando em lista de tokens, para o instalador executar direto. */
@@ -112,6 +112,9 @@ public final class AutostartArtifact {
         args.add(TASK_NAME);
         args.add("/tr");
         args.add(quotedTaskCommand(p));
+        // /f sobrescreve a tarefa existente; sem ele, um segundo `daemon enable`
+        // falha porque a tarefa já existe.
+        args.add("/f");
         return args;
     }
 

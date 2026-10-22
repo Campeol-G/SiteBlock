@@ -255,9 +255,12 @@ public final class AutostartInstaller {
         return List.of("systemctl", "disable", "--now", AutostartArtifact.UNIT_NAME);
     }
 
-    private static int runWithProcessBuilder(List<String> command) throws IOException {
+    static int runWithProcessBuilder(List<String> command) throws IOException {
         ProcessBuilder pb = new ProcessBuilder(command);
         pb.redirectErrorStream(true);
+        // Nada da saída é usado aqui; descartar evita encher o pipe e travar
+        // antes do waitFor em um comando verboso.
+        pb.redirectOutput(ProcessBuilder.Redirect.DISCARD);
         Process p = pb.start();
         boolean done;
         try {

@@ -1,5 +1,6 @@
 package com.sitelock.core;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -171,7 +172,7 @@ public final class DnsCacheFlusher {
         return osType;
     }
 
-    private static int runWithProcessBuilder(List<String> command) throws IOException {
+    static int runWithProcessBuilder(List<String> command) throws IOException {
         ProcessBuilder pb = new ProcessBuilder(command);
         pb.redirectErrorStream(true);
         Process p;
@@ -180,28 +181,44 @@ public final class DnsCacheFlusher {
         } catch (IOException e) {
             throw new IOException("comando não encontrado: " + command.get(0).toLowerCase(Locale.ROOT), e);
         }
+        // A saída é drenada em paralelo ao waitFor. Drenar depois de esperar
+        // trava quando o comando escreve mais que o buffer do pipe.
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        Thread drain = Thread.ofVirtual().name("dns-flush-output").start(() -> {
+            try (InputStream in = p.getInputStream()) {
+                in.transferTo(buffer);
+            } catch (IOException ignored) {
+                // O timeout/exit code já diz o que importa; saída parcial é detalhe.
+            }
+        });
         boolean done;
         try {
             done = p.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             p.destroyForcibly();
+            aguardarDrenagem(drain);
             throw new IOException("timeout aguardando flush de DNS", e);
         }
         if (!done) {
             p.destroyForcibly();
+            aguardarDrenagem(drain);
             throw new IOException("timeout (> " + TIMEOUT_SECONDS + "s) no flush de DNS");
         }
-        // Drena a saída para não travar o pipe em comandos verbosos.
-        String out = "";
-        try (InputStream in = p.getInputStream()) {
-            out = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (IOException ignored) {
-        }
+        aguardarDrenagem(drain);
+        String out = buffer.toString(StandardCharsets.UTF_8);
         int exit = p.exitValue();
         if (exit != 0 && !out.isBlank()) {
             throw new IOException("exit " + exit + ": " + out.strip().split("\n")[0]);
         }
         return exit;
+    }
+
+    private static void aguardarDrenagem(Thread drain) {
+        try {
+            drain.join(1000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 }
