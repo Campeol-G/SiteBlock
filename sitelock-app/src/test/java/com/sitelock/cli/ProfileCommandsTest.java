@@ -91,6 +91,25 @@ class ProfileCommandsTest {
     }
 
     @Test
+    void addRejectsDurationThatWouldOverflowMillis() throws Exception {
+        block("tiktok.com");
+        assertEquals(0, new ProfileSaveCommand("trabalho", false,
+                hosts().toString(), state()).call());
+
+        ProfileCommand parent = new ProfileCommand();
+        parent.name = "trabalho";
+        ProfileAddCommand cmd = new ProfileAddCommand();
+        cmd.parent = parent;
+        cmd.domainsRaw = List.of("youtube.com");
+        cmd.forDuration = "999999999999d";
+        cmd.stateFileOverride = state();
+
+        assertEquals(1, cmd.call());
+        assertFalse(Files.readString(profilesFile(), StandardCharsets.UTF_8).contains("youtube.com"),
+                "duração inválida não pode gravar entrada no perfil");
+    }
+
+    @Test
     void saveSkipsExpiredThatAreStillPending() throws Exception {
         // hosts não gravável: o sweep devolve skippedDueToPermission e o
         // expirado continua no estado. Ele não pode entrar no perfil — senão

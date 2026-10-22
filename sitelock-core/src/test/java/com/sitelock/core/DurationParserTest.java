@@ -41,6 +41,22 @@ class DurationParserTest {
         assertEquals(Duration.ofDays(1).plusMinutes(5), DurationParser.parse("1d5m"));
     }
 
+    @Test
+    void acceptsTheMaximumSupportedDuration() {
+        assertEquals(DurationParser.MAX_DURATION, DurationParser.parse("365000d"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"365001d", "365000d1m", "999999999999d",
+            "999999999999999999999d"})
+    void rejectsDurationsBeyondTheSupportedRange(String input) {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> DurationParser.parse(input));
+        assertTrue(e.getMessage().contains("'" + input + "'"), e.getMessage());
+        assertTrue(e.getMessage().contains("fora do intervalo"), e.getMessage());
+        assertTrue(e.getMessage().contains(DurationParser.LIMIT_HELP), e.getMessage());
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"abc", "30", "30s", "1w", "1H", "30M", "1h 30m",
             "1h30", "h30m", "-5m", "0m", "0h", "0d", "1d2h30m5s", "1.5h", "--for"})

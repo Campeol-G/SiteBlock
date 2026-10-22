@@ -53,6 +53,16 @@ class CliCommandsTest {
     }
 
     @Test
+    void blockRejectsDurationThatWouldOverflowInstant() throws Exception {
+        Path h = hosts();
+        int exit = new BlockCommand(List.of("tiktok.com"), "999999999999d",
+                h.toString(), state()).call();
+        assertEquals(2, exit);
+        assertFalse(Files.readString(h, StandardCharsets.UTF_8).contains("tiktok.com"));
+        assertFalse(Files.exists(Path.of(state())), "nada pode ser gravado com duração inválida");
+    }
+
+    @Test
     void unblockPermanentNeedsNoForce() throws Exception {
         Path h = hosts();
         assertEquals(0, new BlockCommand(List.of("a.com", "b.com"), null, h.toString(), state()).call());

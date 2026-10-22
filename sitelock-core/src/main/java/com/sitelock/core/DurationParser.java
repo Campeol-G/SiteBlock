@@ -16,6 +16,13 @@ public final class DurationParser {
     public static final String FORMAT_HELP =
             "Formato esperado: <numero>d<h><m> colados, ex.: 30m, 2h, 1h30m, 1d, 1d2h30m (apenas m/h/d minúsculos, sem espaços)";
 
+    // POR QUE: sem teto explícito, uma entrada válida para o Duration estoura
+    // no Instant.plus (DateTimeException) ou no Duration.toMillis (ArithmeticException).
+    // 1.000 anos cabe com folga nos dois e é muito mais do que qualquer uso real.
+    public static final long MAX_DAYS = 365_000;
+    public static final Duration MAX_DURATION = Duration.ofDays(MAX_DAYS);
+    public static final String LIMIT_HELP = "Máximo: " + MAX_DAYS + "d (1000 anos).";
+
     private DurationParser() {
     }
 
@@ -47,11 +54,20 @@ public final class DurationParser {
                 throw new IllegalArgumentException(
                         "Duração deve ser maior que zero: '" + input + "'. " + FORMAT_HELP);
             }
+            if (total.compareTo(MAX_DURATION) > 0) {
+                throw foraDoIntervalo(input, null);
+            }
             return total;
         } catch (ArithmeticException | NumberFormatException e) {
-            throw new IllegalArgumentException(
-                    "Duração fora do intervalo suportado: '" + input + "'. " + FORMAT_HELP, e);
+            throw foraDoIntervalo(input, e);
         }
+    }
+
+    private static IllegalArgumentException foraDoIntervalo(String input, Exception cause) {
+        return new IllegalArgumentException(
+                "Duração fora do intervalo suportado: '" + input + "'. "
+                        + FORMAT_HELP + " " + LIMIT_HELP,
+                cause);
     }
 
     /**
