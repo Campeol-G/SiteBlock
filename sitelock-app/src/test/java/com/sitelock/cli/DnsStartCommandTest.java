@@ -88,13 +88,46 @@ class DnsStartCommandTest {
 
     // Derruba o daemon que o teste subiu (o PID está no registro de estado).
     private void encerrar(Path estado) {
+        final Optional<DnsDaemonState> state;
         try {
-            Optional<DnsDaemonState> state = DnsDaemonState.read(estado);
-            if (state.isPresent() && state.get().getPid() > 0) {
-                ProcessHandle.of(state.get().getPid()).ifPresent(ProcessosDeTeste::matar);
-            }
+            state = DnsDaemonState.read(estado);
         } catch (IOException ignored) {
-            // o teste só precisa que o processo não fique pendurado
+            return;
+        }
+        if (state.isEmpty() || state.get().getPid() <= 0) {
+            return;
+        }
+
+        long pid = state.get().getPid();
+        ProcessHandle handle = ProcessHandle.of(pid).orElse(null);
+        if (handle == null) {
+            return;
+        }
+        ProcessosDeTeste.matar(handle);
+        if (handle.isAlive()) {
+            throw new AssertionError("o daemon não morreu: pid " + pid);
+        }
+
+        // O Windows pode segurar o handle do log por um instante depois do
+        // kill; apagar aqui (com retry) evita que o @TempDir falhe na limpeza.
+        Path log = DnsDaemonState.logPath(estado);
+        for (int i = 0; i < 50; i++) {
+            try {
+                Files.deleteIfExists(log);
+                return;
+            } catch (IOException e) {
+                dormir(100);
+            }
+        }
+        throw new AssertionError("o log do daemon continua travado: " + log
+                + " (pid " + pid + ", vivo=" + handle.isAlive() + ")");
+    }
+
+    private static void dormir(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 }
