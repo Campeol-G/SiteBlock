@@ -276,6 +276,10 @@ public class DnsStartCommand implements Callable<Integer> {
 
         List<String> cmd = new ArrayList<>();
         cmd.add(javaCmd);
+        // O log do filho é lido como UTF-8 pelo tail e pelos testes; sem isto o
+        // Windows grava na codepage nativa e a leitura quebra.
+        cmd.add("-Dstdout.encoding=UTF-8");
+        cmd.add("-Dstderr.encoding=UTF-8");
         String binProp = System.getProperty("siteblock.bin");
         if (binProp != null && !binProp.isBlank()) {
             cmd.add("-Dsiteblock.bin=" + binProp);

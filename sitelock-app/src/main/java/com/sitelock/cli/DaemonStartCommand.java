@@ -160,6 +160,10 @@ public class DaemonStartCommand implements Callable<Integer> {
         String javaCmd = Files.isExecutable(javaBin) ? javaBin.toString() : "java";
 
         List<String> properties = new ArrayList<>();
+        // O log do filho é lido como UTF-8 pelo tail e pelos testes; sem isto o
+        // Windows grava na codepage nativa e a leitura quebra.
+        properties.add("-Dstdout.encoding=UTF-8");
+        properties.add("-Dstderr.encoding=UTF-8");
         String binProp = System.getProperty("siteblock.bin");
         if (binProp != null && !binProp.isBlank()) {
             properties.add("-Dsiteblock.bin=" + binProp);

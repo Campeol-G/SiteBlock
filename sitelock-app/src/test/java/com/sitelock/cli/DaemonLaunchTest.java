@@ -62,6 +62,17 @@ class DaemonLaunchTest {
     }
 
     @Test
+    void childCommandPinsUtf8ForTheLog() {
+        // No Windows o padrão do processo é a codepage nativa; o log é lido
+        // como UTF-8 pelo tail e pelos testes.
+        List<String> cmd = new DaemonStartCommand("60", null, null)
+                .buildChildCommand(tmp.resolve("estado"), tmp.resolve("hosts"));
+
+        assertTrue(cmd.contains("-Dstdout.encoding=UTF-8"), cmd.toString());
+        assertTrue(cmd.contains("-Dstderr.encoding=UTF-8"), cmd.toString());
+    }
+
+    @Test
     void childCommandWithJarDropsTheMainClass() {
         String saved = System.getProperty("siteblock.jar");
         System.setProperty("siteblock.jar", "/opt/sitelock/siteblock.jar");
