@@ -221,8 +221,14 @@ class DaemonEnableTest {
 
         assertFalse(r.texto().contains("sudo sudo"),
                 "a saída não pode repetir o sudo:\n" + r.texto());
-        assertTrue(r.texto().contains("sudo siteblock daemon enable"),
+        assertTrue(r.texto().contains("daemon enable"),
                 "a saída tem que mostrar o comando:\n" + r.texto());
+        // No Windows o enable simulado como Linux usa a dica do host, que é
+        // "Administrador"; o comando Unix exato só vale no Unix.
+        if (!OsType.detect().isWindows()) {
+            assertTrue(r.texto().contains("sudo siteblock daemon enable"),
+                    "a saída tem que mostrar o comando:\n" + r.texto());
+        }
     }
 
     @Test
