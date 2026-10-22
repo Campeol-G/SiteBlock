@@ -8,6 +8,8 @@ import com.sitelock.core.ExpirationDaemonState;
 import com.sitelock.core.OsType;
 import com.sitelock.core.HostsFileManager;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayOutputStream;
@@ -320,7 +322,11 @@ class DaemonCliTest {
         lock.close();
     }
 
+    // ATENÇÃO: no Windows não existe SIGTERM. Process.destroy() chama
+    // TerminateProcess e NÃO roda shutdown hooks; o caminho do hook só pode ser
+    // exercitado nos Unix.
     @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
     void sigtermFazVarreduraFinalAntesDeSair() throws Exception {
         // O daemon fica dormindo 60s. O primeiro expirado prova que o sweep
         // inicial terminou (e o laço dormiu); aí o segundo é semeado, e só a
