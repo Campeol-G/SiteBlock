@@ -106,7 +106,7 @@ sudo ./run.sh daemon disable
 ```
 
 Durações aceitas: `30m`, `2h`, `1h30m`, `1d`, `1d2h30m`. Só minúsculo, sem
-espaço.
+espaço. O limite é 1.000 anos; acima disso o comando recusa.
 
 ### Códigos de saída
 
@@ -139,7 +139,9 @@ Em `~/.sitelock/`:
 | `hosts.backup` | cópia do hosts original, criada uma vez |
 | `hosts.lock` | lock: serializa as escritas no arquivo de hosts |
 | `dns-server.json` | estado do servidor DNS |
+| `dns-server.start.lock` | lock: impede dois `dns start` ao mesmo tempo |
 | `dns-server.log` | log do servidor DNS (consultas, upstream, decisões) |
+| `dns-server.log.1` | log anterior, quando o atual passa de 5 MiB |
 | `profiles.json` | os conjuntos de domínios salvos com nome |
 | `profiles.json.lock` | lock: serializa as escritas dos perfis |
 | `daemon.json` | o daemon de expiração está rodando (pid, último sweep) |
@@ -257,7 +259,8 @@ hosts, ao custo de configurar cada dispositivo.
 O servidor atende **UDP e TCP na mesma porta**. O TCP não é enfeite: quando a
 resposta não cabe num pacote UDP, o servidor devolve `TC=1` e o cliente refaz
 a mesma consulta por TCP (RFC 7766). Sem o listener TCP, a resolução falha
-justamente nas respostas grandes.
+justamente nas respostas grandes. E se o upstream também responder truncado, o
+SiteBlock refaz a consulta por TCP antes de entregar a resposta.
 
 Quem pode consultar o servidor é definido na hora de subir. Por padrão, só
 quem está na rede local (loopback, link-local, faixas RFC1918, IPv6 ULA e os
