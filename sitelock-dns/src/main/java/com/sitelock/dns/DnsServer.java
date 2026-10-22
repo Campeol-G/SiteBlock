@@ -40,8 +40,10 @@ public class DnsServer {
     /** Timeout padrão de espera pelo upstream antes de responder SERVFAIL. */
     public static final int DEFAULT_UPSTREAM_TIMEOUT_MS = 2000;
 
-    /** Buffer por datagrama; cobre DNS clássico (512) e EDNS (até 4096) com folga. */
-    public static final int MAX_PACKET_BYTES = 8192;
+    // Buffer por datagrama e resposta do upstream. 65535 é o teto de uma
+    // mensagem DNS (2 bytes de tamanho no TCP); no UDP o maior payload é 65507.
+    // 8192 truncava respostas EDNS grandes antes de checar o TC.
+    public static final int MAX_PACKET_BYTES = 65535;
 
     /** Tamanho máximo de uma mensagem DNS sobre TCP (2 bytes de tamanho, RFC 1035 §4.2.2). */
     public static final int MAX_TCP_MESSAGE_BYTES = 65535;

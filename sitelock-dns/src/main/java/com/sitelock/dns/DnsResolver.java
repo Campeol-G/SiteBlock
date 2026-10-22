@@ -4,9 +4,13 @@ import com.sitelock.core.BlockEntry;
 import com.sitelock.core.BlockStore;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Instant;
@@ -396,11 +400,60 @@ final class UpstreamClient implements AutoCloseable {
             sock.receive(in);
             byte[] resposta = Arrays.copyOf(in.getData(), in.getLength());
             DnsResolver.validarResposta(resposta, idUpstream, request, requestLen);
+            // TC=1 significa que o upstream não coube no UDP. Repetir a mesma
+            // consulta por TCP é o caminho que o cliente seguiria sozinho; sem
+            // isso, ele recebia a resposta truncada e podia falhar a resolução.
+            int flags = ((resposta[2] & 0xFF) << 8) | (resposta[3] & 0xFF);
+            if ((flags & 0x0200) != 0) {
+                resposta = encaminharTcp(enviado, requestLen, idUpstream, request);
+            }
             // O cliente precisa ver o ID dele: o ID do upstream é nosso, não dele.
             resposta[0] = (byte) (idCliente >>> 8);
             resposta[1] = (byte) idCliente;
             return resposta;
         }
+    }
+
+    private byte[] encaminharTcp(byte[] enviado, int requestLen, int idUpstream,
+                                 byte[] consultaOriginal) throws IOException {
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(upstream, porta), timeoutMs);
+            socket.setSoTimeout(timeoutMs);
+            OutputStream out = socket.getOutputStream();
+            out.write((requestLen >>> 8) & 0xFF);
+            out.write(requestLen & 0xFF);
+            out.write(enviado, 0, requestLen);
+            out.flush();
+
+            InputStream in = socket.getInputStream();
+            byte[] tamanho = lerExatamente(in, 2);
+            if (tamanho == null) {
+                throw new IOException("upstream fechou o TCP antes do tamanho da resposta");
+            }
+            int length = ((tamanho[0] & 0xFF) << 8) | (tamanho[1] & 0xFF);
+            if (length <= 0) {
+                throw new IOException("resposta TCP do upstream com tamanho inválido: " + length);
+            }
+            byte[] resposta = lerExatamente(in, length);
+            if (resposta == null) {
+                throw new IOException("resposta TCP do upstream truncada");
+            }
+            DnsResolver.validarResposta(resposta, idUpstream, consultaOriginal, requestLen);
+            return resposta;
+        }
+    }
+
+    private static byte[] lerExatamente(InputStream in, int n) throws IOException {
+        byte[] buffer = new byte[n];
+        int lidos = 0;
+        while (lidos < n) {
+            int r = in.read(buffer, lidos, n - lidos);
+            if (r < 0) {
+                return null;
+            }
+            lidos += r;
+        }
+        return buffer;
     }
 
     @Override
