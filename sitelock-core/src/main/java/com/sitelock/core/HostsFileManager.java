@@ -259,6 +259,7 @@ public final class HostsFileManager {
         List<String> remaining = new ArrayList<>();
         remaining.add(parts[0]);
         boolean removedAny = false;
+        boolean remainingHost = false;
         for (int i = 1; i < parts.length; i++) {
             if (parts[i].startsWith("#")) {
                 remaining.add(parts[i]);
@@ -277,12 +278,15 @@ public final class HostsFileManager {
             }
             if (!target) {
                 remaining.add(parts[i]);
+                remainingHost = true;
             }
         }
         if (!removedAny) {
             return line;
         }
-        if (remaining.size() <= 1) {
+        // Sem host sobrando, o comentário era da entrada removida: a linha
+        // inteira sai. Deixá-la como "127.0.0.1 # note" manteria o bloco vivo.
+        if (!remainingHost) {
             return null;
         }
         return String.join(" ", remaining);
@@ -293,7 +297,16 @@ public final class HostsFileManager {
         if (t.isEmpty() || t.startsWith("#")) {
             return false;
         }
-        return t.split("\\s+").length >= 2;
+        String[] parts = t.split("\\s+");
+        for (int i = 1; i < parts.length; i++) {
+            if (parts[i].startsWith("#")) {
+                return false;
+            }
+            if (!parts[i].isBlank()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static boolean isWritable(Path hostsPath) {

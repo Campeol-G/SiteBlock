@@ -151,6 +151,46 @@ class HostsFileManagerTest {
     }
 
     @Test
+    void removeDropsCommentThatBelongedToTheRemovedEntry() {
+        String content = "# SITELOCK-START\n"
+                + "127.0.0.1 tiktok.com # note\n"
+                + "# SITELOCK-END\n";
+
+        String out = HostsFileManager.removeDomain(content, "tiktok.com");
+
+        assertFalse(out.contains("127.0.0.1 # note"), out);
+        assertFalse(out.contains("tiktok.com"), out);
+        assertFalse(out.contains(HostsFileManager.START_MARKER),
+                "bloco sem entradas tem que sumir inteiro: " + out);
+        assertFalse(out.contains(HostsFileManager.END_MARKER), out);
+    }
+
+    @Test
+    void removeKeepsCommentWhenAnotherHostRemains() {
+        String content = "# SITELOCK-START\n"
+                + "127.0.0.1 tiktok.com youtube.com # note\n"
+                + "# SITELOCK-END\n";
+
+        String out = HostsFileManager.removeDomain(content, "tiktok.com");
+
+        assertTrue(out.contains("127.0.0.1 youtube.com # note"), out);
+        assertFalse(out.contains("tiktok.com"), out);
+    }
+
+    @Test
+    void removeTreatsIpPlusCommentAsAnEmptyBlock() {
+        String content = "# SITELOCK-START\n"
+                + "127.0.0.1 # comentario solto\n"
+                + "# SITELOCK-END\n";
+
+        String out = HostsFileManager.removeDomain(content, "outro.com");
+
+        assertFalse(out.contains(HostsFileManager.START_MARKER),
+                "IP + comentario nao e entrada: " + out);
+        assertFalse(out.contains(HostsFileManager.END_MARKER), out);
+    }
+
+    @Test
     void addDoesNotDuplicateBlockWhenEndMarkerIsMissing() {
         String content = "# SITELOCK-START\n127.0.0.1 x.com\n";
 
