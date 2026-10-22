@@ -16,8 +16,10 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 
 /**
@@ -115,6 +117,7 @@ public class ProfileUnblockCommand implements Callable<Integer> {
         Instant now = Instant.now(service.getClock());
         List<String> alvos = new ArrayList<>();
         List<String> descricao = new ArrayList<>();
+        Map<String, BlockEntry> confirmados = new LinkedHashMap<>();
         Duration total = Duration.ZERO;
         for (String domain : profile.getEntries().keySet()) {
             BlockEntry entry = state.get(domain);
@@ -122,6 +125,7 @@ public class ProfileUnblockCommand implements Callable<Integer> {
                 continue;
             }
             alvos.add(domain);
+            confirmados.put(domain, entry);
             if (entry.isTemporaryAndActive(now)) {
                 Duration restante = Duration.between(now, entry.getExpiresAt());
                 total = total.plus(restante);
@@ -170,9 +174,18 @@ public class ProfileUnblockCommand implements Callable<Integer> {
         // save na mesma trava, e o hosts escrito dentro dela, na ordem Estado → hosts.
         // Fora daqui, o block de outro terminal some do JSON e o domínio fica preso.
         final boolean[] chegouNoHosts = {false};
+        final String[] conflito = {null};
         try {
             service.inTransaction(
                     (estado, tx) -> {
+                        // Confirmação e remoção não podem ter estados diferentes: se
+                        // qualquer alvo mudou, o lote inteiro é cancelado.
+                        for (String domain : alvos) {
+                            if (!Objects.equals(estado.get(domain), confirmados.get(domain))) {
+                                conflito[0] = domain;
+                                return null;
+                            }
+                        }
                         for (String domain : alvos) {
                             estado.remove(domain);
                         }
@@ -180,6 +193,9 @@ public class ProfileUnblockCommand implements Callable<Integer> {
                         return null;
                     },
                     (resultado, estado, tx) -> {
+                        if (conflito[0] != null) {
+                            return;
+                        }
                         chegouNoHosts[0] = true;
                         service.getBlocker().unblockAll(alvos);
                     });
@@ -200,6 +216,12 @@ public class ProfileUnblockCommand implements Callable<Integer> {
             }
             System.err.println("Erro ao remover os domínios do hosts: " + e.getMessage());
             System.err.println("Nada foi alterado.");
+            return 1;
+        }
+
+        if (conflito[0] != null) {
+            System.err.println("'" + conflito[0] + "' mudou enquanto você confirmava; "
+                    + "o lote inteiro foi cancelado. Tente de novo.");
             return 1;
         }
 

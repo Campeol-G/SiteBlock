@@ -118,6 +118,7 @@ public class UnblockCommand implements Callable<Integer> {
         // enquanto a pessoa escreve SIM travaria o daemon e qualquer outro
         // comando até ela terminar de digitar.
         final List<String> aSoltar = new ArrayList<>();
+        final Map<String, BlockEntry> confirmados = new LinkedHashMap<>();
         boolean cancelledAny = false;
         for (String domain : domains) {
             BlockEntry entry = state.get(domain);
@@ -141,6 +142,7 @@ public class UnblockCommand implements Callable<Integer> {
                 }
             }
             aSoltar.add(domain);
+            confirmados.put(domain, entry);
         }
 
         Plano plano = new Plano();
@@ -151,6 +153,13 @@ public class UnblockCommand implements Callable<Integer> {
                             BlockEntry entry = estado.get(domain);
                             if (entry == null) {
                                 plano.ausentes.add(domain);
+                                continue;
+                            }
+                            // A entrada foi lida antes da confirmação. Se outro processo
+                            // mexeu nela nesse intervalo, remover seria desfazer um block
+                            // que o usuário não confirmou.
+                            if (!entry.equals(confirmados.get(domain))) {
+                                plano.conflitos.add(domain);
                                 continue;
                             }
                             plano.anteriores.put(domain, entry);
@@ -193,8 +202,12 @@ public class UnblockCommand implements Callable<Integer> {
         for (String domain : plano.ausentes) {
             System.out.println("'" + domain + "' não está bloqueado. Nada a fazer.");
         }
+        for (String domain : plano.conflitos) {
+            System.err.println("'" + domain + "' mudou enquanto você confirmava; "
+                    + "nada foi feito para ele. Tente de novo.");
+        }
         int failures = plano.falhas;
-        if (failures > 0) {
+        if (failures > 0 || !plano.conflitos.isEmpty()) {
             return 1;
         }
         if (!cancelledAny) {
@@ -211,6 +224,7 @@ public class UnblockCommand implements Callable<Integer> {
 
         final List<String> gravados = new ArrayList<>();
         final List<String> ausentes = new ArrayList<>();
+        final List<String> conflitos = new ArrayList<>();
         final Map<String, BlockEntry> anteriores = new LinkedHashMap<>();
         int falhas;
     }
