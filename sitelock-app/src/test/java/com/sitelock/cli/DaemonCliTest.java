@@ -104,6 +104,10 @@ class DaemonCliTest {
         cmd.add("-Dsitelock.hostsFile=" + hosts());
         cmd.add("-Duser.home=" + tmp.resolve("home-vazio"));
         cmd.add("-Dsiteblock.user=" + System.getProperty("user.name", ""));
+        // O log do teste é lido como UTF-8; no Windows o padrão do processo é
+        // a codepage nativa, que quebra a leitura em "próxima volta".
+        cmd.add("-Dstdout.encoding=UTF-8");
+        cmd.add("-Dstderr.encoding=UTF-8");
         cmd.add("com.sitelock.SiteLockApplication");
         cmd.add("daemon");
         cmd.add("__run-daemon");
