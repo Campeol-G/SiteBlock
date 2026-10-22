@@ -40,6 +40,29 @@ jobs:
       - name: Build (gera o fat-jar distribuível)
         shell: bash
         run: bash ./mvnw -B clean package
+      # Sem login o log do run não abre. A anotação aparece na página e diz
+      # qual teste quebrou, que é o que falta para diagnosticar a matriz.
+      - name: Anota falhas de teste
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          shopt -s globstar nullglob
+          total=0
+          for report in **/target/surefire-reports/*.txt; do
+            if grep -qE '<<< (FAILURE|ERROR)' "$report"; then
+              total=$((total + 1))
+              [ "$total" -gt 10 ] && break
+              msg=$(grep -E -A 8 '<<< (FAILURE|ERROR)' "$report" | head -n 12)
+              msg=${msg//'%'/'%25'}
+              msg=${msg//$'\r'/}
+              msg=${msg//$'\n'/'%0A'}
+              echo "::error title=Falha em ${report}::${msg}"
+            fi
+          done
+          if [ "$total" -eq 0 ]; then
+            echo "::error title=Build falhou::Nenhum relatório do Surefire encontrado; a falha pode ser de compilação."
+          fi
       - name: Verifica o fat-jar
         shell: bash
         run: |
