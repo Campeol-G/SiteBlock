@@ -433,7 +433,10 @@ class DaemonCliTest {
         assertTrue(saida.texto().contains("não está rodando"), saida.texto());
     }
 
+    // No Windows o autostart é uma Tarefa do Agendador e isEnabled consulta o
+    // schtasks de verdade; não dá para semear o artefato como aqui.
     @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
     void statusSaysTheInstalledJarIsMissing() throws Exception {
         // O sintoma do mvn clean: a unit aponta para um jar que não existe
         // mais. Sem esta linha, o status só diria "não está rodando" e a
@@ -441,14 +444,15 @@ class DaemonCliTest {
         semear(prazos("permanente.com", null));
         // Raiz temporária: o teste não pode mexer no /opt de verdade, que é do
         // root — e o diretório de instalação nem existe aí.
+        OsType os = OsType.detect();
         Path raiz = tmp.resolve("sys");
-        Path jar = AutostartInstaller.installJarPath(OsType.LINUX, raiz);
+        Path jar = AutostartInstaller.installJarPath(os, raiz);
         Files.createDirectories(jar.getParent());
         Files.writeString(jar, "jar");
         Files.delete(jar);
         // A unit precisa existir: o aviso do jar só aparece quando o autostart
         // está instalado — senão não há daemon para reclamar.
-        Path unit = AutostartInstaller.artifactPath(OsType.LINUX, raiz);
+        Path unit = AutostartInstaller.artifactPath(os, raiz);
         Files.createDirectories(unit.getParent());
         Files.writeString(unit, "[Unit]\n");
         try {
