@@ -14,8 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * O artefato de autostart é testado como <b>texto gerado</b>, não como agendador:
- * o CI roda em Linux e Windows, nunca em macOS, então o {@code systemctl}/
- * {@code launchctl}/{@code schtasks} de verdade não pode ser exercitado.
+ * o CI roda nos três SOs, mas o {@code systemctl}/{@code launchctl}/
+ * {@code schtasks} de verdade não pode ser exercitado.
  *
  * <p>A asserção que importa é de substring: o texto tem que conter o
  * {@code stateDir} e o {@code hostsFile} absolutos — é ela que pega o daemon
@@ -23,8 +23,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class AutostartArtifactTest {
 
-    private static final String STATE_DIR = "/home/chico/.sitelock";
-    private static final String HOSTS = "/etc/hosts";
+    private static final Path STATE_DIR_PATH = Path.of("/home/chico/.sitelock");
+    private static final Path HOSTS_PATH = Path.of("/etc/hosts");
+    // O artefato resolve os caminhos com toAbsolutePath(); no Windows isso
+    // ganha a letra da unidade, então a expectativa também precisa resolver.
+    private static final String STATE_DIR = STATE_DIR_PATH.toAbsolutePath().toString();
+    private static final String HOSTS = HOSTS_PATH.toAbsolutePath().toString();
     private static final String JAVA = "/usr/lib/jvm/temurin-26/bin/java";
     private static final String JAR = "/opt/sitelock/siteblock.jar";
     private static final String CP = "/opt/sitelock/classes";
@@ -33,11 +37,11 @@ class AutostartArtifactTest {
     Path tmp;
 
     private AutostartPaths caminhos(OsType os) {
-        return new AutostartPaths(Path.of(STATE_DIR), Path.of(HOSTS), JAVA, JAR, CP, "chico", os);
+        return new AutostartPaths(STATE_DIR_PATH, HOSTS_PATH, JAVA, JAR, CP, "chico", os);
     }
 
     private AutostartPaths caminhos(OsType os, String jarPath) {
-        return new AutostartPaths(Path.of(STATE_DIR), Path.of(HOSTS), JAVA, jarPath, CP, "chico", os);
+        return new AutostartPaths(STATE_DIR_PATH, HOSTS_PATH, JAVA, jarPath, CP, "chico", os);
     }
 
     @Test
@@ -108,15 +112,16 @@ class AutostartArtifactTest {
 
     @Test
     void artifactEscapesSpacesInPaths() {
+        Path stateComEspaco = Path.of("/home/chico/My Projects/.sitelock");
         AutostartPaths comEspaco = new AutostartPaths(
-                Path.of("/home/chico/My Projects/.sitelock"),
-                Path.of(HOSTS), "/opt/My JDK/bin/java", "/opt/My JDK/siteblock.jar",
+                stateComEspaco, HOSTS_PATH, "/opt/My JDK/bin/java", "/opt/My JDK/siteblock.jar",
                 CP, "chico", OsType.LINUX);
         String unit = AutostartArtifact.systemdUnit(comEspaco);
 
         // O systemd não faz split de shell: a citação vai no token inteiro,
         // property e caminho juntos, ou o espaço viraria outro argumento.
-        assertTrue(unit.contains("\"-Dsitelock.stateDir=/home/chico/My Projects/.sitelock\""), unit);
+        assertTrue(unit.contains("\"-Dsitelock.stateDir=" + stateComEspaco.toAbsolutePath() + "\""),
+                unit);
         assertTrue(unit.contains("\"/opt/My JDK/bin/java\""), unit);
         assertTrue(unit.contains("\"/opt/My JDK/siteblock.jar\""), unit);
     }
