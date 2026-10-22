@@ -201,27 +201,31 @@ public class DnsServer {
     public void serveForever() {
         DatagramSocket ds = bind();
         this.socket = ds;
-        ServerSocket tcp = bindTcp();
-        this.tcpServer = tcp;
-        final UpstreamClient cliente;
+        ServerSocket tcp = null;
+        UpstreamClient cliente = null;
+        // ATENÇÃO: bindTcp e a criação do upstream também ficam dentro do try:
+        // se qualquer um falhar, o finally fecha o UDP — antes a falha do TCP
+        // vazava o socket UDP e o próximo start dizia que a porta estava em uso.
         try {
-            cliente = new UpstreamClient(upstream, upstreamPort, upstreamTimeoutMs, UPSTREAM_SOCKETS);
-        } catch (IOException e) {
-            closeQuietly(ds);
-            closeQuietly(tcp);
-            throw new DnsServerException("Falha ao abrir o socket do upstream "
-                    + upstream.getHostAddress() + ":" + upstreamPort + ": " + e.getMessage(), e);
-        }
-        this.upstreamClient = cliente;
-        this.pool = newPool();
-        this.tcpPool = newTcpPool();
-        startTcpAcceptor(tcp);
-        log("ouvindo em 0.0.0.0:" + port + " (upstream " + upstream.getHostAddress()
-                + ") — aceitando origens locais"
-                + (policy.extras().isEmpty() ? ""
-                : " + extras " + String.join(", ", policy.extras())));
-        System.out.println("SITELOCK_DNS_LISTENING port=" + port);
-        try {
+            tcp = bindTcp();
+            this.tcpServer = tcp;
+            try {
+                cliente = new UpstreamClient(upstream, upstreamPort, upstreamTimeoutMs,
+                        UPSTREAM_SOCKETS);
+            } catch (IOException e) {
+                throw new DnsServerException("Falha ao abrir o socket do upstream "
+                        + upstream.getHostAddress() + ":" + upstreamPort + ": "
+                        + e.getMessage(), e);
+            }
+            this.upstreamClient = cliente;
+            this.pool = newPool();
+            this.tcpPool = newTcpPool();
+            startTcpAcceptor(tcp);
+            log("ouvindo em 0.0.0.0:" + port + " (upstream " + upstream.getHostAddress()
+                    + ") — aceitando origens locais"
+                    + (policy.extras().isEmpty() ? ""
+                    : " + extras " + String.join(", ", policy.extras())));
+            System.out.println("SITELOCK_DNS_LISTENING port=" + port);
             while (!stopRequested) {
                 try {
                     aguardaEDespacha(ds);
@@ -236,8 +240,12 @@ public class DnsServer {
             }
         } finally {
             closeQuietly(ds);
-            closeQuietly(tcp);
-            cliente.close();
+            if (tcp != null) {
+                closeQuietly(tcp);
+            }
+            if (cliente != null) {
+                cliente.close();
+            }
             // POR QUE: derruba o pool no finally — sem isso, uma queda no meio do
             // loop deixaria o pool antigo órfão (threads daemon com keepalive de
             // 60s) e o watchdog criaria outro pool por cima.
