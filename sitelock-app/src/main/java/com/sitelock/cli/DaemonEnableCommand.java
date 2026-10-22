@@ -13,27 +13,19 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.Callable;
 
+// ATENÇÃO: os caminhos são resolvidos agora e embutidos no artefato — o
+// agendador roda como root sem SUDO_USER, e aí user.home é /root: o daemon
+// leria o blocks.json de outro usuário, e a feature viraria um no-op silencioso.
+
+// POR QUE: o jar é copiado, não apontado de onde está — a unit apontava para
+// target/, que um mvn clean apaga, e ela entrava em loop de crash. A cópia mora
+// num diretório que só o root escreve.
+
 /**
  * siteblock daemon enable [--jar &lt;caminho&gt;] — instala o autostart.
  *
- * <p>É instalação privilegiada porque o daemon precisa escrever no
- * {@code /etc/hosts}. Não é novidade na curva: o uso normal do SiteBlock já
- * pede root.
- *
- * <p>E aqui está o ponto que faz a feature funcionar ou não: os caminhos são
- * resolvidos <b>agora</b> e embutidos no artefato. Um unit de sistema, uma
- * LaunchDaemon e uma {@code schtasks /ru SYSTEM} rodam como root sem
- * {@code SUDO_USER}, e aí {@code user.home} é {@code /root} — o daemon leria um
- * {@code blocks.json} que não é o do {@code sudo siteblock block}, e a feature
- * inteira viraria um no-op silencioso.
- *
- * <p>O jar também é <b>instalado</b>, não apontado de onde está. A unit
- * apontava para {@code target/siteblock-1.0.0.jar}, e um {@code mvn clean}
- * apagava o {@code target/}: a unit passava a apontar para o nada, o systemd
- * entrava em loop de crash e o prazo dos bloqueios parava de ser cumprido sem
- * mensagem que explicasse. A cópia mora num diretório do root, que só o root
- * escreve — o que também resolve o outro aviso do projeto, o de o daemon
- * executar código de um caminho que o usuário pode trocar.
+ * <p>É instalação privilegiada: o daemon precisa escrever no {@code /etc/hosts},
+ * e o uso normal do SiteBlock já pede root.
  */
 @Command(name = "enable",
         description = "Instala o daemon de expiracao para subir a cada boot.",
@@ -136,31 +128,21 @@ public class DaemonEnableCommand implements Callable<Integer> {
         return 0;
     }
 
-    /**
- * O usuário a quem o daemon deve devolver a posse dos arquivos que escreve.
- *
- * <p>NÃO é {@code user.name}. O {@code daemon enable} roda com sudo, e sob sudo
- * a JVM resolve {@code user.name} a partir do uid — que é 0, ou seja,
- * {@code "root"}. Embutilo embutiria {@code -Dsitelock.user=root}, e o
- * {@code chownToUserIfConfigured} jogaria fora na hora (ele recusa root
- * explicitamente), então a devolução de posse nunca aconteceria: o primeiro
- * sweep do daemon deixaria o {@code blocks.json} do root, e o próprio
- * {@code reset --yes} que a mensagem de estado corrompido recomenda deixaria de
- * funcionar sem sudo.
- *
- * <p>{@link SiteLockPaths#realUserName()} é o certo: lê {@code SUDO_USER} e já
- * rejeita {@code root}. Quando o enable é disparado sem sudo — de um pipeline,
- * por exemplo — devolve vazio e o artefato simplesmente não embute usuário.
- */
+    // POR QUE: a posse dos arquivos que o daemon escreve volta para o usuário
+    // real, e não é user.name: sob sudo a JVM resolve user.name pelo uid (0 =
+    // "root"), que o chownToUserIfConfigured recusa — sem devolução, o reset
+    // --yes deixaria de funcionar sem sudo.
+
+    // ATENÇÃO: SiteLockPaths.realUserName() lê SUDO_USER e já rejeita root;
+    // sem sudo — de um pipeline, por exemplo — devolve vazio e o artefato não
+    // embute usuário.
 private String usuarioReal() {
         return SiteLockPaths.realUserName().orElse(null);
     }
 
-    /**
-     * systemd ausente é comum: container, WSL, distro enxuta. Fingir que
-     * funcionou seria pior que dizer que não deu — a pessoa acharia que está
-     * coberta quando não está.
-     */
+    // systemd ausente é comum: container, WSL, distro enxuta. Fingir que
+    // funcionou seria pior que dizer que não deu — a pessoa acharia que está
+    // coberta quando não está.
     private boolean temAgendador(OsType os) {
         if (systemdPresenteOverride != null) {
             return systemdPresenteOverride;
@@ -178,14 +160,9 @@ private String usuarioReal() {
         return "systemd";
     }
 
-    /**
-     * O diretório que precisa ser gravável para a instalação acontecer.
-     *
-     * <p>No Linux e no macOS é o diretório do artefato ({@code /etc/systemd/system},
-     * {@code /Library/LaunchDaemons}). No Windows não existe artefato em arquivo —
-     * a definição vive na Tarefa do Agendador —, e quem decide é o diretório onde
-     * o jar é instalado ({@code ProgramData/SiteBlock}).
-     */
+    // O diretório que precisa ser gravável: no Linux e no macOS é o diretório
+    // do artefato (/etc/systemd/system, /Library/LaunchDaemons); no Windows não
+    // existe artefato em arquivo, e decide o diretório do jar (ProgramData/SiteBlock).
     private static Path diretorioDaInstalacao(OsType os, Path systemRoot) {
         Path artefato = AutostartInstaller.artifactPath(os, systemRoot);
         if (artefato != null) {
@@ -195,18 +172,12 @@ private String usuarioReal() {
         return AutostartInstaller.installDir(os, systemRoot);
     }
 
-    /**
-     * Dá para criar o artefato aqui?
-     *
-     * <p>Sobe até o ancestral existente mais próximo, porque o diretório ainda pode
-     * não existir — {@code /etc/systemd/system} não existe numa máquina sem
-     * systemd, mas é o próprio {@code install} que o cria. O que decide é se
-     * chegamos a um diretório gravável antes de subir a raiz.
-     *
-     * <p>ATENÇÃO: o argumento é o diretório que precisa ser gravável, e não o
-     * arquivo do artefato — no Windows não existe arquivo, e quem decide é o
-     * diretório de instalação do jar.
-     */
+    // Sobe até o ancestral existente mais próximo, porque o diretório ainda pode
+    // não existir (/etc/systemd/system não existe numa máquina sem systemd):
+    // o que decide é se chegamos a um diretório gravável.
+
+    // ATENÇÃO: o argumento é o diretório que precisa ser gravável, e não o
+    // arquivo do artefato — no Windows não existe arquivo.
     private static boolean podeEscrever(Path diretorio) {
         if (diretorio == null) {
             return false;
@@ -224,7 +195,7 @@ private String usuarioReal() {
         return Files.isExecutable(javaBin) ? javaBin.toString() : "java";
     }
 
-    /** A property primeiro; o classpath é reserva, e é um jar só no uso documentado. */
+    // A property primeiro; o classpath é reserva, e é um jar só no uso documentado.
     private String caminhoDoJar() {
         if (jarPath != null && !jarPath.isBlank()) {
             return jarPath;
@@ -233,21 +204,13 @@ private String usuarioReal() {
         return prop == null || prop.isBlank() ? null : prop;
     }
 
-    /**
-     * O jar do daemon fica num diretório que só o root escreve — e é isso que
-     * o aviso antigo cobria, com o caminho do build no lugar.
-     *
-     * <p>Agora o aviso é o oposto: se o diretório de instalação NÃO for do
-     * root, a proteção não vale nada, porque o usuário pode trocar o jar que o
-     * daemon executa. Isso acontece quando o diretório já existia e era do
-     * usuário — e aí é preciso dizer, porque é a diferença entre o daemon
-     * executar código do root e executar código do usuário como root.
-     */
+    // O jar do daemon fica num diretório que só o root escreve: se o diretório de
+    // instalação NÃO for do root — o caso de um diretório que já existia e era do
+    // usuário — o daemon executa código do usuário como root.
     private String avisoDonoDoInstall(OsType os, Path systemRoot) {
         if (os.isWindows()) {
-            // ATENÇÃO: no Windows não existe uid root nem chown. Quem protege o
-            // jar é a permissão (ACL) da pasta, e o dono do arquivo não diz quem
-            // pode escrever nele — o dono do ProgramData é o usuário que
+            // ATENÇÃO: no Windows não existe uid root nem chown — quem protege o
+            // jar é a ACL da pasta, e o dono do ProgramData é o usuário que
             // instalou. Pedir um chown ali é pedir um comando que não existe.
             return null;
         }

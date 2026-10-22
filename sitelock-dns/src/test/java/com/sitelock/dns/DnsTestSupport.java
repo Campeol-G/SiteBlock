@@ -14,13 +14,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-/**
- * Apoio comum aos testes de socket: porta livre, consulta UDP, espera pelo
- * servidor no ar e arquivo de bloqueios temporário.
- *
- * <p>Nada aqui toca na internet nem em arquivo do usuário: tudo vive em
- * diretório temporário e em loopback.
- */
+// Apoio comum aos testes de socket: porta livre, consulta UDP, espera pelo
+// servidor no ar e arquivo de bloqueios temporário. Nada aqui toca na internet
+// nem em arquivo do usuário: tudo vive em diretório temporário e em loopback.
 final class DnsTestSupport {
 
     private static final int PORTA_BASE = 15300;
@@ -28,12 +24,9 @@ final class DnsTestSupport {
     private DnsTestSupport() {
     }
 
-    /**
-     * Porta livre nos dois espaços de protocolo (UDP e TCP).
-     *
-     * <p>O servidor usa a mesma porta nos dois: por isso a porta precisa estar
-     * livre nos dois lados ao mesmo tempo.
-     */
+    // Porta livre nos dois espaços de protocolo (UDP e TCP). O servidor usa a
+    // mesma porta nos dois: por isso ela precisa estar livre nos dois lados ao
+    // mesmo tempo.
     static int portaLivre() {
         for (int i = 0; i < 200; i++) {
             int porta = PORTA_BASE + (i * 7) % 2000;
@@ -47,7 +40,7 @@ final class DnsTestSupport {
         throw new IllegalStateException("não achou porta livre para o teste");
     }
 
-    /** Envia uma consulta UDP ao servidor e devolve a resposta (ou null). */
+    // Envia uma consulta UDP ao servidor e devolve a resposta (ou null).
     static byte[] consultar(int porta, byte[] consulta, int timeoutMs) throws IOException {
         try (DatagramSocket s = new DatagramSocket()) {
             s.setSoTimeout(timeoutMs);
@@ -60,7 +53,7 @@ final class DnsTestSupport {
         }
     }
 
-    /** Espera o servidor responder (usa um nome bloqueado: resposta local e rápida). */
+    // Espera o servidor responder (usa um nome bloqueado: resposta local e rápida).
     static void esperaEscuta(int porta, String nomeBloqueado, int timeoutMs) throws Exception {
         long fim = System.currentTimeMillis() + timeoutMs;
         byte[] probe = DnsWire.query(0x4242, nomeBloqueado, DnsQuery.TYPE_A);
@@ -77,7 +70,7 @@ final class DnsTestSupport {
         throw new IllegalStateException("o servidor não respondeu na porta " + porta);
     }
 
-    /** Espera o log do servidor mostrar a marca pedida. */
+    // Espera o log do servidor mostrar a marca pedida.
     static void esperaMarca(ByteArrayOutputStream log, String marca, long timeoutMs)
             throws InterruptedException {
         long fim = System.currentTimeMillis() + timeoutMs;
@@ -90,7 +83,8 @@ final class DnsTestSupport {
         throw new IllegalStateException("a marca '" + marca + "' não apareceu no log");
     }
 
-    /** Cria um blocks.json com os domínios dados. */    static Path arquivoDeBloqueios(Path dir, String... dominios) throws IOException {
+    // Cria um blocks.json com os domínios dados.
+    static Path arquivoDeBloqueios(Path dir, String... dominios) throws IOException {
         Files.createDirectories(dir);
         Path arquivo = dir.resolve("blocks.json");
         StringBuilder json = new StringBuilder("{");
@@ -108,7 +102,7 @@ final class DnsTestSupport {
         return arquivo;
     }
 
-    /** Nomes de arquivo temporários usados nos testes. */
+    // Nomes de arquivo temporários usados nos testes.
     static List<String> nomes(List<String> base, String... extras) {
         List<String> todos = new ArrayList<>(base);
         todos.addAll(Arrays.asList(extras));

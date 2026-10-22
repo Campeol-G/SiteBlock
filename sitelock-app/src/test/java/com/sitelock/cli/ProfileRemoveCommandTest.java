@@ -51,7 +51,7 @@ class ProfileRemoveCommandTest {
         return tmp.resolve("estado/profiles.json");
     }
 
-    /** Roda a CLI de verdade, com o --state-file apontando para o temporário. */
+    // Roda a CLI de verdade, com o --state-file apontando para o temporário.
     private int run(String... args) {
         List<String> todos = new ArrayList<>(List.of(args));
         todos.add("--state-file");
@@ -59,7 +59,7 @@ class ProfileRemoveCommandTest {
         return new CommandLine(new SiteLockApplication()).execute(todos.toArray(new String[0]));
     }
 
-    /** Bloqueia e salva um perfil com os domínios dados. */
+    // Bloqueia e salva um perfil com os domínios dados.
     private void prepararPerfil(String nome, String... dominios) throws Exception {
         List<String> args = new ArrayList<>();
         args.add("block");
@@ -74,7 +74,7 @@ class ProfileRemoveCommandTest {
         return Files.readString(profilesFile(), StandardCharsets.UTF_8);
     }
 
-    /** Exit code + stdout/stderr de um comando. */
+    // Exit code + stdout/stderr de um comando.
     private record Resultado(int exit, String texto) {
     }
 
@@ -184,13 +184,11 @@ class ProfileRemoveCommandTest {
         assertEquals(antes, perfil(), "um domínio inválido não pode mudar nada");
     }
 
+    // POR QUE: a leitura do estado existe só para o aviso do "continua bloqueado".
+    // Falhar nela impede o aviso, não a edição da receita — desfazer a remoção
+    // por causa de um arquivo quebrado seria trocar um problema pequeno por um maior.
     /**
      * O estado ilegível não pode impedir a remoção.
-     *
-     * <p>POR QUE: a leitura do estado existe só para o aviso do "continua
-     * bloqueado". Falhar nela impede o aviso, não a edição da receita — e
-     * desfazer a remoção por causa de um arquivo quebrado seria trocar um
-     * problema pequeno por um maior.
      */
     @Test
     void removeSobreviveAoEstadoIlegivel() throws Exception {

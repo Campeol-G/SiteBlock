@@ -27,7 +27,7 @@ class ProfileApplyTest {
     @TempDir
     Path tmp;
 
-    /** Criar uma vez: reescrever apagaria os bloqueios que o teste acabou de fazer. */
+    // Criar uma vez: reescrever apagaria os bloqueios que o teste acabou de fazer.
     private Path hosts() throws Exception {
         if (hosts == null) {
             hosts = tmp.resolve("hosts");
@@ -62,7 +62,7 @@ class ProfileApplyTest {
         return Files.readString(Path.of(state()), StandardCharsets.UTF_8);
     }
 
-    /** Lê o expiresAt de um domínio direto do JSON, sem passar pela CLI. */
+    // Lê o expiresAt de um domínio direto do JSON, sem passar pela CLI.
     private Instant expiresAt(String domain) throws Exception {
         String json = blocksJson();
         int dominio = json.indexOf("\"" + domain + "\"");

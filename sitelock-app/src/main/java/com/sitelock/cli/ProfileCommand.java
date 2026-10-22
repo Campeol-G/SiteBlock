@@ -9,20 +9,9 @@ import java.util.concurrent.Callable;
 /**
  * siteblock profile ... — conjuntos de domínios salvos com nome.
  *
- * <p>Montar o mesmo conjunto toda vez é tedioso. Um perfil guarda a receita
- * (domínio + duração) uma vez; {@code apply} recarrega sem nunca encurtar o
- * que já está mais forte.
- *
- * <p><b>O nome do perfil aparece antes do subcomodo</b> — {@code profile
- * trabalho add tiktok.com} — porque é assim que a pessoa pensa: primeiro de
- * qual conjunto ela está falando, depois o que quer fazer com ele. O nome é
- * um posicional do comando {@code profile}, e os subcomandos que editam a
- * receita o lêem de lá.
- *
- * <p>Os subcomandos que já existiam não mudam de forma: {@code profile save
- * trabalho} continua funcionando, porque o nome deles é o posicional do
- * <b>próprio</b> subcomando. Só quem escreve {@code profile &lt;nome&gt; ...
- * passa pelo posicional do pai.
+ * <p>Um perfil guarda a receita (domínio + duração) uma vez; o {@code apply} recarrega
+ * sem nunca encurtar o que já está mais forte. O nome vem antes do subcomando
+ * ({@code profile trabalho add tiktok.com}): primeiro de qual conjunto, depois o que fazer.
  */
 @Command(name = "profile",
         description = "Conjuntos de dominios salvos com nome.",
@@ -38,13 +27,9 @@ import java.util.concurrent.Callable;
                 ProfileRemoveCommand.class})
 public class ProfileCommand implements Callable<Integer> {
 
-    /**
-     * Nome do perfil, para os subcomandos que editam a receita.
-     *
-     * <p>Opcional porque nem todo subcomando usa: {@code profile list} não
-     * precisa de nome nenhum. Quem exige nome ({@code add}, {@code remove})
-     * avisa quando ele falta.
-     */
+    // Nome do perfil, para os subcomandos que editam a receita ("add" e "remove").
+    // Opcional porque nem todo subcomando usa: "profile list" não precisa de nome, e
+    // quem exige nome avisa quando ele falta. Os subcomandos antigos têm nome próprio.
     @Parameters(index = "0", paramLabel = "<nome>", arity = "0..1",
             description = "Nome do perfil (usado por 'add' e 'remove').")
     String name;

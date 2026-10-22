@@ -19,16 +19,13 @@ import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.Optional;
 
+// POR QUE: o arquivo fica no state dir do usuário real (mesmo sob sudo, via
+// SiteLockPaths) para que o daemon iniciado com sudo e o `dns stop` enxerguem
+// o mesmo arquivo.
 /**
- * Estado do daemon DNS em {@code ~/.sitelock/dns-server.json}: quem está
- * rodando,
+ * Estado do daemon DNS em {@code ~/.sitelock/dns-server.json}: quem está rodando,
  * em qual porta/upstream e até quando (--for). Lido por {@code dns stop/status}
  * para sinalizar o processo certo e para aplicar a regra de --force.
- *
- * <p>
- * O arquivo fica no state dir do usuário real (mesmo sob sudo, via
- * {@link SiteLockPaths}), então o daemon iniciado com sudo e o {@code dns stop}
- * enxergam o mesmo arquivo.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class DnsDaemonState {
@@ -39,13 +36,9 @@ public class DnsDaemonState {
   private Instant startedAt;
   private Instant expiresAt;
 
-  /**
-   * Instante de início do PROCESSO registrado.
-   *
-   * <p>É o que prova a identidade do PID: o SO recicla números, e um PID
-   * vivo não é necessariamente o daemon DNS. Nulo = registro escrito por uma
-   * versão antiga, que não tinha o campo.
-   */
+  // Instante de início do PROCESSO registrado: é o que prova a identidade do
+  // PID (o SO recicla números, e um PID vivo não é necessariamente o daemon
+  // DNS). Nulo = registro escrito por uma versão antiga, que não tinha o campo.
   private Instant processStartedAt;
 
   /** Construtor para o Jackson. */
@@ -178,13 +171,9 @@ public class DnsDaemonState {
     SiteLockPaths.chownToRealUserIfSudo(target);
   }
 
-  /**
-   * Grava o instante de início do processo, quando o registro é sobre este
-   * processo.
-   *
-   * <p>Só quem é o processo sabe o próprio instante de início — e é esse
-   * instante que prova, depois, que o PID ainda é o nosso.
-   */
+  // Grava o instante de início do processo, quando o registro é sobre este
+  // processo: só quem é o processo sabe o próprio instante de início — e é
+  // esse instante que prova, depois, que o PID ainda é o nosso.
   private static void registrarInstanteDoProcesso(DnsDaemonState state) {
     if (state.getProcessStartedAt() != null || state.getPid() != ProcessHandle.current().pid()) {
       return;
@@ -219,16 +208,13 @@ public class DnsDaemonState {
     Files.deleteIfExists(statePath(stateDir));
   }
 
+  // POR QUE: o SO recicla PID, então "o PID existe" mente — o `dns stop`
+  // mandaria SIGTERM num processo que não é o SiteLock. A prova de identidade é
+  // o instante de início do processo: dois processos não começam no mesmo instante.
   /**
    * true se o PID registrado ainda for o processo que o registro descreve.
    *
-   * <p>O SO recicla PID: o daemon morreu e o número foi dado a outro
-   * processo. "O PID existe" mente, e o {@code dns stop} manda um SIGTERM
-   * num processo que não é o SiteLock. A prova de identidade é o instante de
-   * início do processo: dois processos não começam no mesmo instante.
-   *
-   * <p>Registro sem o instante de início (escrito por uma versão antiga)
-   * continua valendo pelo PID.
+   * <p>Registro sem o instante de início (versão antiga) continua valendo pelo PID.
    */
   public static boolean isAlive(DnsDaemonState state) {
     if (state == null || state.getPid() <= 0) {

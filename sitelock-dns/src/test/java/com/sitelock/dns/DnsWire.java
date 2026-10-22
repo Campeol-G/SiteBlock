@@ -5,29 +5,26 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-/**
- * Monte e leitura de pacotes DNS para os testes de socket.
- *
- * <p>Não usa a internet: as consultas são montadas na mão e as respostas são
- * lidas direto do buffer, porque o parser de produção só sabe ler consultas.
- */
+// Monte e leitura de pacotes DNS para os testes de socket. Não usa a internet:
+// as consultas são montadas na mão e as respostas lidas direto do buffer,
+// porque o parser de produção só sabe ler consultas.
 final class DnsWire {
 
     private DnsWire() {
     }
 
-    /** Lê um inteiro de 16 bits big-endian. */
+    // Lê um inteiro de 16 bits big-endian.
     static int u16(byte[] data, int off) {
         return ((data[off] & 0xFF) << 8) | (data[off + 1] & 0xFF);
     }
 
-    /** Escreve um inteiro de 16 bits big-endian. */
+    // Escreve um inteiro de 16 bits big-endian.
     static void put16(byte[] data, int off, int value) {
         data[off] = (byte) (value >>> 8);
         data[off + 1] = (byte) value;
     }
 
-    /** Codifica um nome em rótulos DNS ("exemplo.com" -> 7"exemplo"3"com"0). */
+    // Codifica um nome em rótulos DNS ("exemplo.com" -> 7"exemplo"3"com"0).
     static byte[] encodeName(String name) {
         String[] labels = name.split("\\.");
         int tamanho = 1;
@@ -46,7 +43,7 @@ final class DnsWire {
         return out;
     }
 
-    /** Monta uma consulta padrão (QR=0, RD=1, uma pergunta). */
+    // Monta uma consulta padrão (QR=0, RD=1, uma pergunta).
     static byte[] query(int id, String name, int type) {
         byte[] qname = encodeName(name);
         byte[] out = new byte[12 + qname.length + 4];
@@ -60,20 +57,12 @@ final class DnsWire {
         return out;
     }
 
-    /**
-     * Resposta com uma cadeia de aliases, como um upstream de verdade monta.
-     *
-     * <p>Cada elo da cadeia é um CNAME do nome anterior para o próximo; o
-     * último nome recebe um registro final (A/AAAA). Os nomes da section answer
-     * vêm <b>comprimidos</b> (ponteiro 0xC0xx): é assim que o upstream real
-     * economiza bytes, e é o que o leitor de nomes precisa seguir.
-     *
-     * @param consulta   consulta recebida (a pergunta é ecoada byte a byte, como
-     *                   o servidor exige antes de repassar a resposta)
-     * @param cadeia     nomes da cadeia; o primeiro é o nome consultado
-     * @param tipoFinal  tipo do registro final (0 = nenhum registro final)
-     * @param rdataFinal dados do registro final
-     */
+    // Resposta com uma cadeia de aliases, como um upstream de verdade monta: cada
+    // elo é um CNAME para o próximo, o último recebe o registro final (A/AAAA), e
+    // a pergunta é ecoada byte a byte, como o servidor exige antes de repassar.
+
+    // ATENÇÃO: os nomes da section answer vêm comprimidos (ponteiro 0xC0xx) — é
+    // assim que o upstream real economiza bytes, e é o que o leitor de nomes segue.
     static byte[] respostaEmCadeia(byte[] consulta, String[] cadeia,
                                    int tipoFinal, byte[] rdataFinal) {
         int id = u16(consulta, 0);
@@ -134,13 +123,13 @@ final class DnsWire {
         return out.toByteArray();
     }
 
-    /** Escreve um ponteiro de compressão (0xC0xx) para o offset informado. */
+    // Escreve um ponteiro de compressão (0xC0xx) para o offset informado.
     private static void writePointer(ByteArrayOutputStream out, int offset) {
         out.write(0xC0 | ((offset >>> 8) & 0x3F));
         out.write(offset & 0xFF);
     }
 
-    /** Offset do fim da seção question (após QTYPE/QCLASS). */
+    // Offset do fim da seção question (após QTYPE/QCLASS).
     static int fimDaPergunta(byte[] data) {
         int off = 12;
         while (off < data.length) {
@@ -157,7 +146,7 @@ final class DnsWire {
         return off + 4;
     }
 
-    /** Pula um nome (com ponteiro de compressão) e devolve o offset seguinte. */
+    // Pula um nome (com ponteiro de compressão) e devolve o offset seguinte.
     static int skipName(byte[] data, int off) {
         while (off < data.length) {
             int len = data[off] & 0xFF;
@@ -172,24 +161,24 @@ final class DnsWire {
         return off;
     }
 
-    /** Resposta lida do buffer. */
+    // Resposta lida do buffer.
     record Resposta(int id, int flags, int rcode, int qdCount, int anCount, List<Answer> answers) {
 
         boolean isResposta() {
             return (flags & 0x8000) != 0;
         }
 
-        /** Primeiro RDATA da resposta, ou null. */
+        // Primeiro RDATA da resposta, ou null.
         byte[] primeiroRdata() {
             return answers.isEmpty() ? null : answers.get(0).rdata();
         }
     }
 
-    /** Um registro da seção answer. */
+    // Um registro da seção answer.
     record Answer(int type, byte[] rdata) {
     }
 
-    /** Lê uma resposta (header + question + answers). */
+    // Lê uma resposta (header + question + answers).
     static Resposta parse(byte[] data) {
         int id = u16(data, 0);
         int flags = u16(data, 2);

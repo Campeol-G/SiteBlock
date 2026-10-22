@@ -40,7 +40,7 @@ class StatusCommandTest {
 
     private Path hosts;
 
-    /** O hosts de teste; criado uma vez só, para não apagar o bloco escrito. */
+    // O hosts de teste; criado uma vez só, para não apagar o bloco escrito.
     private Path hosts() throws Exception {
         if (hosts == null) {
             hosts = tmp.resolve("hosts");
@@ -53,7 +53,7 @@ class StatusCommandTest {
         return tmp.resolve("estado/blocks.json").toString();
     }
 
-    /** Grava um estado com um único domínio, sem passar pelo block. */
+    // Grava um estado com um único domínio, sem passar pelo block.
     private void gravarEstado(String dominio, Instant expiresAt) throws Exception {
         Map<String, BlockEntry> estado = new TreeMap<>();
         estado.put(dominio, new BlockEntry(dominio, Instant.now(), expiresAt));
@@ -151,13 +151,11 @@ class StatusCommandTest {
                 "o www e o dominio são o mesmo bloqueio: " + r.texto());
     }
 
+    // ATENÇÃO: o teste depende de permissão POSIX — no Windows o
+    // setPosixFilePermissions não existe, o arquivo continua legível e a
+    // asserção quebra. Sem @EnabledOnOs, a perna Windows da CI fica VERMELHA.
     /**
      * Sem permissão de leitura no hosts, o status avisa e não vira erro.
-     *
-     * <p>ATENÇÃO: o teste depende de permissão POSIX — no Windows o
-     * {@code setPosixFilePermissions} não existe, o arquivo continua legível e
-     * a asserção quebra. Sem {@code @EnabledOnOs}, a perna Windows da CI fica
-     * VERMELHA.
      */
     @Test
     @EnabledOnOs({OS.LINUX, OS.MAC})

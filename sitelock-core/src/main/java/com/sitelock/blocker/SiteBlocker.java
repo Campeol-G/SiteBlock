@@ -12,12 +12,11 @@ public interface SiteBlocker {
     /** Remove o bloqueio do domínio. */
     void unblock(String domain) throws IOException;
 
+    // POR QUE: sem default de propósito — a interface tem uma única implementação,
+    // e forçar o compilador a achar os dois métodos é mais barato que caçar um
+    // UnsupportedOperationException em produção.
     /**
      * Bloqueia vários domínios de uma vez.
-     *
-     * <p>Sem {@code default} de propósito: a interface tem uma única
-     * implementação, e forçar o compilador a achar os dois métodos é mais barato
-     * que caçar um {@code UnsupportedOperationException} em produção.
      */
     void blockAll(List<String> domains) throws IOException;
 

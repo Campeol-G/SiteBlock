@@ -132,11 +132,10 @@ class ResetCommandTest {
         assertTrue(estado().isEmpty(), "o estado recriado tem que estar vazio: " + estado());
     }
 
+    // POR QUE: o caminho do pai é um arquivo comum, e nenhum sistema deixa
+    // criar o diretório do estado por baixo dele.
     /**
      * Quando o estado não pode ser gravado, o reset tem que dizer que falhou.
-     *
-     * <p>O caminho do pai é um arquivo comum: nenhum sistema deixa criar o
-     * diretório do estado por baixo dele.
      */
     @Test
     void resetFalhaComMensagemQuandoOEstadoNaoPodeSerGravado() throws Exception {

@@ -16,12 +16,11 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Escrita no hosts preserva permissões e repara 600.
+ * Escrita no hosts preserva as permissões e repara o arquivo deixado em 600.
  *
- * <p>Só faz sentido onde existe permissão POSIX. Antes these testes engoliam a
- * {@code UnsupportedOperationException} e voltavam sem verificar nada — no
- * Windows da CI isso era verde sem cobertura. Agora o SO decide: o teste é
- * pulado, e a suíte reporta o pulo.
+ * <p>Só faz sentido onde existe permissão POSIX. Onde não há, o teste é pulado
+ * e a suíte reporta o pulo — engolir a {@code UnsupportedOperationException}
+ * deixaria a CI do Windows verde sem cobertura nenhuma.
  */
 @EnabledOnOs({OS.LINUX, OS.MAC})
 class HostsFileManagerPermsTest {

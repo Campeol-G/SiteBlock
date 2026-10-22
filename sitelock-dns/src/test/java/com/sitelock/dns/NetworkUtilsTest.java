@@ -7,14 +7,9 @@ import java.net.InetAddress;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/**
- * O endereço que a CLI manda o usuário configurar no celular.
- *
- * <p>Um endereço link-local (169.254/16 — hotspot, PPPoE) não é roteável: o
- * celular pointed para ele não resolve nada, e a CLI imprimia
- * "configure o DNS manualmente para 169.254.210.73" como se fosse o caminho
- * certo.
- */
+// O endereço que a CLI manda o usuário configurar no celular. Um link-local
+// (169.254/16 — hotspot, PPPoE) não é roteável: o celular apontado para ele não
+// resolve nada, e a CLI imprimia "configure o DNS manualmente para 169.254.210.73".
 class NetworkUtilsTest {
 
     private static InetAddress ip(String texto) throws Exception {

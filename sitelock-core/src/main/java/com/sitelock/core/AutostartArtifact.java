@@ -7,9 +7,8 @@ import java.util.List;
  * Gera o texto do artefato de autostart de cada SO.
  *
  * <p>Puro: nenhum caminho é resolvido aqui dentro. Tudo chega já absoluto pelo
- * {@link AutostartPaths}, porque resolver dentro do gerador seria resolver no
- * momento errado — e o momento errado é quando o daemon roda como root sem
- * {@code SUDO_USER}.
+ * {@link AutostartPaths} — resolver no gerador seria resolver no momento
+ * errado, que é o daemon rodando como root sem {@code SUDO_USER}.
  */
 public final class AutostartArtifact {
 
@@ -88,17 +87,19 @@ public final class AutostartArtifact {
     /**
      * Comando {@code schtasks} que instala a tarefa.
      *
-     * <p>Dispara em <b>ONLOGON</b> e não em ONSTART: {@code /ru SYSTEM}
-     * trocaria a identidade do processo, e todo arquivo criado no diretório de
-     * estado nasceria do SYSTEM. {@code ONLOGON} com {@code HIGHEST} dá o root
-     * que o daemon precisa sem esse custo. Perde-se só o caso "ligada, ninguém
-     * logado" — e sem sessão não há navegador para estar bloqueado.
+     * <p>Dispara em <b>ONLOGON</b>, não em ONSTART: {@code /ru SYSTEM} trocaria
+     * a identidade do processo, e todo arquivo do diretório de estado nasceria
+     * do SYSTEM.
+     *
+     * <p>{@code ONLOGON} com {@code HIGHEST} dá o root que o daemon precisa sem
+     * esse custo. Perde-se só o caso "ligada, ninguém logado" — e sem sessão não
+     * há navegador para estar bloqueado.
      */
     public static String schtasksCommand(AutostartPaths p) {
         return String.join(" ", schtasksArgs(p)) + " /f";
     }
 
-    /** Mesma coisa em lista de tokens, para o instalador executar direto. */
+    /** O mesmo comando em lista de tokens, para o instalador executar direto. */
     public static List<String> schtasksArgs(AutostartPaths p) {
         List<String> args = new ArrayList<>();
         args.add("schtasks");
@@ -121,7 +122,7 @@ public final class AutostartArtifact {
 
     private static String quotedTaskCommand(AutostartPaths p) {
         // O /tr é um único argumento: aspas por fora, e aspas internas
-        // duplicadas — é a regra do cmd.exe, não a da shell Unix.
+        // duplicadas — é a regra do cmd.exe, não a do shell Unix.
         StringBuilder sb = new StringBuilder("\"");
         for (String arg : commandLine(p)) {
             sb.append(arg.contains(" ") ? "\\\"\"" + arg + "\\\"\" " : arg).append(' ');

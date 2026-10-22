@@ -43,7 +43,7 @@ class DaemonEnableTest {
         return 0;
     };
 
-    /** Exit code + stdout/stderr de um comando. */
+    // Exit code + stdout/stderr de um comando.
     private record Resultado(int exit, String texto) {
     }
 
@@ -70,7 +70,7 @@ class DaemonEnableTest {
         return tmp.resolve("sys");
     }
 
-    /** Um jar de verdade: o enable copia o arquivo, e copia de arquivo inexistente falha. */
+    // Um jar de verdade: o enable copia o arquivo, e copia de arquivo inexistente falha.
     private Path jarDeExemplo() throws Exception {
         Path jar = tmp.resolve("build/siteblock-1.0.0.jar");
         Files.createDirectories(jar.getParent());
@@ -289,12 +289,11 @@ class DaemonEnableTest {
         assertEquals(0, r.exit(), r.texto());
     }
 
+    // ATENÇÃO: lá não existe uid root nem chown — quem protege o jar é a
+    // permissão da pasta, e o dono do arquivo não diz quem pode escrever
+    // nele. A instrução "Rode: sudo chown root ..." é impossível de seguir.
     /**
      * O aviso de dono do diretório não pode pedir {@code chown} no Windows.
-     *
-     * <p>Lá não existe uid {@code root} nem {@code chown}: quem protege o jar
-     * é a permissão da pasta, e o dono do arquivo não diz quem pode escrever
-     * nele. A instrução "Rode: sudo chown root ..." é impossível de seguir.
      */
     @Test
     void noWindowsOAvisoDeDonoNaoPedeChown() throws Exception {
@@ -326,7 +325,7 @@ class DaemonEnableTest {
         assertTrue(cmd.contains("-Dsitelock.user=chico"), cmd.toString());
     }
 
-    /** O caminho do jar na linha ExecStart da unit. */
+    // O caminho do jar na linha ExecStart da unit.
     private static String caminhoDoJarNaUnit(String unit) {
         for (String linha : unit.split("\n")) {
             if (!linha.startsWith("ExecStart=")) {

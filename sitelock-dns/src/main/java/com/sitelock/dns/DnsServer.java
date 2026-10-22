@@ -31,21 +31,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Servidor DNS UDP (RFC 1035): loop principal que recebe consultas de qualquer
- * dispositivo da rede, despacha cada pacote para uma thread do pool e responde
- * sinkhole (bloqueado) ou retransmite a resposta do upstream (liberado).
- *
- * <ul>
- *   <li>Binding em {@code 0.0.0.0:porta} para alcançar toda a rede local.</li>
- *   <li>Thread pool (cached, threads daemon): múltiplos dispositivos simultâneos
- *       sem travar; uma consulta lenta (upstream) nunca bloqueia as demais.</li>
- *   <li>{@link DatagramSocket#send} é thread-safe, então as workers compartilham
- *       o mesmo socket de escuta para responder.</li>
- *   <li>Pacotes malformados ou com OPCODE/QDCOUNT inesperados são <b>ignorados</b>
- *       (sem resposta, sem derrubar o loop) — responder erro a lixo facilita
- *       reflexão/amplificação; o cliente retransmite por conta própria.</li>
- *   <li>Timeout no upstream vira SERVFAIL (RCODE 2) ao cliente, nunca espera infinita.</li>
- * </ul>
+ * Servidor DNS (RFC 1035) para a rede local: escuta UDP e TCP na mesma porta,
+ * despacha cada consulta para uma thread do pool e responde sinkhole
+ * (bloqueado) ou encaminha ao upstream (liberado).
  */
 public class DnsServer {
 
@@ -55,39 +43,29 @@ public class DnsServer {
     /** Buffer por datagrama; cobre DNS clássico (512) e EDNS (até 4096) com folga. */
     public static final int MAX_PACKET_BYTES = 8192;
 
-    /**
-     * Tamanho máximo de uma mensagem DNS sobre TCP (2 bytes de tamanho, RFC 1035 §4.2.2).
-     */
+    /** Tamanho máximo de uma mensagem DNS sobre TCP (2 bytes de tamanho, RFC 1035 §4.2.2). */
     public static final int MAX_TCP_MESSAGE_BYTES = 65535;
 
-    /**
-     * Tempo que uma conexão TCP pode ficar aberta sem enviar a consulta.
-     *
-     * <p>POR QUE: sem isso, uma conexão que abre e fica muda ocupa uma thread
-     * do pool para sempre — o próprio cliente do SiteLock viraria o vetor.
-     */
+    // Tempo que uma conexão TCP pode ficar aberta sem enviar a consulta.
+    // POR QUE: sem isso, uma conexão que abre e fica muda ocupa uma thread do
+    // pool para sempre — o próprio cliente do SiteLock viraria o vetor.
     static final int TCP_READ_TIMEOUT_MS = 5000;
 
-    /**
-     * Threads que atendem consultas UDP ao mesmo tempo.
-     *
-     * <p>POR QUE: o pool antigo era "cached" (cresce até o limite da máquina).
-     * Uma rajada — um app com retry agressivo, ou alguém na LAN — criava
-     * milhares de threads. O pool é limitado, e o que não entra na fila é
-     * descartado: o cliente retransmite por conta própria.
-     */
+    // Threads que atendem consultas UDP ao mesmo tempo.
+    // POR QUE: pool "cached" criaria milhares de threads numa rajada (app com
+    // retry agressivo, alguém na LAN); o excedente é descartado pela fila.
     static final int UDP_POOL_SIZE = 16;
 
-    /** Fila de consultas UDP à espera de thread. */
+    // Fila de consultas UDP à espera de thread.
     static final int UDP_QUEUE_SIZE = 128;
 
-    /** Sockets conectados ao upstream, reaproveitados entre consultas. */
+    // Sockets conectados ao upstream, reaproveitados entre consultas.
     static final int UPSTREAM_SOCKETS = 8;
 
-    /** Threads que atendem conexões TCP ao mesmo tempo. */
+    // Threads que atendem conexões TCP ao mesmo tempo.
     static final int TCP_POOL_SIZE = 8;
 
-    /** Fila de conexões TCP à espera de thread. */
+    // Fila de conexões TCP à espera de thread.
     static final int TCP_QUEUE_SIZE = 64;
 
     private final int port;
@@ -106,7 +84,7 @@ public class DnsServer {
     private volatile ExecutorService tcpPool;
     private volatile UpstreamClient upstreamClient;
 
-    /** Última vez que cada origem recusada foi registrada (para não inundar o log). */
+    // Última vez que cada origem recusada foi registrada (para não inundar o log).
     private final Map<String, Long> ultimaRecusa = new ConcurrentHashMap<>();
 
     public DnsServer(int port, InetAddress upstream, BlockStore store, Clock clock) {
@@ -150,14 +128,14 @@ public class DnsServer {
                 SourcePolicy.padrao(allowFrom));
     }
 
-    /** Construtor com a política de origem já pronta (usado nos testes). */
+    // Construtor com a política de origem já pronta (usado nos testes).
     DnsServer(int port, InetAddress upstream, int upstreamTimeoutMs,
               BlockStore store, Clock clock, SourcePolicy policy) {
         this(port, upstream, DnsResolver.UPSTREAM_PORT, upstreamTimeoutMs,
                 store, clock, policy);
     }
 
-    /** Construtor com a política de origem e a porta do upstream (usados nos testes). */
+    // Construtor com a política de origem e a porta do upstream (usados nos testes).
     DnsServer(int port, InetAddress upstream, int upstreamPort, int upstreamTimeoutMs,
               BlockStore store, Clock clock, SourcePolicy policy) {
         if (port < 1 || port > 65535) {
@@ -187,11 +165,10 @@ public class DnsServer {
         return upstream;
     }
 
+    // ATENÇÃO: a validação acontece na CLI, antes de forkar — um erro de
+    // digitação no endereço não pode derrubar o daemon depois de subir.
     /**
      * Valida a lista de origens do {@code --allow-from} (separada por vírgula).
-     *
-     * <p>ATENÇÃO: a validação acontece na CLI, antes de forkar — um erro de
-     * digitação no endereço não pode derrubar o daemon depois de subir.
      *
      * @throws IllegalArgumentException se alguma entrada não for IP ou CIDR válido
      */
@@ -261,19 +238,16 @@ public class DnsServer {
             closeQuietly(ds);
             closeQuietly(tcp);
             cliente.close();
-            // POR QUE: sem derrubar o pool aqui, uma queda no meio do loop
-            // deixava o pool antigo órfão — threads daemon com keepalive de
-            // 60s — e o watchdog criava outro pool por cima.
+            // POR QUE: derruba o pool no finally — sem isso, uma queda no meio do
+            // loop deixaria o pool antigo órfão (threads daemon com keepalive de
+            // 60s) e o watchdog criaria outro pool por cima.
             shutdown(pool);
             shutdown(tcpPool);
         }
     }
 
-    /**
-     * Espera um pacote e despacha o atendimento para o pool.
-     *
-     * <p>Package-private para o teste poder simular a queda do loop.
-     */
+    // Espera um pacote e despacha o atendimento para o pool.
+    // POR QUE: package-private para o teste poder simular a queda do loop.
     void aguardaEDespacha(DatagramSocket ds) throws IOException {
         byte[] buf = new byte[MAX_PACKET_BYTES];
         DatagramPacket packet = new DatagramPacket(buf, buf.length);
@@ -288,19 +262,13 @@ public class DnsServer {
         }
     }
 
+    // POR QUE: a primeira falha derruba o processo — antes o watchdog genérico
+    // dormia 1s e tentava de novo para sempre, e o `dns start` (que só olhava
+    // se o filho estava vivo) imprimia "Servidor DNS iniciado" sem escutar nada.
     /**
-     * Watchdog simples: se o loop de atendimento morrer por exceção inesperada
-     * (ex.: socket invalidado), espera 1s e tenta de novo até {@link #stop()}.
-     *
-     * <p>A <b>primeira</b> falha derruba o processo, seja ela
-     * {@link DnsServerException} ou qualquer outra {@link RuntimeException}.
-     * Antes, a exceção genérica caía no catch de baixo e o watchdog dormia 1s
-     * e tentava de novo, para sempre: o processo ficava vivo sem nunca
-     * escutar, e o {@code dns start} — que só olhava se o filho estava vivo —
-     * imprimia "Servidor DNS iniciado".
-     *
-     * <p>Não cobre {@code kill -9} do processo — nesse caso o watchdog morre junto
-     * (ver README: risco de perda de internet e como reverter).
+     * Watchdog: se o loop de atendimento morrer por exceção inesperada, espera 1s
+     * e tenta de novo até {@link #stop()}. A primeira falha derruba o processo.
+     * Não cobre {@code kill -9}: o watchdog morre junto (ver README).
      */
     public void runWithWatchdog() {
         boolean primeiraTentativa = true;
@@ -355,7 +323,7 @@ public class DnsServer {
         shutdown(pool);
         shutdown(tcpPool);
     }
-    /** Desliga um pool, esperando as threads terminarem. */
+    // Desliga um pool, esperando as threads terminarem.
     private static void shutdown(ExecutorService p) {
         if (p == null) {
             return;
@@ -382,16 +350,16 @@ public class DnsServer {
         }
     }
 
-    /**
-     * Decide e monta a resposta de uma consulta — o mesmo caminho para UDP e TCP.
-     *
-     * @return os bytes da resposta, ou null quando a consulta foi ignorada
-     */
+    // Decide e monta a resposta de uma consulta — o mesmo caminho para UDP e TCP.
+    // Devolve null quando a consulta foi ignorada.
     private byte[] montaResposta(byte[] data, InetAddress client) {
         final DnsQuery query;
         try {
             query = DnsPacketParser.parse(data, data.length);
         } catch (DnsParseException e) {
+            // ATENÇÃO: pacote com OPCODE/QDCOUNT inesperado é malformado, e fica
+            // sem resposta de propósito — responder erro a lixo facilita
+            // reflexão/amplificação, e o cliente retransmite por conta própria.
             log("ignorado pacote malformado de " + client.getHostAddress() + ": " + e.getMessage());
             return null;
         }
@@ -425,6 +393,7 @@ public class DnsServer {
                 resposta = cliente.encaminhar(data, data.length);
             }
         } catch (SocketTimeoutException e) {
+            // Timeout vira SERVFAIL (RCODE 2): nunca espera o upstream indefinidamente.
             log("timeout do upstream " + upstream.getHostAddress() + " para " + query.name()
                     + " (SERVFAIL)");
             return DnsPacketBuilder.buildErrorResponse(query, 2);
@@ -433,10 +402,9 @@ public class DnsServer {
             return DnsPacketBuilder.buildErrorResponse(query, 2);
         }
 
-        // Alias por CNAME: o nome consultado é livre, mas a cadeia que o upstream
-        // devolve pode apontar para um nome bloqueado — e vir com o IP real dele
-        // na mesma resposta. Aí a resposta do upstream é descartada e o cliente
-        // recebe o sinkhole local, como se o nome consultado fosse bloqueado.
+        // Alias por CNAME: o nome consultado é livre, mas a cadeia devolvida pelo
+        // upstream pode apontar para um nome bloqueado — e vir com o IP real dele.
+        // Aí a resposta é descartada e o cliente recebe o sinkhole local.
         final String aliasBloqueado;
         try {
             aliasBloqueado = resolver.nomeBloqueadoNaCadeia(resposta, resultado.estado());
@@ -457,12 +425,9 @@ public class DnsServer {
         return resposta;
     }
 
-    /**
-     * Atende uma consulta vinda por TCP (RFC 1035 §4.2.2).
-     *
-     * <p>O formato é o mesmo da consulta, precedido do tamanho em 2 bytes. A
-     * mesma política de origem e a mesma decisão do UDP valem aqui.
-     */
+    // Atende uma consulta vinda por TCP (RFC 1035 §4.2.2): o formato é o mesmo
+    // da consulta, precedido do tamanho em 2 bytes. A mesma política de origem
+    // e a mesma decisão do UDP valem aqui.
     private void handleTcp(Socket socket) {
         InetAddress client = socket.getInetAddress();
         try {
@@ -513,7 +478,7 @@ public class DnsServer {
         }
     }
 
-    /** Lê exatamente {@code n} bytes; devolve null se o fluxo acabou antes. */
+    // Lê exatamente n bytes; devolve null se o fluxo acabou antes.
     private static byte[] leExatamente(InputStream in, int n) throws IOException {
         byte[] buffer = new byte[n];
         int lidos = 0;
@@ -527,6 +492,8 @@ public class DnsServer {
         return buffer;
     }
 
+    // POR QUE: as workers respondem pelo mesmo socket de escuta —
+    // DatagramSocket#send é thread-safe, então não precisa de lock.
     private void send(byte[] response, InetAddress client, int clientPort) {
         DatagramSocket ds = socket;
         if (ds == null || ds.isClosed()) {
@@ -557,14 +524,9 @@ public class DnsServer {
         return ds;
     }
 
-    /**
-     * Abre o listener TCP na MESMA porta do UDP.
-     *
-     * <p>POR QUE: UDP e TCP são protocolos diferentes e não conflitam na mesma
-     * porta. Sem o listener TCP, uma resposta grande (TC=1) faz o cliente
-     * retransmitir por TCP (RFC 7766 §8) e a resolução falha com erro de DNS
-     * — o SiteLock parece quebrado justamente nas respostas que importam.
-     */
+    // Abre o listener TCP na MESMA porta do UDP: os dois protocolos não
+    // conflitam. Sem o listener TCP, uma resposta grande (TC=1) faz o cliente
+    // retransmitir por TCP (RFC 7766 §8) e a resolução falha com erro de DNS.
     private ServerSocket bindTcp() {
         final ServerSocket server;
         try {
@@ -585,7 +547,7 @@ public class DnsServer {
         return server;
     }
 
-    /** Thread que aceita conexões TCP e entrega cada uma ao pool. */
+    // Thread que aceita conexões TCP e entrega cada uma ao pool.
     private void startTcpAcceptor(ServerSocket tcp) {
         Thread acceptor = new Thread(() -> {
             while (!stopRequested) {
@@ -618,11 +580,9 @@ public class DnsServer {
         acceptor.start();
     }
 
-    /**
-     * Troca exceções cruas de bind por mensagens acionáveis.
-     * A porta 53 é privilegiada no Linux: só root faz bind abaixo de 1024.
-     * Para testes locais sem sudo existe a flag --port (ex.: --port 5300).
-     */
+    // Troca exceções cruas de bind por mensagens acionáveis.
+    // A porta 53 é privilegiada no Linux: só root faz bind abaixo de 1024.
+    // Para testes locais sem sudo existe a flag --port (ex.: --port 5300).
     DnsServerException friendlyBindError(SocketException cause) {
         String msg = String.valueOf(cause.getMessage()).toLowerCase();
         if (cause instanceof BindException || msg.contains("already in use")
@@ -652,10 +612,9 @@ public class DnsServer {
         return newPool(TCP_POOL_SIZE, TCP_QUEUE_SIZE, "sitelock-dns-tcp-");
     }
 
-    /**
-     * Pool limitado: número fixo de threads, fila com teto e rejeição quando
-     * enche (o pacote é descartado — o cliente retransmite).
-     */
+    // Pool limitado: número fixo de threads, fila com teto e rejeição quando
+    // enche (o pacote é descartado — o cliente retransmite). É o que impede que
+    // uma consulta lenta no upstream trave as demais.
     private static ExecutorService newPool(int threads, int fila, String nome) {
         ThreadFactory factory = new ThreadFactory() {
             private final AtomicInteger seq = new AtomicInteger();
@@ -671,13 +630,9 @@ public class DnsServer {
                 new ArrayBlockingQueue<>(fila), factory, new ThreadPoolExecutor.AbortPolicy());
     }
 
-    /**
-     * Registra a origem recusada, sem repetir a cada pacote.
-     *
-     * <p>POR QUE: uma varredura na porta gera milhares de pacotes; um log por
-     * pacote enche o disco. O nome consultado não aparece aqui de propósito:
-     * recusar é decisão de origem, e o log não vira canal de consulta.
-     */
+    // Registra a origem recusada, sem repetir a cada pacote.
+    // POR QUE: um log por pacote enche o disco numa varredura de porta. O nome
+    // consultado não aparece de propósito: o log não vira canal de consulta.
     private void registrarOrigemRecusada(InetAddress client) {
         String ip = client.getHostAddress();
         long agora = System.currentTimeMillis();
@@ -690,19 +645,17 @@ public class DnsServer {
         }
     }
 
+    // POR QUE: escutar em 0.0.0.0 sem olhar a origem transformaria a máquina
+    // num resolvedor aberto — qualquer um da internet a usaria como reflexo de
+    // DDoS (a resposta do upstream sai com o IP dela) e para ver o que a rede consulta.
     /**
-     * Quem pode consultar este servidor.
-     *
-     * <p>POR QUE: escutar em 0.0.0.0 sem olhar a origem transforma a máquina
-     * num resolvedor aberto — qualquer um da internet a usa como reflexo de
-     * DDoS (a resposta do upstream sai com o IP dela) e para saber o que as
-     * máquinas da rede consultam. O padrão aceita só origem local (loopback,
-     * link-local, RFC1918, IPv6 ULA e os próprios endereços da máquina) e
-     * recusa o resto <b>em silêncio</b>: responder seria o que amplifica.
+     * Quem pode consultar este servidor. O padrão aceita só origem local
+     * (loopback, link-local, RFC1918, IPv6 ULA e os próprios endereços da
+     * máquina) e recusa o resto <strong>em silêncio</strong>.
      */
     public static final class SourcePolicy {
 
-        /** Redes liberadas por padrão: loopback, link-local, RFC1918 e ULA. */
+        // Redes liberadas por padrão: loopback, link-local, RFC1918 e ULA.
         private static final List<String> REDES_PADRAO = List.of(
                 "127.0.0.0/8",     // loopback IPv4
                 "::1/128",         // loopback IPv6
@@ -741,7 +694,7 @@ public class DnsServer {
             return new SourcePolicy(redes, Set.copyOf(NetworkUtils.localAddresses()), extras);
         }
 
-        /** Política que não aceita ninguém (usado nos testes). */
+        // Política que não aceita ninguém (usado nos testes).
         static SourcePolicy nenhuma() {
             return new SourcePolicy(List.of(), Set.of(), List.of());
         }
@@ -768,9 +721,7 @@ public class DnsServer {
         }
     }
 
-    /**
-     * Uma rede em notação CIDR (ou um endereço único, tratado como /32 ou /128).
-     */
+    // Uma rede em notação CIDR (ou um endereço único, tratado como /32 ou /128).
     static final class Cidr {
 
         private final byte[] rede;
@@ -781,9 +732,7 @@ public class DnsServer {
             this.bits = bits;
         }
 
-        /**
-         * @throws IllegalArgumentException se o texto não for um IP ou CIDR válido
-         */
+        // Lança IllegalArgumentException se o texto não for um IP ou CIDR válido.
         static Cidr parse(String texto) {
             String limpo = texto == null ? "" : texto.trim();
             if (limpo.isEmpty()) {
@@ -837,13 +786,9 @@ public class DnsServer {
             return true;
         }
 
-        /**
-         * Converte o texto em endereço, sem nunca consultar o DNS.
-         *
-         * <p>POR QUE: {@code InetAddress.getByName} resolve nomes e um hostname
-         * esquecido travaria o servidor na primeira query (o DNS público pode
-         * estar justamente bloqueado).
-         */
+        // Converte o texto em endereço, sem nunca consultar o DNS.
+        // POR QUE: getByName resolve nomes, e um hostname esquecido travaria o
+        // servidor na primeira query (o DNS público pode estar bloqueado).
         private static InetAddress enderecoLiteral(String texto) {
             String t = texto.trim();
             if (t.indexOf(':') >= 0) {

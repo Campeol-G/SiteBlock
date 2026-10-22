@@ -24,20 +24,20 @@ import java.util.concurrent.locks.ReentrantLock;
 /**
  * Estado do daemon de expiração em {@code ~/.sitelock/daemon.json}.
  *
- * <p><b>Quem escreve:</b> o próprio daemon, no início da vida dele. A primeira
- * versão do design dizia que quem escreve é o pai do {@code daemon start} — e
- * isso está errado sob autostart, que é justamente o caso que importa: o
- * systemd, o launchd e o Task Scheduler executam o daemon <b>direto</b>, sem
- * pai nenhum. Se ninguém escrevesse, depois de um boot não existiria PID, e
- * então {@code daemon status} diria "parado" com o processo rodando, {@code
- * daemon stop} não teria o que matar, e o aviso de "não há daemon vivo"
- * dispararia numa máquina configurada corretamente.
+ * <p><b>Quem escreve:</b> o próprio daemon, no início da vida dele: sob
+ * autostart (systemd, launchd, Task Scheduler) ele é executado direto, sem
+ * pai nenhum, então quem escreve não é o pai do {@code daemon start}.
+ *
+ * <p>Sem esse registro não existiria PID depois de um boot, e o {@code daemon
+ * status} diria "parado" com o processo rodando, enquanto o {@code daemon stop}
+ * não teria o que matar.
  *
  * <p><b>{@code lastSweepAt} só é escrito quando o sweep removeu algo.</b>
- * Reescrever a cada iteração seria uma escrita de root no diretório do usuário a
- * cada minuto, o dia inteiro, para atualizar um campo que ninguém lê com essa
- * frequência. Assim, o que o arquivo registra é justamente o que a pessoa quer
- * saber: quando foi a última vez que alguma coisa expirou sozinha.
+ * Reescrever a cada iteração seria uma escrita de root no diretório do usuário,
+ * o dia inteiro, para um campo que ninguém lê com essa frequência.
+ *
+ * <p>O arquivo registra assim o que a pessoa quer saber: quando foi a última
+ * vez que algo expirou sozinha.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ExpirationDaemonState {
@@ -47,13 +47,9 @@ public class ExpirationDaemonState {
     private String stateDir;
     private Instant lastSweepAt;
 
-    /**
-     * Instante de início do PROCESSO registrado.
-     *
-     * <p>É o que prova a identidade do PID: o SO recicla números, e um PID
-     * vivo não é necessariamente o daemon. Nulo = registro escrito por uma
-     * versão antiga, que não tinha o campo.
-     */
+    // Instante de início do PROCESSO registrado.
+    // POR QUE: é o que prova a identidade do PID, porque o SO recicla números.
+    // Nulo = registro escrito por uma versão antiga, que não tinha o campo.
     private Instant processStartedAt;
 
     /** Construtor para o Jackson. */
@@ -126,13 +122,9 @@ public class ExpirationDaemonState {
     public static final String LOG_FILE_NAME = "daemon.log";
     public static final String LOCK_FILE_NAME = "daemon.json.lock";
 
-    /**
-     * Serializa as escritas dentro da MESMA JVM.
-     *
-     * <p>Lock de arquivo é por JVM, não por canal: na mesma JVM um segundo
-     * {@code lock()} estoura. A trava local é o que evita isso; o lock de
-     * arquivo é o que serializa contra os OUTROS processos.
-     */
+    // Serializa as escritas dentro da MESMA JVM.
+    // POR QUE: lock de arquivo é por JVM, não por canal, e um segundo lock() na
+    // mesma JVM estoura; o lock de arquivo serializa contra os OUTROS processos.
     private static final ReentrantLock TRAVA_DA_JVM = new ReentrantLock();
 
     public static Path statePath(Path stateDir) {
@@ -159,7 +151,7 @@ public class ExpirationDaemonState {
         comTrava(stateDir, () -> escreverRegistro(stateDir, state));
     }
 
-    /** A escrita do registro em si, sem a trava: só válida dentro da trava. */
+    // A escrita do registro em si, sem a trava: só válida dentro da trava.
     private static void escreverRegistro(Path stateDir, ExpirationDaemonState state)
             throws IOException {
         Files.createDirectories(stateDir);
@@ -178,7 +170,7 @@ public class ExpirationDaemonState {
         SiteLockPaths.chownToUserIfConfigured(lockPath(stateDir));
     }
 
-    /** Executa a ação com o registro travado contra os outros processos. */
+    // Executa a ação com o registro travado contra os outros processos.
     private static void comTrava(Path stateDir, Acao acao) throws IOException {
         Files.createDirectories(stateDir);
         TRAVA_DA_JVM.lock();
@@ -191,19 +183,14 @@ public class ExpirationDaemonState {
         }
     }
 
-    /** Uma ação que pode falhar com IOException. */
+    // Uma ação que pode falhar com IOException.
     private interface Acao {
         void executar() throws IOException;
     }
 
-    /**
-     * Grava o instante de início do processo, quando o registro é sobre este
-     * processo.
-     *
-     * <p>Só quem é o processo sabe o próprio instante de início — e é esse
-     * instante que prova, depois, que o PID ainda é o nosso. Um registro escrito
-     * por uma versão antiga (sem o campo) é completado na próxima escrita.
-     */
+    // Grava o instante de início quando o registro é sobre este processo.
+    // POR QUE: só o processo sabe o próprio instante, e é ele que prova, depois,
+    // que o PID ainda é o nosso. Registro de versão antiga é completado aqui.
     private static void registrarInstanteDoProcesso(ExpirationDaemonState state) {
         if (state.getProcessStartedAt() != null || state.getPid() != ProcessHandle.current().pid()) {
             return;
@@ -244,10 +231,9 @@ public class ExpirationDaemonState {
     /**
      * Atualiza só o último sweep, preservando o resto do registro.
      *
-     * <p>Read-modify-write: sem a trava, ele lê o registro, e nesse intervalo
-     * outra escrita grava o PID novo — e o updateLastSweep devolve o registro
-     * velho por cima. O PID do daemon some, e o {@code daemon status} diz que
-     * não há daemon com ele rodando.
+     * <p>Read-modify-write: sem a trava, outra escrita grava o PID novo durante
+     * a leitura, e o update devolve o registro velho por cima — o PID do daemon
+     * some e o {@code daemon status} diz que não há daemon rodando.
      */
     public static void updateLastSweep(Path stateDir, Instant at) throws IOException {
         comTrava(stateDir, () -> {
@@ -264,10 +250,9 @@ public class ExpirationDaemonState {
     /**
      * true se o PID registrado ainda for o processo que o registro descreve.
      *
-     * <p>O SO recicla PID: o daemon morreu e o número foi dado a outro
-     * processo. "O PID existe" mente, e o {@code daemon stop} manda um SIGTERM
-     * num processo que não é o SiteLock. A prova de identidade é o instante de
-     * início do processo: dois processos não começam no mesmo instante.
+     * <p>O SO recicla PID: o número do daemon morto vai para outro processo, e o
+     * {@code daemon stop} manda SIGTERM em quem não é o SiteLock. A prova é o
+     * instante de início: dois processos não começam no mesmo instante.
      *
      * <p>Registro sem o instante de início (escrito por uma versão antiga)
      * continua valendo pelo PID.

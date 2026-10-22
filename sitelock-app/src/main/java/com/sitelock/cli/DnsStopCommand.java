@@ -19,10 +19,9 @@ import java.util.concurrent.TimeoutException;
 /**
  * siteblock dns stop [--force].
  *
- * <p>Encerra o daemon (SIGTERM → shutdown hook fecha socket e pool de forma
- * controlada). Se o servidor foi iniciado com {@code --for} e ainda está no prazo,
- * a parada antecipada segue a mesma regra do {@code unblock}: sem {@code --force}
- * nada muda (saída 3); com {@code --force}, pede confirmação digitada (SIM).
+ * <p>Encerra o daemon (SIGTERM → shutdown hook fecha socket e pool de forma controlada).
+ * Com {@code --for} ainda no prazo, a parada antecipada segue a regra do {@code unblock}:
+ * sem {@code --force} nada muda (saída 3); com {@code --force}, confirmação digitada.
  */
 @Command(name = "stop",
         description = "Encerra o servidor DNS local.",

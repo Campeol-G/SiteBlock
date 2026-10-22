@@ -12,12 +12,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /**
  * Quanto o daemon dorme entre uma varredura e outra.
  *
- * <p>Dois limites brigam. O teto ({@code --interval}, 60s por padrão) é o que
- * faz um bloqueio criado em outro terminal ser notado em no máximo um minuto,
- * sem watcher de arquivo. O piso de 1s evita que o daemon fique girando à
- * espera de um prazo que está a 500ms. E o intervalo ocioso é o que impede um
- * daemon de passar a madrugada relendo o disco a cada segundo sem nada
- * vencendo.
+ * <p>O teto ({@code --interval}, 60s por padrão) é o que faz um bloqueio criado
+ * em outro terminal ser notado em no máximo um minuto, sem watcher de arquivo.
+ * O piso de 1s evita que o daemon fique girando à espera de um prazo que está a
+ * 500ms. E o intervalo ocioso é o que impede um daemon de passar a madrugada
+ * relendo o disco a cada segundo sem nada vencendo.
  */
 class SweeperScheduleTest {
 
@@ -29,12 +28,12 @@ class SweeperScheduleTest {
         return SweeperSchedule.nextSleep(state, NOW, MAX, IDLE);
     }
 
-    /** Estado com um temporário que vence em {@code em} segundos. */
+    // Estado com um temporário que vence dentro de "segundos" segundos.
     private static Map<String, BlockEntry> expiringIn(long segundos) {
         return expiringInMillis(segundos * 1000L);
     }
 
-    /** Estado com um temporário que vence em {@code emMillis} milissegundos. */
+    // Estado com um temporário que vence dentro de "emMillis" milissegundos.
     private static Map<String, BlockEntry> expiringInMillis(long emMillis) {
         Map<String, BlockEntry> state = new TreeMap<>();
         state.put("tiktok.com", new BlockEntry("tiktok.com", NOW.minusSeconds(60),

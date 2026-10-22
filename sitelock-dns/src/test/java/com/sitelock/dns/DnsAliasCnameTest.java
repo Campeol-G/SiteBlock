@@ -18,31 +18,24 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/**
- * Alias por CNAME: o nome consultado é livre, mas aponta para um nome bloqueado.
- *
- * <p>O defeito: o cliente pergunta "alias.test"; o upstream responde com a
- * cadeia de CNAMEs e o IP real do alvo na MESMA resposta; o servidor repassava
- * tudo verbatim — o cliente conectava no IP do domínio bloqueado.
- *
- * <p>Os testes usam um upstream falso local (nada de internet) que responde com
- * a cadeia montada à mão, com nomes comprimidos como num upstream de verdade.
- */
+// Alias por CNAME: o nome consultado é livre, mas aponta para um nome bloqueado.
+// O defeito: o upstream devolvia a cadeia de CNAMEs e o IP real do alvo na mesma
+// resposta, e o servidor repassava tudo — o cliente conectava no IP bloqueado.
 class DnsAliasCnameTest {
 
-    /** IP que o upstream entrega para o alvo bloqueado (não pode vazar). */
+    // IP que o upstream entrega para o alvo bloqueado (não pode vazar).
     private static final byte[] IP_REAL = {1, 2, 3, 4};
 
     @TempDir
     Path tmp;
 
-    /** Sobe o servidor apontado para o upstream falso, com os bloqueios dados. */
+    // Sobe o servidor apontado para o upstream falso, com os bloqueios dados.
     private DnsServer subir(FakeUpstream upstream, String... bloqueados) throws Exception {
         Path estado = DnsTestSupport.arquivoDeBloqueios(tmp, bloqueados);
         return subir(upstream, new BlockStore(estado), bloqueados[0]);
     }
 
-    /** Sobe o servidor com um {@link BlockStore} próprio (para contar leituras). */
+    // Sobe o servidor com um BlockStore próprio (para contar leituras).
     private DnsServer subir(FakeUpstream upstream, BlockStore store, String bloqueado)
             throws Exception {
         int porta = DnsTestSupport.portaLivre();
@@ -55,7 +48,7 @@ class DnsAliasCnameTest {
         return server;
     }
 
-    /** Upstream que responde com a cadeia de aliases informada. */
+    // Upstream que responde com a cadeia de aliases informada.
     private static FakeUpstream upstreamComCadeia(String[] cadeia, int tipoFinal,
                                                   byte[] rdataFinal) throws Exception {
         FakeUpstream upstream = new FakeUpstream();
@@ -65,7 +58,7 @@ class DnsAliasCnameTest {
         return upstream;
     }
 
-    /** true se o IP aparece em qualquer byte da resposta. */
+    // true se o IP aparece em qualquer byte da resposta.
     private static boolean contemIp(byte[] resposta, byte[] ip) {
         for (int i = 0; i + ip.length <= resposta.length; i++) {
             boolean igual = true;
@@ -82,10 +75,8 @@ class DnsAliasCnameTest {
         return false;
     }
 
-    /**
-     * O defeito original: "www.microsoft.com" livre, com CNAME para
-     * "www.microsoft.com-c-3.edgekey.net" bloqueado. O cliente recebia o IP real.
-     */
+    // O defeito original: "www.microsoft.com" livre, com CNAME para
+    // "www.microsoft.com-c-3.edgekey.net" bloqueado. O cliente recebia o IP real.
     @Test
     void aliasDeNomeBloqueadoRecebeSinkhole() throws Exception {
         FakeUpstream upstream = upstreamComCadeia(
@@ -108,10 +99,8 @@ class DnsAliasCnameTest {
         }
     }
 
-    /**
-     * O nome livre sem alias continua sendo encaminhado: a correção do alias não
-     * pode estragar o caminho normal.
-     */
+    // O nome livre sem alias continua sendo encaminhado: a correção do alias não
+    // pode estragar o caminho normal.
     @Test
     void nomeLivreSemCnameContinuaSendoEncaminhado() throws Exception {
         FakeUpstream upstream = new FakeUpstream();
@@ -133,7 +122,7 @@ class DnsAliasCnameTest {
         }
     }
 
-    /** Cadeia com dois elos e o bloqueio no segundo elo: o IP real não pode vazar. */
+    // Cadeia com dois elos e o bloqueio no segundo elo: o IP real não pode vazar.
     @Test
     void cadeiaDeDoisElosComBloqueioNoSegundoEloRecebeSinkhole() throws Exception {
         FakeUpstream upstream = upstreamComCadeia(
@@ -156,7 +145,7 @@ class DnsAliasCnameTest {
         }
     }
 
-    /** Cadeia com dois elos, nenhum bloqueado: a resposta passa direto. */
+    // Cadeia com dois elos, nenhum bloqueado: a resposta passa direto.
     @Test
     void cadeiaDeDoisElosSemNenhumBloqueadoPassaDireto() throws Exception {
         FakeUpstream upstream = upstreamComCadeia(
@@ -177,7 +166,7 @@ class DnsAliasCnameTest {
         }
     }
 
-    /** Resposta sem section answer (NXDOMAIN): nada a inspecionar, repassa. */
+    // Resposta sem section answer (NXDOMAIN): nada a inspecionar, repassa.
     @Test
     void respostaSemSectionAnswerEhRepassada() throws Exception {
         FakeUpstream upstream = new FakeUpstream();
@@ -198,7 +187,7 @@ class DnsAliasCnameTest {
         }
     }
 
-    /** O bloqueio de verdade continua valendo: nome bloqueado não vai ao upstream. */
+    // O bloqueio de verdade continua valendo: nome bloqueado não vai ao upstream.
     @Test
     void upstreamNaoRecebeConsultaDeNomeBloqueado() throws Exception {
         FakeUpstream upstream = new FakeUpstream();
@@ -221,7 +210,7 @@ class DnsAliasCnameTest {
         }
     }
 
-    /** O sinkhole do alias tem que respeitar o tipo pedido (AAAA → ::). */
+    // O sinkhole do alias tem que respeitar o tipo pedido (AAAA → ::).
     @Test
     void aliasBloqueadoComAaaaRecebeSinkholeIpv6() throws Exception {
         FakeUpstream upstream = upstreamComCadeia(
@@ -241,7 +230,7 @@ class DnsAliasCnameTest {
         }
     }
 
-    /** Tipo ≠ A/AAAA no alias bloqueado: NODATA, como num nome bloqueado. */
+    // Tipo ≠ A/AAAA no alias bloqueado: NODATA, como num nome bloqueado.
     @Test
     void aliasBloqueadoComTipoNaoAaaaRespondeNodata() throws Exception {
         FakeUpstream upstream = upstreamComCadeia(
@@ -260,7 +249,7 @@ class DnsAliasCnameTest {
         }
     }
 
-    /** Subdomínio do nome bloqueado na cadeia: bloqueia igual (sufixo com ponto). */
+    // Subdomínio do nome bloqueado na cadeia: bloqueia igual (sufixo com ponto).
     @Test
     void aliasParaSubdominioDoBloqueadoRecebeSinkhole() throws Exception {
         FakeUpstream upstream = upstreamComCadeia(
@@ -281,10 +270,8 @@ class DnsAliasCnameTest {
         }
     }
 
-    /**
-     * A checagem do alias não pode custar uma releitura do blocks.json: a
-     * consulta já leu a lista de bloqueios, e a cadeia é checada com ela.
-     */
+    // A checagem do alias não pode custar uma releitura do blocks.json: a
+    // consulta já leu a lista de bloqueios, e a cadeia é checada com ela.
     @Test
     void checagemDoAliasNaoReleOBlocksJsonDeNovo() throws Exception {
         FakeUpstream upstream = upstreamComCadeia(
@@ -306,7 +293,7 @@ class DnsAliasCnameTest {
         }
     }
 
-    /** {@link BlockStore} que conta as leituras do arquivo de estado. */
+    // BlockStore que conta as leituras do arquivo de estado.
     private static final class ContadorDeLeituras extends BlockStore {
 
         private final AtomicInteger leituras = new AtomicInteger();

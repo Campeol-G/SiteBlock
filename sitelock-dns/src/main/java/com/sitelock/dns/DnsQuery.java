@@ -52,13 +52,9 @@ public record DnsQuery(
         return questionSection.clone();
     }
 
-    /**
-     * Array da seção question sem clonar — uso interno do pacote.
-     *
-     * <p>POR QUE: o builder montava a resposta copiando o array duas vezes (uma por
-     * accessor). O accessor público continua devolvendo cópia, então a mutabilidade
-     * do array não escapa do pacote.
-     */
+    // Array da seção question sem clonar — uso interno do pacote.
+    // POR QUE: o builder copiava o array duas vezes (uma por accessor); o accessor
+    // público continua devolvendo cópia, então a mutabilidade não escapa do pacote.
     byte[] questionSectionInternal() {
         return questionSection;
     }

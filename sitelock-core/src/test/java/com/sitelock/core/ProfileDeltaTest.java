@@ -17,12 +17,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * O delta do {@link ProfileStore}.
  *
- * <p>O store grava um delta sobre o que está no disco, e não o arquivo
- * inteiro: uma escrita concorrente de quem não espera a trava não pode ser
- * apagada. Para isso, o store precisa saber o que mudou — e a comparação
- * precisa ser por valor. Por identidade, um perfil devolvido sem alteração
- * parecia mudado, e a gravação apagava a versão que outro escritor tinha
- * gravado por cima.
+ * <p>O store grava um delta sobre o que está no disco, e não o arquivo inteiro:
+ * uma escrita concorrente de quem não espera a trava não pode ser apagada. Para
+ * isso a comparação precisa ser por valor — por identidade, um perfil devolvido
+ * sem alteração parecia mudado, e a gravação apagava a versão de outro escritor.
  */
 class ProfileDeltaTest {
 
@@ -46,7 +44,7 @@ class ProfileDeltaTest {
         return new Profile(CRIADO, AGORA, entradas);
     }
 
-    /** Grava o arquivo por fora da trava, como um escritor que não a respeita. */
+    // Grava o arquivo por fora da trava, como um escritor que não a respeita.
     private void escreverPorForaDaTrava(Map<String, Profile> perfis) throws IOException {
         Files.writeString(file(), ProfileStore.defaultMapper()
                 .writerWithDefaultPrettyPrinter()

@@ -28,13 +28,9 @@ import java.util.concurrent.Callable;
 /**
  * siteblock dns start [--port 53] [--upstream 1.1.1.1] [--for 2h].
  *
- * <p>Sobe o servidor DNS como processo em background (daemon) e retorna na hora.
- * O daemon reaproveita a lista de bloqueados atual (blocks.json); {@code block}/
- * {@code unblock} em outro terminal valem já na próxima consulta, sem reiniciar.
- *
- * <p>Com {@code --for}, o daemon desliga sozinho ao expirar — e {@code dns stop}
- * antes disso exige {@code --force} + confirmação digitada (mesma regra do
- * {@code unblock} antecipado).
+ * <p>Sobe o servidor DNS em background e retorna na hora. O daemon reaproveita a lista
+ * de bloqueados atual: {@code block}/{@code unblock} em outro terminal valem na próxima
+ * consulta. Com {@code --for}, o {@code dns stop} antes do prazo exige {@code --force}.
  */
 @Command(name = "start",
         description = "Inicia o servidor DNS local em background.",
@@ -92,12 +88,9 @@ public class DnsStartCommand implements Callable<Integer> {
             return 2;
         }
 
-        // Falha rápida e clara para porta privilegiada (< 1024 exige elevação nos
-        // três SOs), em vez de exceção genérica no daemon. A detecção via
-        // user.name=="root" funciona por acidente no Windows (nunca é root, então
-        // o aviso dispara); a mensagem vem do PermissionAdvisor centralizado.
-        // Limitação: o Java não detecta de forma confiável se já roda como
-        // Administrador no Windows — em caso de dúvida, o bind falha e o log mostra.
+        // ATENÇÃO: porta privilegiada (< 1024) exige elevação nos três SOs: a falha
+        // vem rápida e clara, não como exceção genérica no daemon. No Windows o
+        // user.name nunca é "root", então o aviso sempre dispara — o bind falha e o log mostra.
         if (port < 1024 && !isRoot()) {
             String retry = "dns start" + (forDuration != null ? " --for " + forDuration : "");
             System.err.println("Erro: " + new PermissionAdvisor().privilegedPortHint(port, retry));
@@ -238,10 +231,10 @@ public class DnsStartCommand implements Callable<Integer> {
         if (binProp != null && !binProp.isBlank()) {
             cmd.add("-Dsiteblock.bin=" + binProp);
         }
-        // O filho tem que enxergar o MESMO estado do pai. Sem estas properties,
-        // um daemon iniciado como root sem SUDO_USER (autostart) opera em
-        // /root/.sitelock enquanto o `dns status` olha ~/.sitelock: o status
-        // diz "PARADO" com o servidor no ar, e o `dns stop` não o encerra.
+        // O filho tem que enxergar o MESMO estado do pai: sem estas properties, um
+        // daemon iniciado como root sem SUDO_USER (autostart) opera em /root/.sitelock
+        // enquanto o `dns status` olha ~/.sitelock — o status diz "PARADO" com o
+        // servidor no ar, e o `dns stop` não o encerra.
         cmd.add("-Dsitelock.stateDir="
                 + DnsDaemonState.stateDirFor(stateFileOverride).toAbsolutePath());
         String usuario = System.getProperty("sitelock.user");

@@ -102,7 +102,7 @@ class BlockStoreTest {
         assertEquals(1, new BlockStore(stateFile).load().size());
     }
 
-    /** true se o filesystem aceita permissão POSIX. */
+    // true se o filesystem aceita permissão POSIX.
     private static boolean suportaPosix(Path path) {
         try {
             Files.setPosixFilePermissions(path, Files.getPosixFilePermissions(path));

@@ -26,8 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Este é o teste que reproduz o defeito original. A unit do systemd executa
  * a linha gerada pelo {@link AutostartArtifact}; se a linha estiver malformada,
  * o processo morre com código 2 e o systemd entra em loop de crash — que foi
- * exatamente o que aconteceu na máquina de quem escreveu isto: 2625 restarts e
- * nenhum daemon no ar.
+ * exatamente o que aconteceu: milhares de restarts e nenhum daemon no ar.
  *
  * <p>Por isso o teste não confere a linha com {@code assertEquals} e para aí.
  * Ele <b>executa</b> a linha contra um jar de verdade e exige que o daemon
@@ -126,15 +125,9 @@ class DaemonLaunchTest {
         }
     }
 
-    /**
-     * Um jar de verdade, com o {@code Main-Class} do manifest e o classpath
-     * inteiro apontado pelo atributo {@code Class-Path}.
-     *
-     * <p>É a mesma forma do fat-jar que o {@code run.sh} usa — e o mesmo
-     * contrato que a unit do systemd consome. Um jar vazio com as classes
-     * fora seria mais rápido de escrever, mas não exercitaria o caminho
-     * {@code -jar}, que é justamente onde o defeito morava.
-     */
+    // Um jar de verdade, com o Main-Class do manifest e o classpath inteiro
+    // no atributo Class-Path: a mesma forma do fat-jar que o run.sh usa e
+    // que a unit do systemd consome. Um jar vazio não exercitaria o -jar.
     private Path buildJar() throws Exception {
         StringBuilder classPath = new StringBuilder();
         for (String entry : System.getProperty("java.class.path").split(File.pathSeparator)) {
@@ -154,7 +147,7 @@ class DaemonLaunchTest {
 
         Path jar = tmp.resolve("siteblock-teste.jar");
         try (JarOutputStream out = new JarOutputStream(Files.newOutputStream(jar), mf)) {
-            // jar sem entradas: as classes vêm do Class-Path do manifest
+            // POR QUE: jar sem entradas — as classes vêm do Class-Path do manifest.
         }
         return jar;
     }

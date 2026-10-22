@@ -16,16 +16,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * A transação do {@link BlockStore}.
  *
- * <p>O defeito que a transação existe para impedir: o {@code load → transforma →
- * save} solto é um read-modify-write sem proteção. O {@code save} trava, mas o
- * {@code load} acontece antes e fora — e o bloqueio feito por outro terminal
- * nesse intervalo é apagado do JSON enquanto continua no {@code /etc/hosts}.
+ * <p>Ela existe para impedir um read-modify-write sem proteção: o {@code load}
+ * acontece fora da trava, e o bloqueio feito por outro terminal nesse intervalo
+ * é apagado do JSON enquanto continua no {@code /etc/hosts}.
  *
- * <p>O teste da escrita concorrente é determinístico de propósito: o outro
- * escritor escreve o arquivo por fora da trava (como faria outra versão da
- * ferramenta, um script ou uma edição manual), e a transação tem que aplicar a
- * própria mudança <b>por cima</b> do que está no disco, sem apagar o que o
- * outro escreveu.
+ * <p>No teste, o outro escritor grava o arquivo por fora da trava, e a transação
+ * tem que aplicar a própria mudança <b>por cima</b> do que está no disco.
  */
 class BlockStoreTransactionTest {
 
@@ -38,7 +34,7 @@ class BlockStoreTransactionTest {
         return new BlockEntry(domain, AGORA, null);
     }
 
-    /** Grava o estado por fora da trava, como um escritor que não a respeita. */
+    // Grava o estado por fora da trava, como um escritor que não a respeita.
     private void escreverPorForaDaTrava(Path stateFile, Map<String, BlockEntry> estado)
             throws IOException {
         Files.writeString(stateFile, BlockStore.defaultMapper()

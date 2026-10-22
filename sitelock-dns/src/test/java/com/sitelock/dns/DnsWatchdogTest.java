@@ -12,15 +12,9 @@ import java.time.Clock;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/**
- * O watchdog do servidor: a primeira falha tem que derrubar o processo.
- *
- * <p>Antes, só a {@link DnsServerException} era repassada; qualquer outra
- * {@link RuntimeException} caía no catch genérico, o watchdog dormia 1s e
- * tentava de novo — para sempre. O processo ficava vivo sem nunca escutar, e
- * o {@code dns start} (que só olhava se o filho estava vivo) imprimia
- * "Servidor DNS iniciado".
- */
+// O watchdog do servidor: a primeira falha tem que derrubar o processo. Antes,
+// o watchdog engolia a RuntimeException, dormia 1s e repetia para sempre: o
+// processo vivia sem escutar e o dns start imprimia "Servidor DNS iniciado".
 class DnsWatchdogTest {
 
     @TempDir

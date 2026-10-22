@@ -26,25 +26,8 @@ import java.util.concurrent.Callable;
  * siteblock profile apply <nome> — recarrega a receita sem nunca encurtar o
  * que já está mais forte.
  *
- * <p>A ordem é Estado → hosts, e ela não é negociável. O caminho inverso tem
- * um pior modo de falha: entrada no hosts sem registro no estado significa um
- * domínio preso para sempre, porque o {@code sweepExpired()} varre o JSON, não
- * o hosts. A ordem escolhida tem a janela oposta — se o processo for morto
- * entre os dois passos, o estado diz "bloqueado" e o hosts não foi escrito, ou
- * seja, o domínio está de fato livre. Fail-open e silencioso.
- *
- * <p>E é <b>um</b> {@code save} e <b>um</b> {@code blockAll}. Pelo caminho
- * por domínio, um perfil de 40 domínios fazia 40 travadas do hosts, e a
- * verificação otimista de concorrência do {@code HostsFileManager} podia
- * matá-lo no domínio k, com os k-1 anteriores já aplicados: estado parcial e
- * um erro depois de metade do trabalho feito.
- *
- * <p>O aviso de daemon ausente sai do <b>estado final</b>, não da mudança: o
- * que interessa é se existe algum bloqueio com prazo valendo depois do apply.
- * Amarrá-lo à mudança escondia o aviso justamente no caso do {@code KEPT} — o
- * estado já estava mais forte, o apply não mudou nada, e o prazo continuava
- * valendo sem ninguém para cumpri-lo. Quem digitou o prazo continua
- * precisando saber que o prazo só se cumpre quando outro comando roda.
+ * <p>Grava o estado antes do hosts: se o processo morrer no meio, o domínio fica
+ * livre — nunca preso sem registro.
  */
 @Command(name = "apply",
         description = "Aplica um perfil, so aumentando o prazo de cada dominio.",
@@ -57,7 +40,7 @@ public class ProfileApplyCommand implements Callable<Integer> {
     @Option(names = "--hosts-file", hidden = true) String hostsFileOverride;
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
 
-    /** Blocker injetado pelo teste; null = usa o do hosts do sistema. */
+    // Blocker injetado pelo teste; null = usa o do hosts do sistema.
     SiteBlocker blockerOverride;
 
     public ProfileApplyCommand() {
@@ -120,16 +103,17 @@ public class ProfileApplyCommand implements Callable<Integer> {
         Instant now = Instant.now(service.getClock());
         Plano plano = new Plano();
         try {
+            // ATENÇÃO: a ordem é Estado → hosts, e ela não é negociável. O caminho
+            // inverso tem um pior modo de falha: hosts sem registro no estado é domínio
+            // preso para sempre, porque o sweepExpired() varre o JSON, não o hosts.
             service.inTransaction(
                     (estado, tx) -> {
                         Map<String, ProfileMerge.Decision> decisions =
                                 ProfileMerge.merge(estado, profile, now);
 
-                        // POR QUE: TreeMap e não HashMap — o estado é gravado como
-                        // JSON, e o JSON tem que sair sempre na mesma ordem. Com
-                        // HashMap, o apply gravava o arquivo em ordem arbitrária e
-                        // o block em ordem alfabética: o mesmo arquivo, dois
-                        // formatos, e um diff que não é de verdade.
+                        // POR QUE: TreeMap e não HashMap — o estado é gravado como JSON, e
+                        // o JSON tem que sair sempre na mesma ordem. Com HashMap, o mesmo
+                        // arquivo saía em dois formatos, e o diff não era de verdade.
                         Map<String, BlockEntry> novoEstado = new TreeMap<>(estado);
                         for (Map.Entry<String, ProfileMerge.Decision> e : decisions.entrySet()) {
                             String domain = e.getKey();
@@ -161,14 +145,13 @@ public class ProfileApplyCommand implements Callable<Integer> {
                         if (p.erroAoSalvar != null || p.alterados == 0) {
                             return;
                         }
-                        // TODOS os domínios do perfil, inclusive os KEPT. Isso não é
-                        // desperdício: addDomain é idempotente, e é o que permite ao
-                        // apply CONSERTAR um estado que diz bloqueado com o hosts sem a
-                        // linha. Esse desvio acontece quando um apply anterior morre
-                        // entre o save e o blockAll; sem reescrever os KEPT, todo apply
-                        // seguinte veria "nada a fazer" para sempre e o site ficaria
-                        // aberto com o status mentindo.
+                        // ATENÇÃO: todos os domínios, inclusive os KEPT — reescrevê-los conserta
+                        // o estado que diz bloqueado com o hosts sem a linha (o apply anterior
+                        // morreu entre o save e o blockAll); sem isso, todo apply veria "nada a fazer".
                         List<String> todos = new ArrayList<>(p.decisions.keySet());
+                        // POR QUE: um save e um blockAll, e não um por domínio — 40 domínios
+                        // faziam 40 travadas do hosts, e a verificação otimista do
+                        // HostsFileManager podia matá-lo no domínio k, com os k-1 já aplicados.
                         service.getBlocker().blockAll(todos);
                     });
         } catch (IOException e) {
@@ -202,13 +185,9 @@ public class ProfileApplyCommand implements Callable<Integer> {
         return 0;
     }
 
-    /**
-     * O que a transação do {@code profile apply} carrega entre o estado e o hosts.
-     *
-     * <p>POR QUE: o merge e a gravação acontecem em lados diferentes da
-     * transação, e o comando precisa das contagens e das decisões para
-     * imprimir o resumo e decidir se escreve no hosts.
-     */
+    // O que a transação do profile apply carrega entre o estado e o hosts: o merge e
+    // a gravação acontecem em lados diferentes, e o comando precisa das contagens e
+    // das decisões para imprimir o resumo e decidir se escreve no hosts.
     private static final class Plano {
 
         Map<String, ProfileMerge.Decision> decisions = new TreeMap<>();

@@ -19,7 +19,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
 
-/** Helpers compartilhados pelos comandos CLI. */
+// Helpers compartilhados pelos comandos CLI.
 final class CliSupport {
 
     static final String PROFILES_FILE_NAME = "profiles.json";
@@ -49,13 +49,9 @@ final class CliSupport {
         return SiteLockPaths.getBackupFile();
     }
 
-    /**
-     * Diretório de estado considerando o override de {@code --state-file}.
-     *
-     * <p>Sem isto, um comando leria o {@code daemon.json} do {@code ~/.sitelock}
-     * real enquanto operava no arquivo de teste — ou, pior, na máquina de quem
-     * está testando. Mesmo raciocínio de {@link DnsDaemonState#stateDirFor(String)}.
-     */
+    // Diretório de estado considerando o override de --state-file.
+    // POR QUE: sem isto, um comando leria o daemon.json do ~/.sitelock real
+    // enquanto operava no arquivo de teste — mesmo raciocínio de DnsDaemonState.stateDirFor.
     static java.nio.file.Path stateDirFor(String stateFileOverride) {
         if (stateFileOverride != null && !stateFileOverride.isBlank()) {
             java.nio.file.Path sf = Paths.get(stateFileOverride);
@@ -65,11 +61,9 @@ final class CliSupport {
         return SiteLockPaths.getStateDir();
     }
 
-    /**
-     * Onde mora o {@code profiles.json}: irmão do {@code blocks.json}, pelo mesmo
-     * motivo do {@code hosts.backup} e do {@code hosts.lock} — o {@code --state-file}
-     * dos testes aponta o diretório inteiro, sem precisar de uma flag nova.
-     */
+    // Onde mora o profiles.json: irmão do blocks.json, pelo mesmo motivo do
+    // hosts.backup e do hosts.lock — o --state-file dos testes aponta o
+    // diretório inteiro, sem precisar de uma flag nova.
     static Path resolveProfilesFile(String stateFileOverride) {
         if (stateFileOverride != null && !stateFileOverride.isBlank()) {
             return Paths.get(stateFileOverride).resolveSibling(PROFILES_FILE_NAME);
@@ -77,13 +71,9 @@ final class CliSupport {
         return SiteLockPaths.getStateDir().resolve(PROFILES_FILE_NAME);
     }
 
-    /**
-     * O relógio dos comandos — o mesmo que o serviço usa.
-     *
-     * <p>POR QUE: o resto do projeto injeta {@link Clock} em vez de chamar
-     * {@code Instant.now()}, para que os testes possam usar um tempo
-     * controlado. O comando que grava um instante tem que entrar na mesma.
-     */
+    // POR QUE: o resto do projeto injeta Clock em vez de chamar Instant.now(),
+    // para que os testes possam usar um tempo controlado — o comando que grava
+    // um instante tem que entrar na mesma.
     static Clock clock() {
         return Clock.systemUTC();
     }
@@ -98,33 +88,24 @@ final class CliSupport {
         return new BlockService(store, blocker, Clock.systemUTC(), hostsPath);
     }
 
-    /**
-     * Com o blocker injetado, para os testes que precisam que a escrita no hosts
-     * falhe — é o único jeito de provar que o rollback do {@code profile apply}
-     * acontece, já que ninguém vai tornar o {@code /etc/hosts} ilegível no teste.
-     */
+    // Com o blocker injetado, para os testes que precisam que a escrita no hosts
+    // falhe — é o único jeito de provar que o rollback do profile apply
+    // acontece, já que ninguém vai tornar o /etc/hosts ilegível no teste.
     static BlockService newService(String hostsOverride, String stateOverride, SiteBlocker blocker) {
         Path stateFile = resolveStateFile(stateOverride);
         return new BlockService(new BlockStore(stateFile), blocker, Clock.systemUTC(),
                 resolveHostsPath(hostsOverride));
     }
 
-    /**
-     * Dica de elevação específica por SO (componente central: PermissionAdvisor).
-     * No Windows instrui "Executar como administrador"; no Unix, "sudo".
-     */
+    // Dica de elevação específica por SO (vem do PermissionAdvisor). No Windows
+    // instrui "Executar como administrador"; no Unix, "sudo".
     static String elevationHint(String subcommand) {
         return new PermissionAdvisor(osType()).elevationHint(SiteLockPaths.getHostsPath(), subcommand);
     }
 
-    /**
-     * O comando de elevação, no vocabulário de cada SO.
-     *
-     * <p>Unix: sudo com o caminho real do binário, porque o {@code ~/.local/bin}
-     * costuma ficar fora do {@code secure_path} do sudo. Windows: sudo não
-     * existe lá — quem eleva é o terminal, e o texto é o do
-     * {@link PermissionAdvisor}.
-     */
+    // O comando de elevação, no vocabulário de cada SO: no Unix, sudo com o
+    // caminho real do binário (o ~/.local/bin fica fora do secure_path); no
+    // Windows quem eleva é o terminal, e o texto vem do PermissionAdvisor.
     static String elevatedCommand(String subcommand) {
         if (osType().isWindows()) {
             return elevationHint(subcommand);
@@ -132,32 +113,23 @@ final class CliSupport {
         return sudoCommand(subcommand);
     }
 
-    /**
-     * O SO dos textos de elevação.
-     *
-     * <p>ATENÇÃO: o binário é o mesmo nos três SOs, e o texto muda. Um
-     * "sudo siteblock daemon enable" no Windows é um comando que não existe na
-     * máquina de quem está lendo.
-     */
+    // O SO dos textos de elevação.
+    // ATENÇÃO: o binário é o mesmo nos três SOs, e o texto muda — um "sudo
+    // siteblock daemon enable" no Windows não existe na máquina de quem lê.
     static OsType osType() {
         return OsType.detect();
     }
 
-    /**
-     * @deprecated mantido para compatibilidade com testes/código existente;
-     *             delega para {@link #elevationHint(String)}.
-     */
+    // POR QUE: mantido só por compatibilidade com testes/código existente —
+    // delega para elevationHint.
     @Deprecated
     static String sudoHint(String subcommand) {
         return elevationHint(subcommand);
     }
 
-    /**
-     * Monta a dica com sudo usando o caminho real do binário, porque
-     * ~/.local/bin costuma ficar fora do secure_path do sudo.
-     * No Windows o prefixo "sudo" não se aplica (ver PermissionAdvisor),
-     * mas este método é mantido para compatibilidade dos testes.
-     */
+    // Monta a dica com sudo usando o caminho real do binário, porque o
+    // ~/.local/bin costuma ficar fora do secure_path do sudo. No Windows o
+    // prefixo "sudo" não se aplica, mas o método fica por compatibilidade.
     static String sudoCommand(String subcommand) {
         String bin = System.getProperty("siteblock.bin", "siteblock");
         String display = "/usr/local/bin/siteblock".equals(bin) ? "siteblock" : bin;
@@ -168,20 +140,11 @@ final class CliSupport {
         return "sudo " + display + args;
     }
 
-    /**
-     * Avisa quando um bloqueio com prazo não tem daemon para cumpri-lo.
-     *
-     * <p>É o aviso que fecha o ciclo. Sem ele, a feature continua invisível e o
-     * comportamento antigo — o prazo vence, o site só sai quando alguém abre o
-     * terminal — permanece sendo o que a pessoa acha que é o normal.
-     *
-     * <p>Gatilho: não há daemon vivo <b>ou</b> não há autostart instalado. Os
-     * dois são defeito do ponto de vista de quem digitou {@code --for 4h}, e
-     * mesmo com autostart instalado o daemon pode estar naquele boot atrasado.
-     *
-     * <p>Vai para stdout com {@code AVISO:} porque isto não é erro — o
-     * bloqueio foi salvo e está funcionando. Erro vai para stderr.
-     */
+    // Avisa quando um bloqueio com prazo não tem daemon para cumpri-lo: sem ele
+    // a feature continua invisível e o prazo só vence quando alguém abre o
+    // terminal. POR QUE: sai em stdout com "AVISO:" porque não é erro.
+
+    // ATENÇÃO: o gatilho é só "não há daemon vivo" — o autostart não é verificado aqui.
     static void warnIfNoDaemon(String stateFileOverride) {
         if (temDaemonVivo(stateFileOverride)) {
             return;
@@ -193,7 +156,7 @@ final class CliSupport {
         System.out.println("       " + elevatedCommand("daemon enable"));
     }
 
-    /** true se há um daemon registrado e vivo. Sem elevação: é só leitura. */
+    // true se há um daemon registrado e vivo. Sem elevação: é só leitura.
     static boolean temDaemonVivo(String stateFileOverride) {
         try {
             return ExpirationDaemonState.read(stateDirFor(stateFileOverride))
@@ -205,19 +168,12 @@ final class CliSupport {
         }
     }
 
-    /**
-     * Lê uma linha do stdin.
-     *
-     * <p>UM leitor para o processo todo, e não um por pergunta. O
-     * {@code Scanner} antigo lia o stdin num buffer de 1 KB e engolia as
-     * respostas seguintes: na primeira confirmação de um {@code unblock} com
-     * dois domínios, as duas linhas que a pessoa digitou sumiam no buffer, e a
-     * segunda confirmação vinha {@code null} — o comando dizia que não
-     * desbloqueou, com a intenção da pessoa bem clara.
-     *
-     * <p>O leitor é refeito quando o {@code System.in} muda — é o que permite
-     * ao teste trocar o stdin sem que uma leitura velha responda por outra.
-     */
+    // POR QUE: um leitor para o processo todo, e não um por pergunta — o
+    // Scanner antigo engolia as respostas seguintes no buffer de 1 KB: a
+    // segunda confirmação vinha null e o comando dizia que não desbloqueou.
+
+    // ATENÇÃO: o leitor é refeito quando o System.in muda — é o que permite ao
+    // teste trocar o stdin sem que uma leitura velha responda por outra.
     static String readLine() {
         try {
             InputStream atual = System.in;
@@ -231,16 +187,14 @@ final class CliSupport {
         }
     }
 
-    /** O leitor de stdin do processo. */
+    // O leitor de stdin do processo.
     private static BufferedReader stdin;
 
-    /** De onde veio o leitor: se o {@code System.in} trocar, o leitor troca junto. */
+    // De onde veio o leitor: se o System.in trocar, o leitor troca junto.
     private static InputStream stdinStream;
 
-    /**
-     * Flush do cache DNS após modificação no hosts — best-effort.
-     * Nunca lança exceção nem muda o exit code do comando; só avisa.
-     */
+    // Flush do cache DNS após modificação no hosts — best-effort: nunca lança
+    // exceção nem muda o exit code do comando; só avisa.
     static void flushDnsBestEffort() {
         try {
             new DnsCacheFlusher().flushBestEffort();

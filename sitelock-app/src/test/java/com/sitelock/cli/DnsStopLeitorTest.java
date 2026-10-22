@@ -66,7 +66,7 @@ class DnsStopLeitorTest {
         }
     }
 
-    /** Um processo qualquer, que fica vivo até ser morto. */
+    // Um processo qualquer, que fica vivo até ser morto.
     private Process processoAuxiliar() throws Exception {
         List<String> cmd = new ArrayList<>();
         cmd.add(Paths.get(System.getProperty("java.home"), "bin", "java").toString());

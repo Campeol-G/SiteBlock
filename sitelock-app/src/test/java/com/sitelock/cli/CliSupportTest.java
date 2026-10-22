@@ -64,10 +64,11 @@ class CliSupportTest {
                 CliSupport.sudoCommand("status"));
     }
 
+    // ATENÇÃO: mandar "sudo siteblock daemon enable" no Windows é mandar um
+    // comando que não existe na máquina.
     /**
-     * No Windows não existe sudo: o caminho de elevação é o terminal aberto
-     * como Administrador. Mandar "sudo siteblock daemon enable" é mandar um
-     * comando que não existe na máquina.
+     * No Windows não existe sudo: quem eleva é o terminal aberto como
+     * Administrador.
      */
     @Test
     void oAvisoDeDaemonNoWindowsNaoMandaSudo() {

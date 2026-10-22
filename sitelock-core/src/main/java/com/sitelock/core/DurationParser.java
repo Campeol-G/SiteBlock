@@ -5,9 +5,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Parser de durações para a flag --for.
- * Aceita apenas m/h/d minúsculos e colados, sem espaços.
- * Ex.: 30m, 2h, 1h30m, 1d, 1d2h30m.
+ * Parser de durações para a flag {@code --for}. O formato aceito está em
+ * {@link #FORMAT_HELP}.
  */
 public final class DurationParser {
 
@@ -22,8 +21,8 @@ public final class DurationParser {
 
     /**
      * @param input texto de {@code --for}
-     * @return duração correspondente
-     * @throws IllegalArgumentException se o formato for inválido
+     * @throws IllegalArgumentException se o texto não estiver no formato, for
+     *         zero ou exceder o intervalo suportado
      */
     public static Duration parse(String input) {
         if (input == null || input.isBlank()) {

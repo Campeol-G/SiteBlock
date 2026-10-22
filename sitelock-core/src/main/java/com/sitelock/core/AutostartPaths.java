@@ -6,11 +6,11 @@ import java.nio.file.Path;
  * Tudo o que o artefato de autostart precisa, já resolvido e absoluto.
  *
  * <p>Estes valores são resolvidos no instante do {@code daemon enable} e
- * embutidos no artefato. O caminho não pode ser resolvido depois, dentro do
- * daemon: um unit de <b>sistema</b> (sem {@code User=}), uma LaunchDaemon e um
- * {@code schtasks /ru SYSTEM} rodam como root <b>sem {@code SUDO_USER}</b>, e
- * aí {@code user.home} é {@code /root} ou o profile do SYSTEM. O daemon leria
- * um {@code blocks.json} que não é o do {@code sudo siteblock block} — e a
+ * embutidos no artefato. Resolver depois é tarde: unit de sistema, LaunchDaemon
+ * e {@code schtasks /ru SYSTEM} rodam como root <b>sem {@code SUDO_USER}</b>.
+ *
+ * <p>Aí {@code user.home} é {@code /root} ou o profile do SYSTEM: o daemon
+ * leria um {@code blocks.json} que não é o do {@code sudo siteblock block}, e a
  * feature inteira vira um no-op silencioso.
  *
  * @param stateDir      diretório de estado do usuário real

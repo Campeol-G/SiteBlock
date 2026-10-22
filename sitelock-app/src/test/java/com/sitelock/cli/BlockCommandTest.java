@@ -70,13 +70,11 @@ class BlockCommandTest {
         int run() throws Exception;
     }
 
+    // POR QUE: o estado é gravado antes do hosts. Se a recusa não vier antes da
+    // gravação, o JSON diz "bloqueado" e o hosts não tem a linha: o domínio fica
+    // preso sem registro, e o sweep (que varre o JSON) nunca limpa.
     /**
      * Sem escrita no hosts, o block recusa — e não deixa rastro.
-     *
-     * <p>POR QUE: o estado é gravado antes do hosts. Se a recusa não vier
-     * antes da gravação, o JSON diz "bloqueado" e o hosts não tem a linha: o
-     * domínio fica preso no hosts sem registro, e o sweep (que varre o JSON)
-     * nunca o limpa.
      */
     @Test
     void recusaComCodigo1QuandoOHostsNaoEhGravavel() throws Exception {
@@ -102,11 +100,11 @@ class BlockCommandTest {
                 "o estado não pode ser criado quando o comando recusa");
     }
 
+    // POR QUE: só dá para verificar nesta máquina — a dica de elevação segue
+    // o SO real, e simular o Windows não prova o texto que quem usa Windows
+    // lê.
     /**
      * No Windows a recusa fala em Administrador, não em sudo.
-     *
-     * <p>Só dá para verificar nesta máquina: a dica de elevação segue o SO
-     * real, e simular o Windows não prova o texto que quem usa Windows lê.
      */
     @Test
     @EnabledOnOs(OS.WINDOWS)

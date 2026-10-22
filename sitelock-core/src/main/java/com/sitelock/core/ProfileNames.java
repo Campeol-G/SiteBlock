@@ -22,10 +22,9 @@ public final class ProfileNames {
     }
 
     /**
-     * @return o nome, se válido
-     * @throws IllegalArgumentException com mensagem para o usuário final, sem
-     *         {@code IllegalStateException} nem código de saída espalhado pelo
-     *         chamador
+     * @throws IllegalArgumentException (e não {@code IllegalStateException}) com
+     *         mensagem pronta para o usuário final: o chamador não precisa
+     *         espalhar código de saída
      */
     public static String require(String name) {
         if (!isValid(name)) {

@@ -34,10 +34,9 @@ public class BlockService {
      * Resultado de uma varredura.
      *
      * @param removed domínios efetivamente liberados do hosts e do estado
-     * @param failures mantido por compatibilidade de assinatura; com o
-     *                 desbloqueio em lote a operação é atômica, então ou
-     *                 tudo sai ou nada sai — este campo não tem mais caminho
-     *                 que o preencha. Os chamadores só leem {@code removed}.
+     * @param failures vazio sempre — o desbloqueio em lote é atômico (tudo sai ou
+     *                 nada sai), então o campo só sobra por compatibilidade de
+     *                 assinatura; os chamadores leem {@code removed}
      * @param skippedDueToPermission true quando o hosts não está gravável e nada
      *                 foi tentado
      * @param state o estado depois da varredura
@@ -46,17 +45,13 @@ public class BlockService {
                               boolean skippedDueToPermission, Map<String, BlockEntry> state) {
     }
 
+    // POR QUE: o load → unblockAll → save roda inteiro numa transação do BlockStore:
+    // fora dela, um block de outro terminal entre o load e o save seria apagado do
+    // estado, e o domínio ficaria preso no hosts sem registro (janela sempre aberta).
     /**
      * Remove do hosts e do JSON os bloqueios já expirados.
      * Se o hosts não for gravável e houver expirados, nada muda e
      * {@code skippedDueToPermission} volta true.
-     *
-     * <p>O {@code load → unblockAll → save} inteiro roda dentro de uma
-     * transação do {@link BlockStore}. Fora dela, um {@code block} feito de outro
-     * terminal entre o {@code load} e o {@code save} seria apagado do estado — e
-     * o domínio ficaria preso no hosts sem registro em lugar nenhum. Com o
-     * daemon rodando a cada minuto, para sempre, essa janela não é "enquanto
-     * alguém digita": ela está sempre aberta.
      */
     public SweepResult sweepExpired() throws IOException {
         return store.inTransaction(tx -> {
@@ -78,10 +73,8 @@ public class BlockService {
                 blocker.unblockAll(expired);
             } catch (IOException e) {
                 // O lote é atômico: ou o hosts inteiro foi reescrito, ou nada foi.
-                // Por isso o estado não é tocado — a próxima varredura tenta os
-                // mesmos domínios de novo, em vez de deixá-los presos no JSON
-                // sem registro no hosts, que é o modo de falha que o sweep
-                // jamais repara porque varre o JSON.
+                // Por isso o estado não é tocado — a próxima varredura tenta de novo,
+                // em vez de deixar o domínio preso no JSON (que o sweep não varre).
                 List<String> failures = new ArrayList<>();
                 for (String domain : expired) {
                     failures.add(domain + ": " + e.getMessage());
@@ -103,12 +96,10 @@ public class BlockService {
         return parent == null || Files.isWritable(parent);
     }
 
+    // POR QUE: o status roda sem elevação e precisa conferir o hosts contra o
+    // estado — isHostsWritable() fala de GRAVAR, não de LER, e só a leitura interessa.
     /**
      * O conteúdo do hosts.
-     *
-     * <p>POR QUE: o {@code status} roda sem elevação e precisa conferir o
-     * hosts contra o estado. {@link #isHostsWritable()} fala de GRAVAR, não
-     * de LER: os dois são coisas diferentes, e só a leitura interessa aqui.
      *
      * @throws IOException se o hosts não pôde ser lido
      */
@@ -116,28 +107,18 @@ public class BlockService {
         return HostsFileManager.readHosts(hostsPath);
     }
 
+    // POR QUE: load, save e a escrita no hosts ficam sob a mesma trava do
+    // BlockStore — fora dela, um block de outro terminal entre o load e o save
+    // seria apagado do JSON, e o domínio continuaria no hosts sem registro.
+
+    // A ordem é Estado → hosts e não a inversa: o caminho inverso prende o domínio
+    // para sempre (o sweep varre o JSON, não o hosts). A ordem escolhida deixa o
+    // domínio livre se o processo morrer no meio — fail-open e silencioso.
     /**
      * Aplica uma mudança de estado e a escrita no hosts como uma unidade.
      *
-     * <p>É o ponto de entrada único de tudo que grava estado: o {@code load} e o
-     * {@code save} acontecem dentro da mesma trava do {@link BlockStore}, e o
-     * hosts é escrito dentro dela também. Sem isso, um {@code block} feito em
-     * outro terminal entre o {@code load} e o {@code save} é apagado do JSON —
-     * e o domínio continua no {@code /etc/hosts}, sem registro em lugar nenhum.
-     *
-     * <p>A ordem é Estado → hosts, e ela não é negociável. O caminho inverso tem
-     * um pior modo de falha: entrada no hosts sem registro no estado significa
-     * um domínio preso para sempre, porque o {@code sweepExpired()} varre o
-     * JSON, não o hosts. A ordem escolhida tem a janela oposta — se o processo
-     * for morto entre os dois passos, o estado diz "bloqueado" e o hosts não foi
-     * escrito, ou seja, o domínio está de fato livre. Fail-open e silencioso.
-     *
-     * <p>Se a escrita no hosts falhar, o estado volta ao que era: é o
-     * rollback que impede o estado de mentir sobre o hosts.
-     *
      * @param transform o que fazer com o estado carregado; recebe uma cópia
      *                  que pode mutar à vontade e a transação, para gravar
-     * @param hosts     a escrita no hosts
      */
     public <R> R inTransaction(StateTransform<R> transform, HostsWriter<R> hosts)
             throws IOException {

@@ -33,7 +33,7 @@ class DaemonStartCommandDocTest {
                 "o javadoc precisa continuar falando do PID: " + javadoc);
     }
 
-    /** O arquivo-fonte do comando, subindo a árvore até achar. */
+    // O arquivo-fonte do comando, subindo a árvore até achar.
     private static Path fonteDoComando() {
         Path relativo = Path.of("src/main/java/com/sitelock/cli/DaemonStartCommand.java");
         Path atual = Path.of("").toAbsolutePath();
@@ -47,7 +47,7 @@ class DaemonStartCommandDocTest {
         throw new IllegalStateException("fonte do DaemonStartCommand não encontrada");
     }
 
-    /** O bloco de javadoc que precede o método. */
+    // O bloco de javadoc que precede o método.
     private static String javadocDe(String fonte, String metodo) {
         int declaracao = fonte.lastIndexOf(metodo);
         int inicio = fonte.lastIndexOf("/**", declaracao);

@@ -21,47 +21,30 @@ import java.util.Map;
  * estática e testável sem sockets); o transporte está em {@link #forwardRaw} e no
  * {@link DnsServer}. Regras:
  * <ul>
- *   <li>Nome igual — ou subdomínio — de um bloqueio ativo:
- *       <ul>
- *         <li>tipo A ou AAAA: {@link Decision#BLOCK} (sinkhole 0.0.0.0 / ::);</li>
- *         <li>qualquer outro tipo: {@link Decision#BLOCK_NODATA} (NODATA: o nome
- *             existe, mas não tem dados desse tipo).</li>
- *       </ul>
- *       Ex.: bloquear {@code tiktok.com} também bloqueia {@code www.tiktok.com}
- *       e {@code m.tiktok.com} (sufixo ".tiktok.com").</li>
+ *   <li>Nome igual — ou subdomínio — de um bloqueio ativo ({@code tiktok.com} também
+ *       cobre {@code www.tiktok.com} e {@code m.tiktok.com}): tipo A ou AAAA recebe
+ *       {@link Decision#BLOCK} (sinkhole 0.0.0.0 / ::) e qualquer outro tipo recebe
+ *       {@link Decision#BLOCK_NODATA} (o nome existe, mas não tem dados desse tipo).</li>
  *   <li>Todo o resto (domínios não listados, expirados, raiz): {@link Decision#FORWARD}.</li>
  * </ul>
  *
- * <h2>Nome bloqueado nunca vai ao upstream</h2>
- * <p>Um nome bloqueado só pode ser respondido localmente ({@link Decision#isBlocked()}):
- * encaminhar os bytes ao DNS público entregaria ao cliente os dados REAIS do domínio
- * bloqueado (TXT, MX, CNAME, HTTPS…) e revelaria ao provedor qual nome foi consultado.
- * Para os tipos que não são A/AAAA a resposta é NODATA (RCODE 0, ANCOUNT 0), que é a
- * semântica correta de "o nome existe, mas não há dados desse tipo" — a mesma do
- * Pi-hole/AdGuard.
+ * <p>Nome bloqueado nunca vai ao upstream: encaminhar os bytes ao DNS público entregaria
+ * ao cliente os dados REAIS do domínio bloqueado (TXT, MX, CNAME, HTTPS…) e revelaria ao
+ * provedor qual nome foi consultado. Nos tipos que não são A/AAAA a resposta é NODATA
+ * (RCODE 0, ANCOUNT 0) — a semântica de "o nome existe, mas não há dados desse tipo",
+ * a mesma do Pi-hole/AdGuard.
  *
- * <p><b>Alias por CNAME:</b> a decisão olha só o nome consultado — o alias só
- * aparece na <i>resposta</i> do upstream, então a consulta sai mesmo assim. Quem
- * fecha o buraco é o servidor: ele inspeciona a section answer da resposta
- * ({@link #nomeBloqueadoNaCadeia}) e, se algum nome da cadeia for bloqueado,
- * descarta a resposta do upstream e entrega o sinkhole local ao cliente.
+ * <p>Alias por CNAME: a decisão olha só o nome consultado — o alias só aparece na
+ * <i>resposta</i> do upstream, então a consulta sai mesmo assim. Quem fecha o buraco é
+ * o servidor, via {@link #nomeBloqueadoNaCadeia}.
  *
- * <h2>Concorrência e tempo real (sem observer, sem cache)</h2>
- * <p>Cada consulta relê o {@code blocks.json} do disco via {@link BlockStore#load()},
- * que lê um snapshot atômico (escrita atômica + lock entre processos no core). Não há
- * cache em memória compartilhado, portanto não há condição de corrida nem necessidade
- * de {@code ConcurrentHashMap} ou de um mecanismo de "observer": um
- * {@code block}/{@code unblock} feito em outro terminal vale já na próxima consulta.
- * O custo é uma leitura de arquivo pequeno por query — irrelevante frente ao RTT do UDP.
+ * <p>Sem cache em memória: cada consulta relê o {@code blocks.json} do disco via
+ * {@link BlockStore#load()} (snapshot atômico), então um {@code block}/{@code unblock}
+ * feito em outro terminal vale já na próxima consulta. O custo é uma leitura de arquivo
+ * pequeno por query — irrelevante frente ao RTT do UDP.
  *
- * <h2>Falha na leitura do estado: fail-open</h2>
- * <p>Se o estado estiver ilegível/corrompido, a decisão é {@link Decision#FORWARD}
- * (deixa passar) em vez de derrubar a internet de todos os dispositivos. Disponibilidade
- * da rede prevalece sobre o bloqueio; a CLI já trata corrupção com erro explícito.
- *
- * <p><b>Ajuste em sitelock-core avaliado e dispensado:</b> nenhuma mudança foi necessária.
- * O reuso de {@link BlockStore#load()} + {@link BlockEntry#isExpired(Instant)} cobre o
- * tempo real sem nova API.
+ * <p>Estado ilegível vira {@link Decision#FORWARD} (fail-open) em vez de derrubar a
+ * internet de todos os dispositivos: disponibilidade da rede prevalece sobre o bloqueio.
  */
 public class DnsResolver {
 
@@ -69,25 +52,8 @@ public class DnsResolver {
      * O que fazer com a consulta: responder localmente ou encaminhar ao upstream.
      *
      * <p>Contrato para quem consome (o {@link DnsServer}): um nome bloqueado NUNCA
-     * resulta em {@link Decision#FORWARD}.
-     * <ul>
-     *   <li>{@link Decision#BLOCK}: nome bloqueado, consulta A/AAAA — responder com o
-     *       sinkhole (0.0.0.0 / ::).</li>
-     *   <li>{@link Decision#BLOCK_NODATA}: nome bloqueado, consulta de outro tipo —
-     *       responder NODATA (RCODE 0, ANCOUNT 0, sem section answer).</li>
-     *   <li>{@link Decision#FORWARD}: nome não bloqueado — repassar os bytes ao
-     *       upstream e retransmitir a resposta.</li>
-     * </ul>
-     * <p>Use {@link #isBlocked()} para decidir "respondo local ou encaminho?" sem
-     * listar os casos bloqueados. No servidor:
-     * <pre>
-     *   if (decision.isBlocked()) {
-     *       byte[] resposta = DnsPacketBuilder.buildResponse(query, decision);
-     *       enviar(resposta);
-     *       return;                 // nome bloqueado nunca vai ao upstream
-     *   }
-     *   // só um nome não bloqueado chega aqui
-     * </pre>
+     * resulta em {@link Decision#FORWARD}. Use {@link #isBlocked()} para decidir
+     * "respondo local ou encaminho?" sem listar os casos bloqueados.
      */
     public enum Decision {
         /** Responder localmente com o sinkhole (0.0.0.0 / ::). */
@@ -104,9 +70,8 @@ public class DnsResolver {
         /**
          * true quando a resposta é montada localmente (BLOCK ou BLOCK_NODATA).
          *
-         * <p>ATENÇÃO: usar este método em vez de comparar com {@link #BLOCK} — um nome
-         * bloqueado consultado com tipo ≠ A/AAAA é {@link #BLOCK_NODATA}, não
-         * {@link #BLOCK}.
+         * <p>ATENÇÃO: use este método em vez de comparar com {@link #BLOCK} — um nome
+         * bloqueado consultado com tipo ≠ A/AAAA é {@link #BLOCK_NODATA}.
          */
         public boolean isBlocked() {
             return this != FORWARD;
@@ -116,16 +81,12 @@ public class DnsResolver {
     /** Porta do DNS upstream (fixa: serviço DNS padrão). */
     public static final int UPSTREAM_PORT = 53;
 
-    /**
-     * Sorteio do ID enviado ao upstream.
-     *
-     * <p>POR QUE: o ID do cliente trafega em claro na LAN; usá-lo no upstream
-     * expõe a transação. Um ID próprio, sorteado por consulta, fecha a porta
-     * para quem tenta forjar resposta.
-     */
+    // POR QUE: o ID do cliente trafega em claro na LAN; usá-lo no upstream expõe
+    // a transação. Um ID próprio, sorteado por consulta, fecha a porta para quem
+    // tenta forjar resposta.
     private static final SecureRandom SORTEIO = new SecureRandom();
 
-    /** Sorteia um ID de 16 bits para a transação com o upstream. */
+    // Sorteia um ID de 16 bits para a transação com o upstream.
     static int sorteiaId() {
         return SORTEIO.nextInt(0x10000);
     }
@@ -141,8 +102,7 @@ public class DnsResolver {
     /**
      * A decisão e o snapshot do estado que a produziu.
      *
-     * @param decisao o que fazer com a consulta
-     * @param estado  os bloqueios usados na decisão (snapshot do disco)
+     * @param estado os bloqueios usados na decisão (snapshot do disco)
      */
     public record Resultado(Decision decisao, Map<String, BlockEntry> estado) {
     }
@@ -155,9 +115,9 @@ public class DnsResolver {
     /**
      * Decide e devolve junto o snapshot do estado usado na decisão.
      *
-     * <p>POR QUE: a checagem da cadeia de CNAMEs (no caminho FORWARD) precisa da
-     * MESMA lista de bloqueios da decisão. Sem devolver o snapshot, o servidor
-     * teria que reler o blocks.json — uma segunda leitura de disco por consulta.
+     * <p>POR QUE: a checagem da cadeia de CNAMEs (no caminho FORWARD) precisa da MESMA
+     * lista de bloqueios da decisão — sem o snapshot, o servidor releria o blocks.json
+     * numa segunda leitura de disco por consulta.
      */
     public Resultado decideComEstado(String domain, int qtype) {
         final Map<String, BlockEntry> state;
@@ -181,7 +141,8 @@ public class DnsResolver {
      * <p>É o buraco que sobrou no bloqueio por DNS: o nome consultado é livre, mas
      * o upstream responde com a cadeia de CNAMEs <b>e</b> o IP real do alvo na
      * mesma resposta. Se algum nome da cadeia for bloqueado, a resposta do
-     * upstream vale como o IP de um domínio bloqueado.
+     * upstream vale como o IP de um domínio bloqueado — quem chama descarta a
+     * resposta e entrega o sinkhole local.
      *
      * @param resposta bytes da resposta do upstream
      * @param estado   snapshot dos bloqueios (o mesmo da decisão)
@@ -204,7 +165,7 @@ public class DnsResolver {
     }
 
     /**
-     * Decisão de resposta local para um nome cuja cadeia de alias é bloqueada.
+     * Decisão de resposta local para um nome bloqueado (direto ou via cadeia de alias).
      *
      * <p>POR QUE: a resposta tem que ser a mesma de um nome bloqueado — sinkhole
      * (0.0.0.0 / ::) em A/AAAA e NODATA nos demais tipos.
@@ -227,8 +188,7 @@ public class DnsResolver {
      * os dados reais do domínio bloqueado.
      *
      * @param domain nome perguntado (qualquer caixa; ponto final opcional)
-     * @param qtype  tipo DNS (1 = A, 28 = AAAA; os demais tipos de um nome bloqueado
-     *               resultam em NODATA, nunca em encaminhamento)
+     * @param qtype  tipo DNS (1 = A, 28 = AAAA)
      * @param state  snapshot dos bloqueios (chave = domínio normalizado)
      * @param now    instante de referência para expiração
      */
@@ -244,10 +204,8 @@ public class DnsResolver {
         return decisaoDeBloqueio(qtype);
     }
 
-    /**
-     * true se o nome é igual a um bloqueio ativo ou é subdomínio dele
-     * (sufixo ".dominio" — "eviltiktok.com" NÃO casa com "tiktok.com").
-     */
+    // true se o nome é igual a um bloqueio ativo ou é subdomínio dele
+    // (sufixo ".dominio" — "eviltiktok.com" NÃO casa com "tiktok.com").
     private static boolean isBlockedName(String q, Map<String, BlockEntry> state, Instant now) {
         for (BlockEntry entry : state.values()) {
             if (entry == null || entry.getDomain() == null) {
@@ -267,13 +225,9 @@ public class DnsResolver {
         return false;
     }
 
-    /**
-     * Forma canônica do nome para comparar com a lista de bloqueio: minúsculas, sem
-     * ponto final e em punycode.
-     *
-     * <p>Assim o nome em unicode e o nome em punycode casam com a mesma entrada da
-     * lista ("пример.рф" e "xn--e1afmkfd.xn--p1ai" são o mesmo nome).
-     */
+    // Forma canônica do nome para comparar com a lista de bloqueio: minúsculas, sem
+    // ponto final e em punycode — assim o nome em unicode e o nome em punycode casam
+    // com a mesma entrada ("пример.рф" e "xn--e1afmkfd.xn--p1ai" são o mesmo nome).
     static String canonicalName(String raw) {
         String norm = normalizeQueryName(raw);
         if (norm.isEmpty()) {
@@ -310,9 +264,8 @@ public class DnsResolver {
      * UDP que acerte a porta efêmera entrava como se fosse a resposta.
      *
      * <p><b>ID:</b> o upstream recebe um ID <b>próprio</b>, sorteado a cada
-     * consulta. O ID do cliente trafega em claro na LAN; repassá-lo ao upstream
-     * expõe a transação a quem escute o caminho. A resposta volta com o ID do
-     * cliente, reescrito — o cliente continua vendo o ID que mandou.
+     * consulta (o ID do cliente trafega em claro na LAN), e a resposta volta com o
+     * ID do cliente, reescrito — o cliente continua vendo o ID que mandou.
      *
      * <p><b>Validação:</b> a resposta só é repassada se for mesmo uma resposta
      * (QR=1), tiver o ID que foi enviado e a pergunta que foi perguntada.
@@ -344,12 +297,8 @@ public class DnsResolver {
         return forwardRaw(request, requestLen, upstream, UPSTREAM_PORT, timeoutMs);
     }
 
-    /**
-     * Confere que a resposta do upstream é mesmo a resposta da nossa consulta.
-     *
-     * @throws IOException se a resposta não serve (ID trocado, pacote que não é
-     *                     resposta ou pergunta diferente)
-     */
+    // Confere que a resposta do upstream é mesmo a resposta da nossa consulta:
+    // ID trocado, pacote que não é resposta ou pergunta diferente viram IOException.
     static void validarResposta(byte[] resposta, int idEsperado,
                                  byte[] consulta, int consultaLen) throws IOException {
         if (resposta == null || resposta.length < 12) {
@@ -389,19 +338,9 @@ public class DnsResolver {
     }
 }
 
-/**
- * Cliente do upstream: um punhado de sockets conectados, reaproveitados.
- *
- * <p>POR QUE: um socket novo por consulta esgota as portas efêmeras do SO
- * (uma rajada de algumas centenas de consultas já estoura o intervalo) e
- * multiplica os sockets abertos. Os sockets aqui são <b>conectados</b> — é o
- * que faz o kernel descartar resposta de origem errada — e são reaproveitados
- * por todas as consultas.
- *
- * <p>Cada socket é usado por uma requisição por vez (um lock por socket): o
- * par send/receive tem que ser da mesma transação, e o ID sorteado por
- * consulta é o que amarra a resposta à consulta.
- */
+// POR QUE: um socket novo por consulta esgota as portas efêmeras do SO. Os sockets
+// aqui são reaproveitados por todas as consultas, um por requisição sob um lock:
+// send/receive têm que ser da mesma transação, amarrada pelo ID sorteado.
 final class UpstreamClient implements AutoCloseable {
 
     private final InetAddress upstream;
@@ -412,9 +351,7 @@ final class UpstreamClient implements AutoCloseable {
     private final java.util.concurrent.atomic.AtomicInteger proximo =
             new java.util.concurrent.atomic.AtomicInteger();
 
-    /**
-     * @param quantidade quantos sockets conectar (1 = um só, em série)
-     */
+    // "quantidade" é quantos sockets conectar (1 = um só, em série).
     UpstreamClient(InetAddress upstream, int porta, int timeoutMs, int quantidade)
             throws IOException {
         if (quantidade < 1) {
@@ -440,7 +377,7 @@ final class UpstreamClient implements AutoCloseable {
         }
     }
 
-    /** Encaminha a consulta e devolve a resposta com o ID do cliente. */
+    // Encaminha a consulta e devolve a resposta com o ID do cliente.
     byte[] encaminhar(byte[] request, int requestLen) throws IOException {
         if (request == null || requestLen < 2 || requestLen > request.length) {
             throw new IOException("consulta inválida para encaminhar");

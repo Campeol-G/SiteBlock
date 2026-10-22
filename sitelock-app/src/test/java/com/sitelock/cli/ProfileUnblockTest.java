@@ -228,7 +228,7 @@ class ProfileUnblockTest {
                 "a recusa tem que dizer que o perfil não existe: " + saida);
     }
 
-    /** Troca o expiresAt do domínio por um instante já vencido. */
+    // Troca o expiresAt do domínio por um instante já vencido.
     private void envenenar(String domain) throws Exception {
         String json = blocks();
         int chave = json.indexOf("\"" + domain + "\"");
@@ -250,7 +250,7 @@ class ProfileUnblockTest {
         return n;
     }
 
-    /** Captura stdout e stderr: as recusas do comando saem no stderr. */
+    // Captura stdout e stderr: as recusas do comando saem no stderr.
     private static String capture(ThrowingRunnable r) throws Exception {
         PrintStream original = System.out;
         PrintStream originalErr = System.err;

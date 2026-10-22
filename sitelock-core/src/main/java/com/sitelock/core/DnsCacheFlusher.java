@@ -8,6 +8,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
+// FIXME (2026-10-21, @ChicoMagnusOpus): a execução real do flush não é testada
+// no CI em todos os SOs (exigiria runners Windows/macOS + permissões) — os testes
+// cobrem só a seleção dos comandos por SO. Validar manualmente.
 /**
  * Limpeza do cache de DNS após modificações no hosts — etapa best-effort.
  *
@@ -23,11 +26,6 @@ import java.util.concurrent.TimeUnit;
  *   <li>macOS: {@code dscacheutil -flushcache} + {@code killall -HUP mDNSResponder}.</li>
  *   <li>Windows: {@code ipconfig /flushdns}.</li>
  * </ul>
- *
- * <p>Limitação conhecida: a execução real do flush não é testada no CI em todos
- * os SOs (exigiria runners Windows/macOS + permissões) — validar manualmente.
- * Os testes unitários cobrem apenas a <i>seleção</i> dos comandos por SO, com um
- * {@link CommandRunner} fake, sem executar processos reais.
  */
 public final class DnsCacheFlusher {
 
@@ -59,51 +57,41 @@ public final class DnsCacheFlusher {
         this(OsType.detect(osName), isPrivilegedProcess(), DnsCacheFlusher::runWithProcessBuilder);
     }
 
-    /** Injeta SO + runner (testes usam um fake, sem processo real). */
+    // Injeta SO + runner (os testes usam um fake, sem processo real).
     DnsCacheFlusher(OsType osType, CommandRunner runner) {
         this(osType, isPrivilegedProcess(), runner);
     }
 
-    /**
-     * Injeta SO + privilégio + runner. É este construtor que os testes usam
-     * para provar a regra que importa: sem root, nada é tentado.
-     */
+    // Injeta SO + privilégio + runner. É este construtor que os testes usam
+    // para provar a regra que importa: sem root, nada é tentado.
     DnsCacheFlusher(OsType osType, boolean privileged, CommandRunner runner) {
         this.osType = osType == null ? OsType.UNKNOWN : osType;
         this.privileged = privileged;
         this.runner = runner == null ? DnsCacheFlusher::runWithProcessBuilder : runner;
     }
 
-    /**
-     * true quando o processo já tem elevação no SO atual.
-     *
-     * <p>No Unix, "root" é o que faz o flush do resolved ser possível. Fora
-     * dele, {@code systemd-resolve --flush-caches} não falha e segue em frente:
-     * o systemd-resolved aceita a chamada e o polkit abre um diálogo de
-     * autenticação pedindo a senha do usuário. Como o flush é <i>best-effort</i>,
-     * um passo opcional que pode travar esperando senha não pode rodar.
-     *
-     * <p>No Windows não existe root — {@code ipconfig /flushdns} só depende de o
-     * processo já ser administrador, e quem não é recebe o aviso de elevate.
-     */
+    // POR QUE: no Unix só o root faz o flush do resolved ser possível — fora
+    // dele, o systemd-resolved aceita a chamada e o polkit abre um diálogo
+    // pedindo a senha, e um passo opcional não pode travar esperando senha.
     static boolean isPrivilegedProcess() {
         return "root".equals(System.getProperty("user.name", ""));
     }
 
     /**
      * Se este processo pode tentar o flush sem abrir diálogo de autenticação.
-     * Windows não tem polkit: lá o flush é sempre tentado.
+     * Windows não tem polkit: lá o flush é sempre tentado, e só depende de o
+     * processo já ser administrador.
      */
     public boolean isPrivileged() {
         return privileged || osType.isWindows();
     }
 
-    /** Comandos tentados em ordem para o SO corrente (exposto para testes). */
+    // Comandos tentados em ordem para o SO corrente (exposto para testes).
     List<List<String>> commandsForCurrentOs() {
         return commandsFor(osType);
     }
 
-    /** Seleção de comandos por SO — pura, sem executar nada. */
+    // Seleção de comandos por SO — pura, sem executar nada.
     static List<List<String>> commandsFor(OsType os) {
         if (os != null && os.isWindows()) {
             return List.of(List.of("ipconfig", "/flushdns"));
@@ -125,10 +113,9 @@ public final class DnsCacheFlusher {
     public FlushResult flush() {
         List<List<String>> commands = commandsForCurrentOs();
         if (!isPrivileged()) {
-            // Sem elevação não tentamos nada: no Linux e no macOS a tentativa
-            // passa pelo systemd-resolved / dscacheutil, que exigem privilégio e
-            // abrem um pedido de senha (polkit) que ninguém deve precisar
-            // responder para completar um passo opcional.
+            // Sem elevação nada é tentado: no Linux e no macOS a chamada passa
+            // por systemd-resolved/dscacheutil, que abrem um pedido de senha
+            // (polkit) para completar um passo que é opcional.
             return new FlushResult(false, "");
         }
         List<String> errors = new ArrayList<>();

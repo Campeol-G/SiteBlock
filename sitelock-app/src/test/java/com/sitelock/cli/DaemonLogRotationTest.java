@@ -137,7 +137,7 @@ class DaemonLogRotationTest {
                 "o log tem que ser o da execução de agora:\n" + conteudo);
     }
 
-    /** Mata o daemon que o start subiu, se ele tiver subido. */
+    // Mata o daemon que o start subiu, se ele tiver subido.
     private static void matarDaemon(Path estado) {
         try {
             ExpirationDaemonState.read(estado).ifPresent(state -> {
@@ -148,7 +148,7 @@ class DaemonLogRotationTest {
         }
     }
 
-    /** Um grupo do qual o usuario participa e que nao e o principal dele. */
+    // Um grupo do qual o usuario participa e que nao e o principal dele.
     private static Optional<String> grupoSecundario(String usuario) {        Path etc = Path.of("/etc/group");
         if (!Files.isReadable(etc)) {
             return Optional.empty();

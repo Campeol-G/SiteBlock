@@ -48,13 +48,9 @@ class TransacaoEstadoTest {
         return tmp.resolve("state/blocks.json").toString();
     }
 
-    /**
-     * true se a trava do arquivo de estado está retida agora.
-     *
-     * <p>Na mesma JVM, um {@code tryLock} sobre um arquivo já travado por ela
-     * estoura {@link OverlappingFileLockException} — é assim que se descobre
-     * que a transação está com a trava.
-     */
+    // ATENÇÃO: na mesma JVM, um tryLock sobre um arquivo já travado por ela
+    // estoura OverlappingFileLockException — é assim que se descobre que a
+    // transação está com a trava.
     private static boolean travaDoEstadoEstaRetida(String stateFile) {
         Path lock = Path.of(stateFile).resolveSibling("blocks.json.lock");
         try (FileChannel channel = FileChannel.open(lock, StandardOpenOption.WRITE)) {

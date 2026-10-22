@@ -22,13 +22,9 @@ import java.util.concurrent.Callable;
 /**
  * siteblock profile save <nome> [--force].
  *
- * <p>Guarda o que está bloqueado <b>agora</b> como uma receita reutilizável: o
- * que vai para o arquivo é o prazo restante de cada domínio, nunca o
- * {@code expiresAt} original. Um perfil é receita, não histórico — guardar o
- * instante transformaria um perfil de 6 meses em "já vencido".
- *
- * <p>Recusa sobrescrever sem {@code --force}: perder a receita sem querer é o
- * pior erro possível aqui.
+ * <p>Guarda o que está bloqueado <b>agora</b> como uma receita reutilizável: vai para o arquivo
+ * o prazo restante de cada domínio, nunca o {@code expiresAt} original. Sem {@code --force},
+ * não sobrescreve: perder a receita sem querer é o pior erro possível aqui.
  */
 @Command(name = "save",
         description = "Salva os bloqueios ativos como um perfil nomeado.",
@@ -44,7 +40,7 @@ public class ProfileSaveCommand implements Callable<Integer> {
     @Option(names = "--hosts-file", hidden = true) String hostsFileOverride;
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
 
-    /** Store injetado pelo teste; null = usa o do stateDir. */
+    // Store injetado pelo teste; null = usa o do stateDir.
     ProfileStore storeOverride;
 
     public ProfileSaveCommand() {
@@ -85,15 +81,16 @@ public class ProfileSaveCommand implements Callable<Integer> {
 
         Instant now = Instant.now(service.getClock());
 
-        // O sweep não garante "só o que está ativo agora": quando o hosts não
-        // está gravável ele devolve o estado intacto (skippedDueToPermission) e
-        // os expirados continuam no mapa. Filtrar aqui evita gravar um domínio
-        // vencido como se fosse receita viva.
+        // O sweep não garante "só o que está ativo agora": quando o hosts não está gravável
+        // ele devolve o estado intacto (skippedDueToPermission) e os expirados continuam no
+        // mapa. Filtrar aqui evita gravar um domínio vencido como se fosse receita viva.
         Map<String, ProfileEntry> entries = new TreeMap<>();
         for (BlockEntry e : state.values()) {
             if (e == null || e.getDomain() == null || e.isExpired(now)) {
                 continue;
             }
+            // POR QUE: o prazo restante, e não o expiresAt original — um perfil é receita,
+            // não histórico: guardar o instante transformaria um perfil de 6 meses em "já vencido".
             Long millis = e.getExpiresAt() == null ? null
                     : Duration.between(now, e.getExpiresAt()).toMillis();
             entries.put(e.getDomain(), new ProfileEntry(millis));

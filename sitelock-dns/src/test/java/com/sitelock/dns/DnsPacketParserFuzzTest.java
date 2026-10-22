@@ -5,20 +5,15 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 import java.util.Random;
 
-/**
- * Fuzz do parser: pacote nenhum pode derrubar o servidor.
- *
- * <p>O parse de consulta já era auditado (400 mil pacotes aleatórios, zero
- * AIOOBE). O leitor da section answer — que segue ponteiro de compressão, coisa
- * que o parse de consulta rejeita de propósito — precisa da mesma prova: o
- * upstream é a rede, e a resposta dele não é confiável.
- */
+// Fuzz do parser: pacote nenhum pode derrubar o servidor. O parse de consulta
+// já foi provado com 400 mil pacotes aleatórios (zero AIOOBE); a resposta do
+// upstream não é confiável.
 class DnsPacketParserFuzzTest {
 
-    /** Pacotes por rodada (a auditoria do parse de consulta usou 400 mil). */
+    // Pacotes por rodada (400 mil).
     private static final int PACOTES = 400_000;
 
-    /** Semente fixa: uma falha aqui tem que ser reproduzível. */
+    // Semente fixa: uma falha aqui tem que ser reproduzível.
     private static final long SEMENTE = 20261021L;
 
     @Test
@@ -31,10 +26,9 @@ class DnsPacketParserFuzzTest {
         }
     }
 
-    /**
-     * Resposta válida (cadeia de CNAMEs, nomes comprimidos) com bytes trocados
-     * e cortes: é o caminho que o leitor da section answer percorre de verdade.
-     */
+    // Resposta válida (cadeia de CNAMEs, nomes comprimidos) com bytes trocados e
+    // cortes: é o caminho que o leitor da section answer percorre de verdade — ele
+    // segue ponteiro de compressão, que o parse de consulta rejeita de propósito.
     @Test
     void respostaMutadaNuncaQuebraOLetorDaAnswer() {
         Random r = new Random(SEMENTE + 1);
@@ -61,10 +55,8 @@ class DnsPacketParserFuzzTest {
         }
     }
 
-    /**
-     * Passa o pacote pelos dois leitores: o de consulta e o da section answer.
-     * Nenhum dos dois pode lançar exceção de runtime (AIOOBE, NPE, loop).
-     */
+    // Passa o pacote pelos dois leitores: o de consulta e o da section answer.
+    // Nenhum dos dois pode lançar exceção de runtime (AIOOBE, NPE, loop).
     private static void consome(byte[] pacote) {
         try {
             DnsPacketParser.parse(pacote, pacote.length);
@@ -80,7 +72,7 @@ class DnsPacketParserFuzzTest {
         }
     }
 
-    /** Resposta com cadeia de CNAMEs, montada com nomes comprimidos. */
+    // Resposta com cadeia de CNAMEs, montada com nomes comprimidos.
     private static byte[] respostaValida() {
         byte[] consulta = DnsWire.query(0x1234, "alias.test", DnsQuery.TYPE_A);
         return DnsWire.respostaEmCadeia(consulta,

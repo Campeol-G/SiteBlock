@@ -27,7 +27,7 @@
       <groupId>info.picocli</groupId>
       <artifactId>picocli</artifactId>
     </dependency>
-    <!-- NOTA: nem jackson-databind nem jackson-datatype-jsr310 sao declarados
+    <!-- POR QUE: nem jackson-databind nem jackson-datatype-jsr310 sao declarados
          aqui. Nenhum arquivo deste modulo importa Jackson (grep confirma) e as
          duas chegam transitivas pelo sitelock-core, que e quem as usa. -->
     <dependency>
@@ -53,15 +53,9 @@
         </configuration>
       </plugin>
 
-      <!-- Fat-jar executável (java -jar sitelock-app/target/siteblock-*.jar).
-           Escolha: maven-shade-plugin em vez de maven-assembly-plugin, porque o shade
-           desempacota e reempacota as dependências num único JAR com merge de recursos
-           e ManifestResourceTransformer (Main-Class correto).
-           O merge de META-INF/services (picocli/jackson) quem faz é o
-           ServicesResourceTransformer: sem ele, dois jars que registram o mesmo
-           serviço se sobrescrevem e o módulo some em silêncio — o assembly só
-           colocaria os arquivos lado a lado.
-           Uso: mvn clean package (ver run.sh/run.bat e README). -->
+      <!-- POR QUE: shade em vez de assembly, que só colocaria os arquivos das
+           dependências lado a lado: o shade desempacota e reempacota num único
+           JAR, com merge de recursos e ManifestResourceTransformer (Main-Class). -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-shade-plugin</artifactId>

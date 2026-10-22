@@ -32,7 +32,7 @@ class BlockServiceSweepTest {
 
     private static final Instant NOW = Instant.parse("2026-10-15T12:00:00Z");
 
-    /** Blocker que registra o que recebeu, sem tocar em arquivo nenhum. */
+    // Blocker que registra o que recebeu, sem tocar em arquivo nenhum.
     private static final class RecordingBlocker implements SiteBlocker {
 
         final List<List<String>> unblockAllCalls = new ArrayList<>();
@@ -85,7 +85,7 @@ class BlockServiceSweepTest {
         store.save(state);
     }
 
-    /** {@code Map.of} não aceita valor nulo, e "permanente" é justamente {@code null}. */
+    // Map.of não aceita valor nulo, e "permanente" é justamente null.
     private static Map<String, Instant> deadlines(Object... pares) {
         Map<String, Instant> m = new TreeMap<>();
         for (int i = 0; i < pares.length; i += 2) {
@@ -136,10 +136,9 @@ class BlockServiceSweepTest {
 
     @Test
     void sweepIsSkippedWhenHostsNotWritable() throws Exception {
-        // Hosts inexistente com pai inexistente: isHostsWritable() cai no teste do
-        // diretório pai, e um diretório inexistente não é gravável. É o jeito
-        // portátil de simular negação — chmod não significa nada no Windows, que
-        // também roda a CI.
+        // Hosts inexistente com pai inexistente: isHostsWritable() cai no diretório
+        // pai, e um diretório inexistente não é gravável. É o jeito portátil de
+        // simular negação — chmod não significa nada no Windows, que roda a CI.
         Path h = tmp.resolve("sem-pai/hosts");
         BlockStore store = store();
         seed(store, deadlines("tiktok.com", NOW.minusSeconds(60)));

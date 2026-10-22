@@ -18,15 +18,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * A transação do {@link ProfileStore}.
  *
- * <p>Dois {@code profile add} simultâneos se perdiam: cada um lia a receita,
- * acrescentava o seu domínio e gravava o arquivo inteiro — o último a gravar
- * apagava o domínio do outro. A receita é trabalho digitado; perdê-lo é pior
- * do que o estado de bloqueio, que se reconstrói.
+ * <p>Dois {@code profile add} simultâneos se perdiam: cada um lia a receita e
+ * gravava o arquivo inteiro — o último a gravar apagava o domínio do outro. A
+ * receita é trabalho digitado: perdê-la é pior que perder o estado de bloqueio,
+ * que se reconstrói.
  *
- * <p>O teste da escrita concorrente é determinístico: o outro escritor grava o
- * arquivo por fora da trava (como faria outra versão da ferramenta, um script
- * ou uma edição manual), e a transação tem que aplicar a própria mudança
- * <b>por cima</b> do que está no disco, sem apagar o que o outro escreveu.
+ * <p>No teste, o outro escritor grava o arquivo por fora da trava, e a
+ * transação tem que aplicar a própria mudança <b>por cima</b> do que está no disco.
  */
 class ProfileStoreTransactionTest {
 
@@ -47,7 +45,7 @@ class ProfileStoreTransactionTest {
         return new Profile(AGORA, AGORA, entradas);
     }
 
-    /** Grava o arquivo por fora da trava, como um escritor que não a respeita. */
+    // Grava o arquivo por fora da trava, como um escritor que não a respeita.
     private void escreverPorForaDaTrava(Path profilesFile, Map<String, Profile> perfis)
             throws IOException {
         Files.writeString(profilesFile, ProfileStore.defaultMapper()

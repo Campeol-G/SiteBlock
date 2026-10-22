@@ -81,7 +81,7 @@ class DnsStartCommandTest {
         }
     }
 
-    /** Derruba o daemon que o teste subiu (o PID está no registro de estado). */
+    // Derruba o daemon que o teste subiu (o PID está no registro de estado).
     private void encerrar(Path estado) {
         try {
             Optional<DnsDaemonState> state = DnsDaemonState.read(estado);

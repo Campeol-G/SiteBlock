@@ -9,13 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-/**
- * Quem pode consultar o servidor DNS.
- *
- * <p>Escutar em 0.0.0.0 sem olhar a origem faz do SiteLock um resolvedor
- * aberto: quem está de fora usa a máquina para amplificar respostas e para
- * descobrir o que a rede consulta. O padrão é recusar tudo que não for local.
- */
+// Quem pode consultar o servidor DNS: por padrão, recusar tudo que não for
+// local. Escutar em 0.0.0.0 sem olhar a origem faz do SiteLock um resolvedor
+// aberto — quem está de fora amplifica respostas e descobre o que a rede consulta.
 class DnsSourcePolicyTest {
 
     private static InetAddress ip(String texto) throws Exception {

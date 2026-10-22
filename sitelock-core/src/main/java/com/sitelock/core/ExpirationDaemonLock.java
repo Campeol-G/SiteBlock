@@ -13,25 +13,23 @@ import java.util.Optional;
  * Trava de instância única do daemon, via {@code FileLock} retido pela vida
  * inteira do processo.
  *
- * <p>É o SO que libera um {@code FileLock} quando o processo morre — inclusive
- * no {@code kill -9}. Por isso ele serve aqui e um lock por PID não serve: um
- * lock por PID sobreviveria ao processo que o criou e travaria o próximo boot,
- * porque o PID gravado continuaria "vivo" na checagem.
+ * <p>É o SO que libera um {@code FileLock} quando o processo morre — até no
+ * {@code kill -9}. Por isso um lock por PID não serve: sobrevive ao processo
+ * que o criou e trava o próximo boot, porque o PID ainda parece vivo.
  *
- * <p><b>{@code tryLock}, não {@code lock}.</b> Locks de arquivo são por JVM,
- * não por canal: na mesma JVM, um segundo {@code lock()} lança
- * {@link OverlappingFileLockException}. Mas entre <b>processos</b>, {@code
- * lock()} BLOQUEIA — e foi o que a primeira versão fazia, o que transformava
- * uma segunda instância num processo pendurado para sempre (e, com
- * {@code Restart=always}, num processo que o systemd reporta como ativo).
- * {@link #acquire} usa {@code tryLock} com uma espera curta e, ao não conseguir,
- * diz quem está segurando.
+ * <p><b>{@code tryLock}, não {@code lock}.</b> Lock de arquivo é por JVM, não
+ * por canal: um segundo {@code lock()} na mesma JVM lança
+ * {@link OverlappingFileLockException}.
+ *
+ * <p>Entre <b>processos</b>, {@code lock()} bloqueia — foi o que a primeira
+ * versão fazia: a segunda instância ficava pendurada para sempre, e o systemd
+ * a reportava como ativa.
  */
 public final class ExpirationDaemonLock implements AutoCloseable {
 
     public static final String LOCK_FILE_NAME = "daemon.lock";
 
-    /** Tempo total de espera antes de desistir da trava. */
+    // Tempo total de espera antes de desistir: TENTATIVAS * INTERVALO_MS.
     private static final int TENTATIVAS = 20;
     private static final long INTERVALO_MS = 250;
 
@@ -50,6 +48,8 @@ public final class ExpirationDaemonLock implements AutoCloseable {
     }
 
     /**
+     * Adquire a trava, com espera antes de desistir, e diz quem está segurando.
+     *
      * @return a trava retida pela vida do processo
      * @throws IOException se outro daemon já a tem, ou se o arquivo não puder
      *                     ser criado

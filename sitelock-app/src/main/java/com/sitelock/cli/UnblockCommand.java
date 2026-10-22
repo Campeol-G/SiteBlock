@@ -204,13 +204,9 @@ public class UnblockCommand implements Callable<Integer> {
         return cancelledAny ? 3 : 0;
     }
 
-    /**
-     * O que a transação do {@code unblock} carrega entre o estado e o hosts.
-     *
-     * <p>POR QUE: o estado e o hosts são dois lugares, e o desbloqueio tem que
-     * sair nos dois. Guardar o que estava em cada domínio é o que permite
-     * reverter só o que falhou.
-     */
+    // O que a transação do unblock carrega entre o estado e o hosts: o estado e o
+    // hosts são dois lugares, e o desbloqueio tem que sair nos dois. Guardar o que
+    // estava em cada domínio é o que permite reverter só o que falhou.
     private static final class Plano {
 
         final List<String> gravados = new ArrayList<>();

@@ -14,11 +14,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
-/**
- * Quando o loop de atendimento cai no meio, o pool antigo não pode ficar
- * órfão: o watchdog cria um pool novo por cima e as threads do velho
- * continuam vivas (daemon, keepalive de 60s) consumindo memória e porta.
- */
+// Quando o loop de atendimento cai no meio, o pool antigo não pode ficar
+// órfão: o watchdog cria um pool novo por cima e as threads do velho
+// continuam vivas (daemon, keepalive de 60s) consumindo memória e porta.
 class DnsPoolOrfaoTest {
 
     @TempDir
@@ -74,7 +72,7 @@ class DnsPoolOrfaoTest {
                 "o pool antigo ficou órfão: " + restantes + " thread(s) viva(s)");
     }
 
-    /** Threads do pool de UDP (o de TCP tem outro prefixo). */
+    // Threads do pool de UDP (o de TCP tem outro prefixo).
     private static int contaThreadsDoPool() {
         int total = 0;
         for (Thread thread : Thread.getAllStackTraces().keySet()) {

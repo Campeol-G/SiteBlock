@@ -20,21 +20,17 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+// ATENÇÃO: o daemon só remove — BlockService.sweepExpired() é a única coisa que
+// ele chama, mais o flush de cache. Se alguém colocar um block dentro daqui,
+// um profile apply errado passa a parecer um bloqueio válido.
+
+// ATENÇÃO: quem escreve o daemon.json é este processo, e não o pai do daemon
+// start — sob autostart não existe pai. Se dependesse do pai, o status diria
+// "parado" e o stop não teria o que matar.
+
 /**
  * siteblock daemon __run-daemon — o laço de expiração. Comando interno
  * (oculto); não chame diretamente.
- *
- * <p>Ele <b>só remove</b>. {@link BlockService#sweepExpired()} é a única coisa
- * que ele chama, mais o flush de cache. Se alguém colocar um {@code block}
- * dentro daqui, um {@code profile apply} errado passa a parecer um bloqueio
- * válido — e o daemon que deveria limpar vira outra coisa que trava.
- *
- * <p><b>Quem escreve o {@code daemon.json}:</b> este próprio processo, e não o
- * pai do {@code daemon start}. É o ponto mais fácil de errar da feature: sob
- * autostart não existe pai. O systemd, o launchd e o Task Scheduler executam
- * este comando direto; se o registro dependesse do pai, depois de um boot não
- * haveria PID, o {@code daemon status} diria "parado" com o processo vivo, e o
- * {@code daemon stop} não teria o que matar.
  */
 @Command(name = "__run-daemon", hidden = true,
         description = "Executa o laço de expiração em foreground (uso interno do 'daemon start').")
@@ -57,13 +53,9 @@ public class DaemonRunCommand implements Callable<Integer> {
     public Integer call() {
         Path stateDir = CliSupport.stateDirFor(stateFileOverride);
         Duration maxInterval = Duration.ofSeconds(Math.max(1, intervalSeconds));
-        // O ocioso é IGUAL ao teto, e não 5 minutos. A primeira versão da spec
-        // propunha 5 min para não "polir o disco durante a madrugada" — mas isso
-        // contradiz a outra promessa dela, a de que um bloqueio criado em outro
-        // terminal é notado em no máximo um minuto. Um polling de 60s lê um
-        // arquivo pequeno: é de graça. Já o sono de 5 min faz um bloqueio de 1
-        // minuto ficar preso por até 5 minutos depois de vencer, que é
-        // exatamente o defeito que o daemon existe para eliminar.
+        // POR QUE: o ocioso é IGUAL ao teto, e não 5 minutos — 5 min de sono
+        // faz um bloqueio de 1 minuto ficar preso por até 5 minutos depois de
+        // vencer, que é o defeito que o daemon existe para eliminar.
         Duration idleInterval = maxInterval;
 
         if (once) {
@@ -133,17 +125,12 @@ public class DaemonRunCommand implements Callable<Integer> {
         }
     }
 
-    /**
-     * Uma volta do laço.
-     *
-     * <p>Uma falha aqui <b>não</b> mata o daemon: registra e devolve null para
-     * dormir o intervalo ocioso e tentar de novo. O {@code CorruptedStateException}
-     * é o caso provável (o usuário editou o JSON na mão) e ele não pode virar um
-     * daemon que não renasce — que é pior que não limpar, porque o usuário nem
-     * recebe aviso de que parou de ser avisado.
-     *
-     * @return o resultado da varredura, ou null se esta volta falhou
-     */
+    // Uma falha aqui NÃO mata o daemon: registra e devolve null para dormir o
+    // intervalo ocioso e tentar de novo.
+
+    // ATENÇÃO: o CorruptedStateException é o caso provável (o usuário editou o
+    // JSON na mão) e ele não pode virar um daemon que não renasce — pior que
+    // não limpar, porque o usuário nem recebe aviso de que parou de ser avisado.
     private BlockService.SweepResult varrer() {
         try {
             BlockService.SweepResult sweep = CliSupport.newService(null, stateFileOverride).sweepExpired();
@@ -176,7 +163,7 @@ public class DaemonRunCommand implements Callable<Integer> {
         return CliSupport.stateDirFor(stateFileOverride);
     }
 
-    /** @return false quando o laço deve encerrar */
+    // Devolve false quando o laço deve encerrar.
     private boolean dormir(CountDownLatch terminou, long segundos) {
         try {
             return !terminou.await(Math.max(1, segundos), TimeUnit.SECONDS);

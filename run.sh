@@ -19,7 +19,7 @@ SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT")" && pwd)"
 SCRIPT="$SCRIPT_DIR/$(basename "$SCRIPT")"
 ROOT="$SCRIPT_DIR"
 
-# Resolve o 'java' para caminho absoluto: sob 'sudo' o PATH e reduzido
+# Resolve o 'java' para caminho absoluto: sob 'sudo' o PATH é reduzido
 # (secure_path) e a busca relativa poderia falhar.
 JAVA_BIN="$(command -v java || true)"
 if [[ -z "$JAVA_BIN" ]]; then
@@ -55,7 +55,7 @@ versao_do_projeto() {
   printf '%s' "${bruto%%$'\n'*}"
 }
 
-# Um '-sources.jar' ou '-javadoc.jar' não tem Main-Class: roda-lo quebra com
+# Um '-sources.jar' ou '-javadoc.jar' não tem Main-Class: rodá-lo quebra com
 # "no main manifest attribute". Vale o jar que responde.
 escolher_jar() {
   local dir="$1" esperado="$2" candidato
@@ -104,7 +104,7 @@ else
   fi
 fi
 
-# -Dsiteblock.jar: o daemon de expiracao embute esse caminho no artefato de
+# -Dsiteblock.jar: o daemon de expiração embute esse caminho no artefato de
 # autostart, que roda sem PATH e sem este script.
 # -Dsiteblock.bin: as dicas de sudo passam a mostrar o caminho real deste
 # script, em vez do nome solto 'siteblock' (que pode não estar no PATH).

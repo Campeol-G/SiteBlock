@@ -13,10 +13,9 @@ import java.util.concurrent.Callable;
 /**
  * siteblock profile delete <nome>.
  *
- * <p>A confirmação é digitada, e não um {@code S/N}: apagar uma receita
- * digitada é o tipo de erro que ninguém desfaz. Digitar outra coisa cancela
- * com o código 3, o mesmo do {@code unblock} recusado, para que scripts
- * distingam "não fiz" de "erro".
+ * <p>A confirmação é digitada, e não um {@code S/N}: apagar uma receita é o tipo de erro que
+ * ninguém desfaz. Digitar outra coisa cancela com o código 3 — o mesmo do {@code unblock}
+ * recusado, para que scripts distingam "não fiz" de "erro".
  */
 @Command(name = "delete",
         description = "Apaga um perfil salvo.",
@@ -28,7 +27,7 @@ public class ProfileDeleteCommand implements Callable<Integer> {
 
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
 
-    /** Resposta injetada pelo teste; null = lê do stdin. */
+    // Resposta injetada pelo teste; null = lê do stdin.
     String answer;
 
     public ProfileDeleteCommand() {

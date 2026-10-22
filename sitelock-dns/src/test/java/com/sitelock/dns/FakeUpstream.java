@@ -14,27 +14,22 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
 
-/**
- * Upstream falso: um socket UDP local que responde como se fosse o DNS público.
- *
- * <p>Existe para que os testes do servidor nunca dependam da internet real: o
- * endereço é loopback, a porta é efêmera e o servidor sob teste aponta para
- * cá. O modo de resposta permite reproduzir os defeitos do transporte
- * (ID trocado, pacote que não é resposta, upstream que não responde).
- */
+// Upstream falso: um socket UDP local que responde como se fosse o DNS público.
+// Existe para que os testes nunca dependam da internet: o endereço é loopback,
+// a porta é efêmera. O modo de resposta reproduz os defeitos do transporte.
 final class FakeUpstream implements AutoCloseable {
 
-    /** Como o upstream falso responde à consulta. */
+    // Como o upstream falso responde à consulta.
     enum Modo {
-        /** Resposta normal: ecoa o ID e devolve uma answer. */
+        // Resposta normal: ecoa o ID e devolve uma answer.
         NORMAL,
-        /** Responde com outro ID (resposta de outra transação). */
+        // Responde com outro ID (resposta de outra transação).
         ID_ERRADO,
-        /** Responde com QR=0 (não é resposta). */
+        // Responde com QR=0 (não é resposta).
         SEM_QR,
-        /** Não responde nada (upstream mudo). */
+        // Não responde nada (upstream mudo).
         SILENCIO,
-        /** Responde sem section answer (NXDOMAIN). */
+        // Responde sem section answer (NXDOMAIN).
         SEM_ANSWER
     }
 
@@ -64,10 +59,8 @@ final class FakeUpstream implements AutoCloseable {
         }
     }
 
-    /**
-     * Portas de origem das consultas recebidas — ou seja, quantos sockets
-     * diferentes o servidor abriu para falar com o upstream.
-     */
+    // Portas de origem das consultas recebidas — ou seja, quantos sockets
+    // diferentes o servidor abriu para falar com o upstream.
     Set<Integer> portasDeOrigem() {
         synchronized (portasDeOrigem) {
             return new LinkedHashSet<>(portasDeOrigem);
@@ -78,13 +71,9 @@ final class FakeUpstream implements AutoCloseable {
         this.modo = novo;
     }
 
-    /**
-     * Resposta sob medida: o lambda recebe a consulta recebida e devolve a
-     * resposta (ex.: uma cadeia de CNAMEs montada à mão).
-     *
-     * <p>Tem precedência sobre o {@link Modo}: o modo só vale enquanto não há
-     * resposta customizada.
-     */
+    // Resposta sob medida: o lambda recebe a consulta recebida e devolve a
+    // resposta (ex.: uma cadeia de CNAMEs montada à mão). Tem precedência sobre
+    // o Modo: o modo só vale enquanto não há resposta customizada.
     void respondeCom(Function<byte[], byte[]> resposta) {
         this.respostaCustom = resposta;
     }
@@ -127,7 +116,7 @@ final class FakeUpstream implements AutoCloseable {
         }
     }
 
-    /** Resposta com uma answer de verdade (para provar que o dado real vazou). */
+    // Resposta com uma answer de verdade (para provar que o dado real vazou).
     private static byte[] responder(byte[] consulta, Modo modo) {
         int id = DnsWire.u16(consulta, 0);
         if (modo == Modo.ID_ERRADO) {

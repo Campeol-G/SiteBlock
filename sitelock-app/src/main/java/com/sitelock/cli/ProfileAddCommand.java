@@ -24,26 +24,9 @@ import java.util.concurrent.Callable;
 /**
  * siteblock profile &lt;nome&gt; add &lt;dominio...&gt; [--for &lt;duracao&gt;].
  *
- * <p>Adiciona domínios à receita de um perfil que já existe, sem precisar
- * bloquear nada agora. É o complemento do {@code profile save}, que só sabe
- * guardar o que já está bloqueado: quem tem uma lista de domínios na cabeça e
- * quer guardá-la como receita não tinha caminho.
- *
- * <p><b>Não toca no hosts.</b> Editar a receita é uma operação de arquivo
- * puro: não pede sudo, não escreve no {@code /etc/hosts}, e não muda o que
- * está bloqueado. Quem quiser aplicar a receita nova usa {@code profile apply}
- * — e aí sim vale a ordem Estado → hosts, com o rollback que o {@code apply}
- * já faz.
- *
- * <p>O que fica guardado é o <b>prazo restante no momento do add</b>, como no
- * {@code save}: a mesma razão — um perfil é receita, não histórico. E o que
- * fica gravado é o que você pediu agora: adicionar um domínio que já estava no
- * perfil <b>substitui</b> a entrada, em vez de acumular. Uma receita com
- * duas durações para o mesmo domínio não é receita de ninguém.
- *
- * <p>Sem {@code --for}, o domínio entra permanente — que é o mesmo contrato do
- * {@code block}, e a mesma coisa que a maioria dos domínios de uma lista de
- * bloqueio quer ser.
+ * <p>Adiciona domínios à receita de um perfil que já existe — o complemento do
+ * {@code profile save}, que só sabe guardar o que já está bloqueado. Não pede sudo e
+ * não escreve no hosts.
  */
 @Command(name = "add",
         description = "Adiciona dominios a um perfil existente.",
@@ -64,10 +47,10 @@ public class ProfileAddCommand implements Callable<Integer> {
 
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
 
-    /** Relógio injetado pelo teste; null = o do sistema. */
+    // Relógio injetado pelo teste; null = o do sistema.
     Clock clockOverride;
 
-    /** Store injetado pelo teste; null = usa o do stateDir. */
+    // Store injetado pelo teste; null = usa o do stateDir.
     ProfileStore storeOverride;
 
     public ProfileAddCommand() {
@@ -108,6 +91,8 @@ public class ProfileAddCommand implements Callable<Integer> {
         ProfileStore store = storeOverride != null ? storeOverride
                 : new ProfileStore(CliSupport.resolveProfilesFile(stateFileOverride));
 
+        // O que fica guardado é o prazo restante do momento do add, como no save:
+        // um perfil é receita, não histórico.
         Long millis = duration == null ? null : duration.toMillis();
         List<String> adicionados = new ArrayList<>();
         List<String> substituidos = new ArrayList<>();
@@ -123,6 +108,9 @@ public class ProfileAddCommand implements Callable<Integer> {
                     return null;
                 }
                 Map<String, ProfileEntry> entries = new TreeMap<>(profile.getEntries());
+                // POR QUE: um domínio que já estava no perfil substitui a entrada, em vez
+                // de acumular — o que fica gravado é o que você pediu agora. Uma receita
+                // com duas durações para o mesmo domínio não é receita de ninguém.
                 for (String domain : domains) {
                     if (entries.containsKey(domain)) {
                         substituidos.add(domain);
@@ -161,18 +149,14 @@ public class ProfileAddCommand implements Callable<Integer> {
         return 0;
     }
 
-    /** O relógio do comando: o injetado pelo teste, ou o da CLI. */
+    // O relógio do comando: o injetado pelo teste, ou o da CLI.
     private Clock clock() {
         return clockOverride != null ? clockOverride : CliSupport.clock();
     }
 
-    /**
-     * O nome vem do pai: {@code siteblock profile <nome> add ...}.
-     *
-     * <p>Sem nome não há o que fazer — e a mensagem diz a forma inteira, porque
-     * o erro mais provável é a pessoa ter digitado {@code siteblock profile add}
-     * esperando que o "add" fosse o nome do perfil.
-     */
+    // POR QUE: sem nome não há o que fazer, e a mensagem diz a forma inteira porque o
+    // erro mais provável é a pessoa ter digitado "siteblock profile add" esperando que
+    // o "add" fosse o nome do perfil.
     private String nomeDoPerfil() {
         if (parent == null || parent.name == null || parent.name.isBlank()) {
             System.err.println("Erro: informe o nome do perfil. "

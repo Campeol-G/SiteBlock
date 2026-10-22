@@ -17,15 +17,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * O jar do daemon é instalado numa cópia estável.
  *
- * <p>O problema que isto resolve: a unit apontava para
- * {@code ~/Projects/.../target/siteblock-1.0.0.jar}, e um {@code mvn clean}
- * apaga o {@code target/}. A unit passava a apontar para o nada, o systemd
- * entrava em loop de crash, e o prazo dos bloqueios parava de ser cumprido
- * sem nenhuma mensagem que explicasse o motivo.
+ * <p>Sem isso, a unit aponta para o {@code target/} do build — que o
+ * {@code mvn clean} apaga — e o systemd entra em loop de crash: o prazo dos
+ * bloqueios para de ser cumprido, sem nenhuma mensagem que explique o motivo.
  *
- * <p>Além de sobreviver ao {@code mvn clean}, a cópia vive num diretório do
- * root — e isso resolve o outro aviso do projeto: o daemon deixa de executar
- * código de um caminho que o usuário pode trocar.
+ * <p>A cópia vive num diretório do root: o daemon deixa de executar código de
+ * um caminho que o usuário pode trocar.
  */
 class JarInstallTest {
 

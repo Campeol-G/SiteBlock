@@ -20,14 +20,12 @@ public final class AutostartInstaller {
     /**
      * Resultado de enable/disable: sucesso e o detalhe para o usuário.
      *
-     * <p>O caminho vem separado do texto: o texto é para o olho da pessoa, e o
-     * caminho é para o artefato. Misturar os dois gerou uma unit com
-     * {@code -jar "O jar já está no lugar: /opt/sitelock/siteblock.jar"} — e a
-     * unit apontava para um caminho que não existe.
+     * <p>O caminho vem separado do texto: um para o olho da pessoa, outro para
+     * o artefato. Misturar os dois gerou uma unit apontando para o nada:
+     * {@code -jar "O jar já está no lugar: /opt/sitelock/siteblock.jar"}.
      *
-     * @param success a operação deu certo
-     * @param detail  a mensagem para o usuário
-     * @param path    o caminho do jar ou do artefato; null quando não há
+     * @param detail a mensagem para o usuário
+     * @param path   o caminho do jar ou do artefato; null quando não há
      */
     public record InstallResult(boolean success, String detail, Path path) {
 
@@ -50,23 +48,16 @@ public final class AutostartInstaller {
     }
 
     /**
- * Onde o jar do daemon é instalado.
+     * Onde o jar do daemon é instalado: um diretório do sistema, que só o root
+     * escreve.
      *
-     * <p>Um diretório do sistema, que só o root escreve. Duas coisas se
-     * resolvem de uma vez:
+     * <p><b>{@code mvn clean} não derruba mais o daemon.</b> A unit apontava
+     * para o {@code target/}, que o clean apaga: o systemd entrava em loop de
+     * crash e o prazo dos bloqueios parava de ser cumprido em silêncio.
      *
-     * <ul>
-     *   <li><b>{@code mvn clean} não derruba mais o daemon.</b> A unit apontava
-     *       para {@code ~/Projects/.../target/siteblock-1.0.0.jar}, e
-     *       {@code target/} é apagado por {@code mvn clean}. A unit passava a
-     *       apontar para o nada, o systemd entrava em loop de crash, e o prazo
-     *       dos bloqueios parava de ser cumprido sem nenhuma mensagem que
-     *       explicasse o motivo.</li>
-     *   <li><b>O daemon deixa de executar código que o usuário pode trocar.</b>
-     *       O jar original vive num diretório gravável por construção — era
-     *       o motivo do aviso de elevação. A cópia vive num diretório do
-     *       root.</li>
-     * </ul>
+     * <p>O daemon também deixa de executar código que o usuário pode trocar:
+     * o jar original vive num diretório gravável por construção, que era o
+     * motivo do aviso de elevação. A cópia vive num diretório do root.
      *
      * @param systemRoot {@code /} em produção; raiz de teste nos testes
      */
@@ -127,11 +118,12 @@ public final class AutostartInstaller {
     /**
      * Onde vive o artefato neste SO.
      *
-     * <p>No Windows não existe arquivo: é a Tarefa do Agendador que guarda a
-     * definição, e ela não vive em lugar nenhum que se possa apontar. Por isso
-     * devolve {@code null}, e {@link #install} não escreve nada — escrever criaria
-     * uma árvore {@code C:\etc\systemd\system\} de lixo com uma unit Linux dentro,
-     * e ainda assim imprimiria "instalado".
+     * <p>No Windows não existe arquivo: a definição vive na Tarefa do
+     * Agendador, que não está em lugar nenhum que se possa apontar. Por isso
+     * devolve {@code null} e {@link #install} não escreve nada.
+     *
+     * <p>Escrever criaria uma árvore {@code C:\etc\systemd\system\} de lixo com
+     * uma unit Linux dentro, e ainda assim imprimiria "instalado".
      *
      * @param systemRoot {@code /} em produção; raiz de teste nos testes
      * @return o caminho do artefato, ou null se este SO não usa arquivo

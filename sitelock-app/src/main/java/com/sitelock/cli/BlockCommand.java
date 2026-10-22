@@ -178,13 +178,9 @@ public class BlockCommand implements Callable<Integer> {
         return 1;
     }
 
-    /**
-     * O que a transação do {@code block} carrega entre o estado e o hosts.
-     *
-     * <p>POR QUE: os dois lados da transação precisam saber o que foi gravado
-     * no estado e qual era a entrada anterior de cada domínio — é o que
-     * permite reverter só o domínio que falhou, sem desfazer os outros.
-     */
+    // O que a transação do block carrega entre o estado e o hosts: os dois lados
+    // precisam saber o que foi gravado e qual era a entrada anterior de cada domínio,
+    // para reverter só o domínio que falhou, sem desfazer os outros.
     private static final class Plano {
 
         final List<String> gravados = new ArrayList<>();

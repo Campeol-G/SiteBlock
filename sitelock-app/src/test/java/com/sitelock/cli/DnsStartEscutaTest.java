@@ -69,10 +69,8 @@ class DnsStartEscutaTest {
                 "não pode anunciar que o servidor subiu");
     }
 
-    /**
-     * Compila um {@code com.sitelock.SiteLockApplication} de mentira: ele fica
-     * vivo sem nunca escrever a marca de escuta.
-     */
+    // Compila um com.sitelock.SiteLockApplication de mentira: ele fica vivo
+    // sem nunca escrever a marca de escuta.
     private Path compilarDaemonMudo() throws Exception {
         JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
         assumeTrue(compiler != null, "o teste precisa de um JDK (javac)");
@@ -96,7 +94,7 @@ class DnsStartEscutaTest {
         return saida;
     }
 
-    /** Derruba o daemon que o teste subiu (o PID está no registro de estado). */
+    // Derruba o daemon que o teste subiu (o PID está no registro de estado).
     private void encerrar(Path estado) {
         try {
             Optional<DnsDaemonState> state = DnsDaemonState.read(estado);

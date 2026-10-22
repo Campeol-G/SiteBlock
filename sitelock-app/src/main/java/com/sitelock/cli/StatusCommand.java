@@ -107,15 +107,9 @@ public class StatusCommand implements Callable<Integer> {
         return 0;
     }
 
-    /**
-     * Confere o estado contra o hosts e sinaliza as divergências.
-     *
-     * <p>POR QUE: os dois podem discordar, e cada desfecho é ruim de um jeito
-     * diferente. Estado sem linha no hosts: o site está livre e o status
-     * afirma que está bloqueado. Linha no hosts sem registro no estado: o
-     * site está preso para sempre, porque o sweep varre o JSON e nunca o
-     * hosts — e a recuperação seria editar o /etc/hosts à mão.
-     */
+    // POR QUE: os dois podem discordar, e cada desfecho é ruim de um jeito diferente.
+    // Estado sem linha no hosts: o site está livre e o status diz que está bloqueado.
+    // Linha no hosts sem registro: preso para sempre, porque o sweep varre o JSON.
     private void conferirDivergencia(BlockService service, Map<String, BlockEntry> state, Instant now) {
         final String conteudo;
         try {
@@ -169,12 +163,11 @@ public class StatusCommand implements Callable<Integer> {
         }
     }
 
-    /** O domínio sem o prefixo "www." — o bloqueio é o mesmo com ou sem ele. */
+    // O domínio sem o prefixo "www." — o bloqueio é o mesmo com ou sem ele.
     private static String baseDe(String dominio) {
         return HostsFileManager.managedHosts(dominio).get(0);
     }
 
-    /** true se o hosts tem alguma das linhas gerenciadas do domínio. */
     private static boolean temLinhaGerenciada(String conteudo, String dominio) {
         for (String gerenciada : HostsFileManager.managedLines(dominio)) {
             String[] partes = gerenciada.strip().split("\\s+");
@@ -185,7 +178,6 @@ public class StatusCommand implements Callable<Integer> {
         return false;
     }
 
-    /** true se alguma linha do hosts aponta o IP para o host. */
     private static boolean linhaExiste(String conteudo, String ip, String host) {
         for (String linha : conteudo.split("\n", -1)) {
             String t = linha.strip();
@@ -205,7 +197,7 @@ public class StatusCommand implements Callable<Integer> {
         return false;
     }
 
-    /** Os domínios que o SiteLock tem no bloco gerenciado do hosts. */
+    // Os domínios que o SiteLock tem no bloco gerenciado do hosts.
     private static Set<String> dominiosNoBloco(String conteudo) {
         Set<String> dominios = new TreeSet<>();
         for (String linha : linhasDoBloco(conteudo)) {
@@ -224,7 +216,7 @@ public class StatusCommand implements Callable<Integer> {
         return dominios;
     }
 
-    /** As linhas dentro do bloco que o SiteLock gerencia. */
+    // As linhas dentro do bloco que o SiteLock gerencia.
     private static List<String> linhasDoBloco(String conteudo) {
         List<String> linhas = new ArrayList<>();
         boolean dentro = false;
@@ -245,10 +237,8 @@ public class StatusCommand implements Callable<Integer> {
         return linhas;
     }
 
-    /**
-     * true se o host é um domínio que o SiteLock pode bloquear.
-     * O "localhost" e afins do /etc/hosts são conteúdo do sistema.
-     */
+    // POR QUE: o "localhost" e afins do /etc/hosts são conteúdo do sistema, e o que o
+    // SiteLock pode bloquear é o que o normalize() aceita como domínio.
     private static boolean ehDominioBloqueavel(String host) {
         try {
             DomainUtils.normalize(host);

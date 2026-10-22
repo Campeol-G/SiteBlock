@@ -24,13 +24,11 @@ public enum OsType {
         return detect(System.getProperty("os.name", ""));
     }
 
+    // ATENÇÃO: "darwin" contém "win" como substring, então mac/darwin é testado
+    // antes de win.
     /**
      * Detecta a partir de um valor injetado de {@code os.name}.
-     * Existe para permitir testes unitários dos três ramos em qualquer máquina,
-     * sem depender do SO onde o teste roda.
-     *
-     * <p>Ordem importa: "darwin" contém "win" como substring, então mac/darwin
-     * é testado antes de win.
+     * Existe para permitir testes unitários dos três ramos em qualquer máquina.
      */
     public static OsType detect(String osName) {
         String n = osName == null ? "" : osName.toLowerCase(Locale.ROOT);

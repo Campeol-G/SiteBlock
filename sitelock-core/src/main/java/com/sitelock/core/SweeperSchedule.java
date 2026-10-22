@@ -54,15 +54,10 @@ public final class SweeperSchedule {
         return restante;
     }
 
-    /**
-     * O menor {@code expiresAt} ainda no futuro.
-     *
-     * <p>Entradas vencidas são ignoradas de propósito: o {@code sweepExpired()}
-     * roda antes do sono, então uma que sobrou é porque o hosts não pôde ser
-     * escrito — e nesse caso o próprio daemon trata isso dormindo o intervalo
-     * ocioso. Sem este filtro, ela puxaria o sono para o piso de 1s e o daemon
-     * passaria o dia relendo um arquivo em que não consegue escrever.
-     */
+    // O menor expiresAt ainda no futuro.
+    // POR QUE: vencidas são ignoradas de propósito — o sweepExpired() roda antes do
+    // sono, então uma que sobrou é porque o hosts não pôde ser escrito; sem o
+    // filtro ela puxaria o sono para o piso de 1s.
     static Instant proximaExpiracaoAtiva(Map<String, BlockEntry> state, Instant now) {
         if (state == null || state.isEmpty()) {
             return null;

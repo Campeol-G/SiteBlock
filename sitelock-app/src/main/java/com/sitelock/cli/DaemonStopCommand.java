@@ -78,23 +78,16 @@ public class DaemonStopCommand implements Callable<Integer> {
         return 0;
     }
 
-    /**
-     * O daemon roda como root e o comando roda como usuário: o SO recusa o
-     * sinal. Sem esta mensagem, o picocli imprime a pilha da exceção.
-     */
+    // POR QUE: o daemon roda como root e o comando roda como usuário: o SO recusa
+    // o sinal. Sem esta mensagem, o picocli imprime a pilha da exceção.
     private int semPermissaoParaEncerrar(long pid) {
         System.err.println("Erro: sem permissão para encerrar o pid " + pid
                 + " (daemon iniciado elevado?). " + CliSupport.elevationHint("daemon stop"));
         return 1;
     }
 
-    /**
-     * Sinal de encerramento do daemon.
-     *
-     * <p>Separado do {@code call} para o teste poder simular a recusa do SO: a
-     * {@code SecurityException} de verdade só acontece quando o daemon roda
-     * como root e o comando roda como usuário comum.
-     */
+    // POR QUE: separado do call para o teste poder simular a recusa do SO — a
+    // SecurityException de verdade só acontece com o daemon rodando como root.
     void encerrar(ProcessHandle handle) {
         handle.destroy();
     }

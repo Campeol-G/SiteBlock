@@ -90,16 +90,13 @@ public final class SiteLockPaths {
 
     /**
      * Devolve a posse ao usuário nomeado na property {@code sitelock.user},
-     * caindo no comportamento de sempre ({@code SUDO_USER}) quando ela não
-     * existir.
+     * caindo no comportamento de sempre ({@code SUDO_USER}) quando ela não existir.
      *
-     * <p>Existe porque um daemon iniciado por autostart roda como root
-     * <b>sem</b> {@code SUDO_USER}: um unit de sistema do systemd e uma
-     * LaunchDaemon não têm {@code User=}, e o {@code SiteLockPaths} só descobre
-     * o usuário real a partir dessa variável. Sem esta property, o primeiro
-     * sweep deixaria o {@code blocks.json} do root — a escrita atômica troca o
-     * inode — e o próprio {@code status}, que a spec promete que roda sem
-     * elevação, passaria a depender de root para ler.
+     * <p>Existe porque o daemon de autostart roda como root <b>sem</b>
+     * {@code SUDO_USER}: um unit de sistema do systemd e uma LaunchDaemon não têm
+     * {@code User=}. Sem esta property, o primeiro sweep deixaria o
+     * {@code blocks.json} do root — a escrita atômica troca o inode — e o
+     * {@code status}, que roda sem elevação, passaria a depender de root para ler.
      */
     public static void chownToUserIfConfigured(Path path) {
         String configured = System.getProperty("sitelock.user");
@@ -110,7 +107,7 @@ public final class SiteLockPaths {
         chownToRealUserIfSudo(path);
     }
 
-    /** Aplica posse e grupo ao usuário, best-effort. */
+    // Aplica posse e grupo ao usuário, best-effort.
     private static void chownTo(Path path, String user) {
         try {
             if (!Files.exists(path)) {

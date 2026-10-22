@@ -24,16 +24,13 @@ import java.util.TreeMap;
  * | permanente            | permanente     | KEPT    |
  * </pre>
  *
- * <p>Tres consequências que tornam a operação segura de repetir: aplicar o
- * mesmo perfil N vezes só produz {@code KEPT}; aplicar um perfil mais fraco
- * sobre um setup mais forte não faz estrago; e um {@code KEPT} <b>não</b> é um
- * no-op interno — devolve a mesma instância do {@link BlockEntry}, com o mesmo
- * {@code createdAt} e o mesmo {@code expiresAt}. Reescrever o mapa do zero faria
- * um bloqueio de 10h virar "10h a partir de agora", exatamente o encurtamento
- * que a regra proíbe.
+ * <p>Repetir a operação é seguro: o mesmo perfil N vezes só produz {@code KEPT},
+ * e um perfil mais fraco sobre um setup mais forte não faz estrago. E um
+ * {@code KEPT} <b>não</b> é no-op interno — devolve a mesma instância do
+ * {@link BlockEntry}, com o mesmo {@code createdAt} e o mesmo {@code expiresAt}.
+ * Reescrever o mapa do zero faria um bloqueio de 10h virar "10h a partir de agora".
  *
- * <p>Puro: sem I/O e sem {@code Clock}. O instante de referência entra no
- * método, que é o padrão já usado no resto do core.
+ * <p>Puro: sem I/O e sem {@code Clock}. O instante de referência entra no método.
  */
 public final class ProfileMerge {
 
@@ -55,9 +52,9 @@ public final class ProfileMerge {
     }
 
     /**
-     * @param state  estado atual de bloqueio (não é modificado)
-     * @param profile perfil a aplicar
-     * @param now    instante de referência
+     * Aplica o perfil sobre o estado atual de bloqueio.
+     *
+     * @param state estado atual de bloqueio; não é modificado
      * @return uma decisão por domínio do perfil, inclusive os {@code KEPT}, em
      *         ordem alfabética
      */

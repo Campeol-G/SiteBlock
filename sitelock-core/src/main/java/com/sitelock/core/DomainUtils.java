@@ -158,9 +158,7 @@ public final class DomainUtils {
         }
     }
 
-    /**
-     * Só rótulos "www" não são domínio: sobraria a linha "127.0.0.1 www" no hosts.
-     */
+    // Só rótulos "www" não são domínio: sobraria a linha "127.0.0.1 www" no hosts.
     private static boolean isOnlyWww(String domain) {
         for (String label : domain.split("\\.")) {
             if (!label.equals("www")) {

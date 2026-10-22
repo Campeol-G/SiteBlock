@@ -86,16 +86,9 @@ class ExpirationDaemonStateTest {
         assertEquals(tmp.toString(), state.getStateDir());
     }
 
-    /**
-     * A escrita do registro tem que ser atômica.
-     *
-     * <p>Um {@code Files.writeString} trunca o arquivo antes de escrever: entre
-     * o truncate e o write o {@code daemon.json} fica vazio, e quem lê nesse
-     * instante (o {@code daemon status}, o {@code daemon stop}) recebe "não
-     * há daemon" com o daemon rodando. A escrita atômica troca o arquivo
-     * inteiro: o leitor vê o estado velho ou o novo, nunca um estado pela
-     * metade.
-     */
+    // POR QUE: a escrita substitui o arquivo inteiro em vez de truncar o mesmo —
+    // um Files.writeString deixa o daemon.json vazio entre o truncate e o write,
+    // e quem lê nesse instante ("daemon status", "daemon stop") recebe "não há daemon".
     @Test
     void aEscritaSubstituiOArquivoEmVezDeTruncar() throws Exception {
         Path alvo = ExpirationDaemonState.statePath(tmp);
@@ -112,7 +105,7 @@ class ExpirationDaemonStateTest {
                 "o arquivo temporário tem que sumir depois da troca");
     }
 
-    /** Identidade do arquivo: dois arquivos com a mesma identidade são o mesmo. */
+    // Identidade do arquivo: dois arquivos com a mesma identidade são o mesmo.
     private static String identidadeDoArquivo(Path arquivo) throws IOException {
         Object chave = Files.readAttributes(arquivo, BasicFileAttributes.class).fileKey();
         if (chave != null) {
@@ -125,11 +118,8 @@ class ExpirationDaemonStateTest {
         }
     }
 
-    /**
-     * O SO recicla PID: o daemon morreu e o número foi dado a outro
-     * processo. Um "o PID existe" mente, e o {@code daemon stop} manda um
-     * SIGTERM num processo que não é o SiteLock.
-     */
+    // POR QUE: o SO recicla PID, e "o PID existe" mente: o daemon stop mandaria
+    // um SIGTERM num processo que não é o SiteLock.
     @Test
     void umPidRecicladoNaoPassaPorDaemonVivo() {
         ExpirationDaemonState reciclado = new ExpirationDaemonState(
@@ -180,14 +170,9 @@ class ExpirationDaemonStateTest {
                 "o 'Subiu em:' tem que mostrar o instante de início do processo");
     }
 
-    /**
-     * O registro não pode voltar atrás por causa de uma escrita concorrente.
-     *
-     * <p>{@code updateLastSweep} é read-modify-write: sem trava, ele lê o
-     * registro, e nesse intervalo outra escrita grava o PID novo — e o
-     * updateLastSweep devolve o registro velho por cima. O PID do daemon
-     * some, e o {@code daemon status} diz que não há daemon com ele rodando.
-     */
+    // POR QUE: updateLastSweep é read-modify-write. Sem trava, ele lê o registro
+    // e outra escrita grava o PID novo nesse intervalo — o updateLastSweep
+    // devolve o registro velho por cima, e o PID do daemon some.
     @Test
     void escritasConcorrentesNaoRevertemOPid() throws Exception {
         ExpirationDaemonState.write(tmp, new ExpirationDaemonState(1, NOW, tmp.toString(), null));
@@ -336,25 +321,17 @@ class ExpirationDaemonStateTest {
                 "sem a property, o comportamento é o de sempre: só SUDO_USER devolve a posse");
     }
 
-    /**
-     * A property não pode vazar para o resto da suíte.
-     *
-     * <p>POR QUE: a property vive na JVM do surefire (uma por módulo). Se ela
-     * ficar de pé depois de uma falha, todo save seguinte do core passa pelo
-     * caminho do chown — e a ordem de execução dos testes passa a importar.
-     */
+    // POR QUE: a property vive na JVM do surefire (uma por módulo). Se ficar de
+    // pé depois de uma falha, todo save seguinte passa pelo caminho do chown — e
+    // a ordem de execução dos testes passa a importar.
     @AfterEach
     void limpaAPropertyDoUsuario() {
         System.clearProperty("sitelock.user");
     }
 
-    /**
-     * O grupo do usuário — é o que o chown aplica no arquivo.
-     *
-     * <p>ATENÇÃO: nem todo sistema tem grupo com o mesmo nome do usuário (no
-     * macOS o grupo principal se chama "staff"). Sem esse grupo o chown não
-     * troca o grupo, e o teste não teria o que verificar.
-     */
+    // ATENÇÃO: nem todo sistema tem grupo com o mesmo nome do usuário (no macOS
+    // o grupo principal se chama "staff"). Sem esse grupo o chown não troca o
+    // grupo, e o teste não teria o que verificar.
     private static String nomeDoGrupoDoUsuario(String usuario, UserPrincipalLookupService lookup) {
         try {
             GroupPrincipal grupo = lookup.lookupPrincipalByGroupName(usuario);
@@ -364,13 +341,9 @@ class ExpirationDaemonStateTest {
         }
     }
 
-    /**
-     * Um grupo do usuário que não seja o do chown.
-     *
-     * <p>POR QUE: sem um grupo diferente, não dá para trocar o grupo do
-     * arquivo — e o grupo é a única diferença observável entre "o chown rodou"
-     * e "o chown foi um no-op".
-     */
+    // POR QUE: sem um grupo diferente, não dá para trocar o grupo do arquivo — e
+    // o grupo é a única diferença observável entre "o chown rodou" e "o chown foi
+    // um no-op".
     private static String grupoSecundarioDoUsuario(String usuario, String grupoDoChown) {
         Path arquivoDeGrupos = Path.of("/etc/group");
         if (!Files.isReadable(arquivoDeGrupos)) {
@@ -394,7 +367,7 @@ class ExpirationDaemonStateTest {
         return null;
     }
 
-    /** Troca o grupo do arquivo (o dono pode mudar para um grupo seu). */
+    // Troca o grupo do arquivo (o dono pode mudar para um grupo seu).
     private static boolean trocaGrupo(Path arquivo, UserPrincipalLookupService lookup, String grupo) {
         try {
             PosixFileAttributeView posix =
@@ -406,7 +379,7 @@ class ExpirationDaemonStateTest {
         }
     }
 
-    /** O grupo do arquivo, pelo nome. */
+    // O grupo do arquivo, pelo nome.
     private static String nomeDoGrupo(Path arquivo) throws IOException {
         return Files.readAttributes(arquivo, PosixFileAttributes.class).group().getName();
     }

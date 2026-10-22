@@ -5,15 +5,14 @@ import java.nio.file.Path;
 /**
  * Mensagens de elevação de privilégio específicas por SO, num único ponto.
  *
- * <p>Motivação: antes, {@code CliSupport.sudoHint} dizia sempre "rode com sudo",
- * o que é errado no Windows (sem sudo nativo confiável). Agora os comandos CLI
- * pedem o texto aqui, passando o caminho real do hosts e um exemplo de
- * subcomando — nada de strings de permissão espalhadas pelo código.
+ * <p>Antes, {@code CliSupport.sudoHint} dizia sempre "rode com sudo", o que é
+ * errado no Windows (sem sudo nativo confiável). Agora os comandos CLI pedem o
+ * texto aqui, passando o caminho real do hosts e um exemplo de subcomando —
+ * nada de strings de permissão espalhadas pelo código.
  *
  * <ul>
  *   <li>Linux/macOS: instruir a rodar novamente com {@code sudo}.</li>
- *   <li>Windows: instruir a fechar o terminal e reabrir como Administrador
- *       (Iniciar → cmd/PowerShell → "Executar como administrador").</li>
+ *   <li>Windows: instruir a reabrir o terminal como Administrador.</li>
  * </ul>
  */
 public final class PermissionAdvisor {
@@ -64,7 +63,6 @@ public final class PermissionAdvisor {
      * Dica para porta privilegiada (&lt; 1024 exige elevação nos três SOs).
      * Reutiliza o mesmo vocabulário de elevação do {@link #elevationHint}.
      *
-     * @param port porta pedida.
      * @param retryExample exemplo de repetição, ex.: "dns start" ou "dns start --for 2h".
      */
     public String privilegedPortHint(int port, String retryExample) {

@@ -26,19 +26,8 @@ import java.util.concurrent.Callable;
 /**
  * siteblock profile &lt;nome&gt; remove &lt;dominio...&gt;.
  *
- * <p>Tira domínios da receita de um perfil que já existe. Como o {@code add},
- * não toca no hosts: mexer no que está bloqueado é coisa do {@code unblock}.
- *
- * <p><b>E avisa quando o domínio continua bloqueado.</b> Esta é a parte que
- * importa. Tirar um domínio da receita não o libera: o {@code /etc/hosts}
- * continua com a linha, e o estado continua registrando o bloqueio. Quem
- * Assume que "remover" = "soltar" fica com um site bloqueado e um perfil que
- * não menciona mais aquele domínio — e o {@code profile unblock}, que só
- * trabalha sobre os domínios do perfil, já não vai soltar aquele. Daí o aviso
- * apontar o comando que ainda funciona: o {@code unblock} individual.
- *
- * <p>Por isso o aviso não é decorativo: é o que fecha a conta entre o que a
- * pessoa pediu e o que a máquina está fazendo.
+ * <p>Tira domínios da receita de um perfil que já existe; como o {@code add}, não toca no
+ * hosts. Avisa quando o domínio continua bloqueado, porque remover da receita não é soltar.
  */
 @Command(name = "remove",
         description = "Tira dominios de um perfil existente.",
@@ -55,10 +44,10 @@ public class ProfileRemoveCommand implements Callable<Integer> {
 
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
 
-    /** Relógio injetado pelo teste; null = o do sistema. */
+    // Relógio injetado pelo teste; null = o do sistema.
     Clock clockOverride;
 
-    /** Store injetado pelo teste; null = usa o do stateDir. */
+    // Store injetado pelo teste; null = usa o do stateDir.
     ProfileStore storeOverride;
 
     public ProfileRemoveCommand() {
@@ -142,18 +131,16 @@ public class ProfileRemoveCommand implements Callable<Integer> {
             System.out.println("  (não estava no perfil: " + domain + ")");
         }
 
+        // POR QUE: o aviso aponta o "unblock" individual — o "profile unblock" só
+        // trabalha sobre os domínios do perfil, e este já não está mais lá. Sem o
+        // aviso, quem assume que remover = soltar fica com o site bloqueado.
         avisarSeContinuaBloqueado(removidos);
         return 0;
     }
 
-    /**
-     * Diz o que ainda está bloqueado, e como soltar.
-     *
-     * <p>A leitura do estado é separada da escrita do perfil de propósito: falhar
-     * aqui só impede o aviso, não a remoção. O comando já gravou a receita
-     * nova, e desfazer isso por causa de um estado ilegível seria trocar um
-     * problema pequeno por um maior.
-     */
+    // POR QUE: a leitura do estado é separada da escrita do perfil — falhar aqui só
+    // impede o aviso, não a remoção, e desfazer a receita nova por causa de um estado
+    // ilegível seria trocar um problema pequeno por um maior.
     private void avisarSeContinuaBloqueado(List<String> removidos) {
         final Map<String, BlockEntry> estado;
         try {
@@ -187,7 +174,7 @@ public class ProfileRemoveCommand implements Callable<Integer> {
         return "restam " + DurationParser.formatRemaining(restante);
     }
 
-    /** O relógio do comando: o injetado pelo teste, ou o da CLI. */
+    // O relógio do comando: o injetado pelo teste, ou o da CLI.
     private Clock clock() {
         return clockOverride != null ? clockOverride : CliSupport.clock();
     }

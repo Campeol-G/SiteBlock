@@ -196,10 +196,9 @@ class DaemonCliTest {
             p.waitFor();
         }
 
-        // destroyForcibly é SIGKILL: o shutdown hook NÃO roda, então o registro
-        // pode ficar para trás. Isso é aceitável — e é justamente por isso que o
-        // lock de instância única é FileLock e não "o PID existe": o que importa
-        // é que um registro órfão não bloqueie o próximo daemon.
+        // ATENÇÃO: destroyForcibly é SIGKILL, o shutdown hook NÃO roda e o
+        // registro órfão fica para trás — é por isso que o lock de instância
+        // única é FileLock e não "o PID existe".
         if (Files.exists(daemonJson)) {
             assertFalse(ExpirationDaemonState.isAlive(
                             ExpirationDaemonState.read(stateDir()).orElse(null)),
@@ -209,11 +208,9 @@ class DaemonCliTest {
 
     @Test
     void concurrentBlocksSurviveADaemonSweep() throws Exception {
-        // O daemon varre a cada segundo; enquanto isso, um `block` sai de outro
-        // processo. Sem a transação no BlockStore, o sweep grava o estado que
-        // leu antes e o bloqueio concorrente some do JSON — ficando preso no
-        // hosts sem registro, que é o modo de falha que o sweep nunca repara
-        // porque varre justamente o JSON.
+        // POR QUE: sem a transação no BlockStore, o sweep grava o estado que
+        // leu antes e o bloqueio concorrente some do JSON — fica preso no hosts
+        // sem registro, e o sweep nunca repara porque varre justamente o JSON.
         semear(prazos("vencido.com", Instant.parse("2020-01-01T00:00:00Z")));
 
         Process daemon = iniciar("--interval", "1");
@@ -323,7 +320,6 @@ class DaemonCliTest {
         lock.close();
     }
 
-    // ---- comandos de ciclo de vida ----
     // ---- comandos de ciclo de vida ----
 
     @Test

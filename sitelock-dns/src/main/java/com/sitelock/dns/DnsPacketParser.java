@@ -35,10 +35,8 @@ public final class DnsPacketParser {
     /** QTYPE do registro CNAME (RFC 1035 §3.2.2). */
     static final int TYPE_CNAME = 5;
 
-    /**
-     * Decoder UTF-8 estrito (rejeita entrada inválida em vez de trocar por U+FFFD).
-     * Por thread: o decoder do JDK não é thread-safe.
-     */
+    // Decoder UTF-8 estrito (rejeita entrada inválida em vez de trocar por U+FFFD).
+    // Por thread: o decoder do JDK não é thread-safe.
     private static final ThreadLocal<CharsetDecoder> UTF8_STRICT = ThreadLocal.withInitial(() ->
             StandardCharsets.UTF_8.newDecoder()
                     .onMalformedInput(CodingErrorAction.REPORT)
@@ -157,8 +155,8 @@ public final class DnsPacketParser {
      *
      * <p>POR QUE: a cadeia de aliases só aparece na resposta do upstream — o nome
      * consultado é livre, mas o CNAME aponta para um nome bloqueado. Para ver a
-     * cadeia é preciso ler os nomes da section answer, e lá eles vêm
-     * <b>comprimidos</b> (ponteiro 0xC0xx), ao contrário do QNAME da consulta.
+     * cadeia é preciso ler a section answer, e lá os nomes vêm <b>comprimidos</b>
+     * (ponteiro 0xC0xx), ao contrário do QNAME da consulta.
      *
      * <p>Devolve o owner de cada registro e o alvo de cada CNAME: são os nomes
      * da cadeia. Um registro malformado encerra a leitura (o resto da seção não
@@ -217,20 +215,13 @@ public final class DnsPacketParser {
         return nomes;
     }
 
-    /** Um nome lido do fio: o texto e o offset logo depois dele. */
+    // Um nome lido do fio: o texto e o offset logo depois dele.
     private record Nome(String texto, int fim) {
     }
 
-    /**
-     * Lê um nome no fio, seguindo ponteiros de compressão (RFC 1035 §4.1.4).
-     *
-     * @param data      pacote
-     * @param off       offset onde o nome começa
-     * @param limite    fim da região onde os rótulos podem ser lidos direto
-     *                  (a RDATA, quando o nome está dentro dela)
-     * @param fimPacote fim do pacote (onde os ponteiros podem apontar)
-     * @return o nome lido, ou null se o nome não couber no pacote
-     */
+    // Lê um nome no fio, seguindo ponteiros de compressão (RFC 1035 §4.1.4).
+    // "limite" é onde os rótulos podem ser lidos direto (a RDATA); "fimPacote" é
+    // o fim do pacote, onde os ponteiros podem apontar. Null se não couber.
     private static Nome lerNome(byte[] data, int off, int limite, int fimPacote) {
         if (off < 0 || off >= limite || limite > fimPacote) {
             return null;
@@ -296,12 +287,9 @@ public final class DnsPacketParser {
         return new Nome(sb.toString(), fim);
     }
 
-    /**
-     * Lê o payload UDP anunciado pelo cliente no OPT do EDNS (RFC 6891).
-     *
-     * <p>A section additional é tolerada: se estiver malformada ou truncada, o OPT
-     * é ignorado (0 = sem EDNS). Nunca ler fora do buffer.
-     */
+    // Lê o payload UDP anunciado pelo cliente no OPT do EDNS (RFC 6891).
+    // A section additional é tolerada: se estiver malformada ou truncada, o OPT
+    // é ignorado (0 = sem EDNS). Nunca ler fora do buffer.
     private static int readEdnsPayloadSize(byte[] data, int off, int length, int arCount) {
         int p = off;
         for (int i = 0; i < arCount; i++) {
@@ -328,10 +316,8 @@ public final class DnsPacketParser {
         return 0;
     }
 
-    /**
-     * Devolve o offset logo depois do nome (rótulos ou ponteiro de compressão),
-     * ou -1 se o nome não couber no pacote.
-     */
+    // Devolve o offset logo depois do nome (rótulos ou ponteiro de compressão),
+    // ou -1 se o nome não couber no pacote.
     private static int skipName(byte[] data, int off, int length) {
         int p = off;
         for (int labels = 0; labels < 128; labels++) {
@@ -356,14 +342,9 @@ public final class DnsPacketParser {
         return -1;
     }
 
-    /**
-     * Decodifica um rótulo sem perder byte nenhum: 1 byte vira 1 char.
-     *
-     * <p>UTF-8 quando o rótulo é UTF-8 válido (cliente que manda IDN em vez de
-     * punycode); senão ISO-8859-1, que mapeia cada byte 0x00-0xFF em um char. O
-     * decoder ASCII trocaria todo byte &ge; 0x80 por U+FFFD e o nome deixaria de
-     * casar com a lista de bloqueio.
-     */
+    // Decodifica um rótulo sem perder byte nenhum: 1 byte vira 1 char. UTF-8
+    // quando o rótulo é válido (IDN em vez de punycode), senão ISO-8859-1 — o
+    // decoder ASCII trocaria todo byte >= 0x80 por U+FFFD e o nome não casaria.
     private static String decodeLabel(byte[] data, int off, int len) {
         boolean ascii = true;
         for (int i = off; i < off + len; i++) {

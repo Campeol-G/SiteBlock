@@ -24,28 +24,9 @@ import java.util.concurrent.Callable;
  * siteblock profile unblock &lt;nome&gt; [--force] — solta todos os domínios do
  * perfil de uma vez.
  *
- * <p>Há <b>duas</b> camadas de resistência, e elas não são a mesma coisa:
- *
- * <ol>
- *   <li>A externa é o {@code --force}: sem ele, qualquer domínio do perfil que
- *       esteja ativo agora faz o comando recusar tudo e sair com 3 — e "ativo"
- *       inclui permanente. Se o gate cobrisse só os temporários, um perfil só de
- *       travas ilimitadas sairia sem flag e sem digitar uma tecla.</li>
- *   <li>A interna é a confirmação digitada: uma única pergunta antes de tocar
- *       em qualquer domínio. A lista mostra todos os do perfil que estão no
- *       estado, com o tempo restante de cada temporário e {@code permanente} nos
- *       que não têm prazo.</li>
- * </ol>
- *
- * <p>Por que os permanentes entram na confirmação, quando o {@code unblock}
- * individual os solta em silêncio: um bloqueio permanente é o compromisso
- * <b>mais forte</b> que a pessoa assumiu, não o mais fraco — é o que se faz
- * quando se quer fechar a porta de vez. Soltá-lo calado seria o caminho mais
- * curto para descartar uma trava ilimitada sem digitar uma tecla, exatamente o
- * atalho que o {@code --force} existe para não criar. O {@code unblock}
- * individual fica como está, por não ser escopo mudá-lo.
- *
- * <p>Cancelar não desfaz nada: o comando não toca em domínio algum.
+ * <p>Duas camadas: o {@code --force}, que recusa tudo e sai com 3 enquanto houver domínio
+ * ativo, e a confirmação digitada, que vem depois. Cancelar não desfaz nada — o comando
+ * não toca em domínio algum.
  */
 @Command(name = "unblock",
         description = "Libera todos os dominios de um perfil, de uma vez.",
@@ -61,10 +42,10 @@ public class ProfileUnblockCommand implements Callable<Integer> {
     @Option(names = "--hosts-file", hidden = true) String hostsFileOverride;
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
 
-    /** Blocker injetado pelo teste; null = usa o do hosts do sistema. */
+    // Blocker injetado pelo teste; null = usa o do hosts do sistema.
     SiteBlocker blockerOverride;
 
-    /** Resposta injetada pelo teste; null = lê do stdin. */
+    // Resposta injetada pelo teste; null = lê do stdin.
     String answer;
 
     public ProfileUnblockCommand() {
@@ -99,12 +80,9 @@ public class ProfileUnblockCommand implements Callable<Integer> {
                 ? CliSupport.newService(hostsFileOverride, stateFileOverride, blockerOverride)
                 : CliSupport.newService(hostsFileOverride, stateFileOverride);
 
-        // Sem esta trava, quem esquecer o sudo tem o pior desfecho possível: o
-        // estado é gravado primeiro, a escrita no hosts falha depois, e o
-        // domínio fica preso no hosts sem registro em lugar nenhum. O sweep
-        // varre o JSON — nunca vai limpá-lo — e todo comando passa a dizer
-        // "não está bloqueado". A recuperação seria editar o /etc/hosts à mão,
-        // que é exatamente o que este programa existe para dispensar.
+        // ATENÇÃO: sem esta trava, quem esquecer o sudo tem o pior desfecho possível: o
+        // estado é gravado primeiro, a escrita no hosts falha depois, e o domínio fica
+        // preso no hosts sem registro. A recuperação seria editar o /etc/hosts à mão.
         if (!service.isHostsWritable()) {
             System.err.println("Erro: " + CliSupport.elevationHint("profile unblock " + valid));
             return 1;
@@ -158,6 +136,8 @@ public class ProfileUnblockCommand implements Callable<Integer> {
             return 0;
         }
 
+        // ATENÇÃO: o gate cobre também os permanentes. Se cobrisse só os temporários, um
+        // perfil só de travas ilimitadas sairia sem flag e sem digitar uma tecla.
         if (!force) {
             System.err.println("Desbloqueio RECUSADO para: " + String.join(", ", descricao) + ".");
             System.err.println("Para liberar mesmo assim, rode de novo com --force "
@@ -165,6 +145,9 @@ public class ProfileUnblockCommand implements Callable<Integer> {
             return 3;
         }
 
+        // POR QUE: os permanentes entram na confirmação, quando o "unblock" individual os
+        // solta em silêncio — permanente é o compromisso mais forte que a pessoa assumiu, e
+        // soltá-lo calado seria o atalho que o "--force" existe para não criar.
         System.out.println("Você está prestes a DESBLOQUEAR " + alvos.size() + " domínio(s) do perfil '"
                 + valid + "':");
         for (String d : descricao) {
@@ -183,12 +166,9 @@ public class ProfileUnblockCommand implements Callable<Integer> {
             return 3;
         }
 
-        // POR QUE: a transação é o único ponto de entrada que grava estado —
-        // o load e o save na mesma trava, e o hosts escrito dentro dela. Fora
-        // daqui, o block de outro terminal some do JSON e o domínio fica
-        // preso no hosts sem registro.
-        //
-        // A ordem é Estado → hosts: se o hosts falhar, o estado volta.
+        // POR QUE: a transação é o único ponto de entrada que grava estado — o load e o
+        // save na mesma trava, e o hosts escrito dentro dela, na ordem Estado → hosts.
+        // Fora daqui, o block de outro terminal some do JSON e o domínio fica preso.
         final boolean[] chegouNoHosts = {false};
         try {
             service.inTransaction(

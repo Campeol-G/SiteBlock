@@ -18,11 +18,8 @@ import java.util.concurrent.Callable;
 /**
  * siteblock daemon status — responde sem elevação.
  *
- * <p>Roda sem {@code sudo} de propósito: perguntar "o prazo vai ser cumprido?"
- * não pode exigir privilégio para ser respondida. Por isso o "autostart
- * ligado?" é teste de existência do artefato, e não uma chamada ao agendador —
- * e por isso o daemon devolve a posse dos arquivos que escreve, para que
- * este comando consiga ler o estado.
+ * <p>Roda sem {@code sudo} de propósito: perguntar "o prazo vai ser cumprido?" não
+ * pode exigir privilégio para ser respondida.
  */
 @Command(name = "status",
         description = "Mostra se o daemon de expiracao esta rodando.",
@@ -31,7 +28,7 @@ public class DaemonStatusCommand implements Callable<Integer> {
 
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
 
-    /** Raiz do sistema; null = "/" em produção. Injetado nos testes. */
+    // Raiz do sistema; null = "/" em produção. Injetado nos testes.
     Path systemRootOverride;
 
     private static final DateTimeFormatter HORA = DateTimeFormatter.ofPattern("dd/MM HH:mm")
@@ -55,11 +52,15 @@ public class DaemonStatusCommand implements Callable<Integer> {
         OsType os = OsType.detect();
         Path systemRoot = systemRootOverride != null ? systemRootOverride : Path.of("/");
         Path jarInstalado = AutostartInstaller.installJarPath(os, systemRoot);
+        // ATENÇÃO: "autostart ligado?" é teste de existência do artefato, e não uma
+        // chamada ao agendador: este comando responde sem elevação.
         boolean autostart = AutostartInstaller.isEnabled(os, systemRoot);
         boolean jarExiste = Files.exists(jarInstalado);
 
         Optional<ExpirationDaemonState> state;
         try {
+            // POR QUE: o daemon devolve a posse dos arquivos que escreve, para que
+            // este estado seja legível sem elevação.
             state = ExpirationDaemonState.read(stateDir);
         } catch (IOException e) {
             System.err.println("Erro ao ler o estado do daemon: " + e.getMessage());

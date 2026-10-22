@@ -63,7 +63,7 @@ class DnsStartPropriedadesTest {
         }
     }
 
-    /** A linha de comando do processo, lida do /proc. */
+    // A linha de comando do processo, lida do /proc.
     private static List<String> linhaDeProcesso(long pid) throws IOException {
         Path cmdline = Path.of("/proc", String.valueOf(pid), "cmdline");
         assumeTrue(Files.exists(cmdline), "precisa de /proc para ler a linha de comando");
@@ -79,7 +79,7 @@ class DnsStartPropriedadesTest {
         }
     }
 
-    /** Derruba o daemon que o teste subiu (o PID está no registro de estado). */
+    // Derruba o daemon que o teste subiu (o PID está no registro de estado).
     private void encerrar(Path estado) {
         try {
             DnsDaemonState.read(estado).ifPresent(state -> {

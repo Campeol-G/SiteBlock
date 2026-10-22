@@ -41,7 +41,10 @@ public class ProfileEntry {
         this.durationMillis = durationMillis;
     }
 
-    /** Espelha {@link BlockEntry#isTemporaryAndActive(Instant)}: true se tem prazo. */
+    /**
+     * True se a entrada tem prazo. Equivale a {@link BlockEntry#isTemporaryAndActive}
+     * sem a checagem de validade: a receita guarda duração, não instante.
+     */
     public boolean isTemporary() {
         return durationMillis != null;
     }

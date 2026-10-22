@@ -20,9 +20,7 @@ import static com.sitelock.dns.DnsResolver.Decision.BLOCK_NODATA;
 import static com.sitelock.dns.DnsResolver.Decision.FORWARD;
 import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * Lógica "bloquear vs encaminhar" isolada da rede: só mapas em memória, sem sockets.
- */
+// Lógica "bloquear vs encaminhar" isolada da rede: só mapas em memória, sem sockets.
 class DnsResolverTest {
 
     private static final Instant NOW = Instant.parse("2026-01-01T12:00:00Z");
@@ -136,10 +134,9 @@ class DnsResolverTest {
 
     @Test
     void nomeLivreComAliasBloqueadoEhConsultadoNoUpstream() {
-        // POR QUE: o alias só aparece na RESPOSTA do upstream — a decisão não tem
-        // como saber que "www.microsoft.com" aponta para um nome bloqueado. Por
-        // isso a consulta sai mesmo assim; quem troca a resposta pelo sinkhole é
-        // o servidor, ao inspecionar a section answer (ver DnsAliasCnameTest).
+        // POR QUE: o alias só aparece na RESPOSTA do upstream — a decisão não tem como
+        // saber que "www.microsoft.com" aponta para um nome bloqueado. Por isso a
+        // consulta sai; o sinkhole é trocado pelo servidor (ver DnsAliasCnameTest).
         Map<String, BlockEntry> s = state(permanent("www.microsoft.com-c-3.edgekey.net"));
         assertEquals(FORWARD, DnsResolver.decide("www.microsoft.com", 1, s, NOW));
     }

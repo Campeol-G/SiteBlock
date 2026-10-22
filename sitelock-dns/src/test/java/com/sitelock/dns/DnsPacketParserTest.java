@@ -7,10 +7,10 @@ import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Monta consultas DNS brutas e verifica a extração do domínio perguntado. */
+// Monta consultas DNS brutas e verifica a extração do domínio perguntado.
 class DnsPacketParserTest {
 
-    /** Consulta padrão: ID 0x1234, RD=1, QDCOUNT=1, QNAME www.tiktok.com, A/IN. */
+    // Consulta padrão: RD=1, QDCOUNT=1; ID, nome, tipo e classe vêm por parâmetro.
     static byte[] queryBytes(int id, String dottedName, int qtype, int qclass) {
         try {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -74,7 +74,7 @@ class DnsPacketParserTest {
         assertEquals("exemplo.com", q.name());
     }
 
-    /** Consulta com um OPT do EDNS (ARCOUNT=1, TYPE=41, CLASS=payload size). */
+    // Consulta com um OPT do EDNS (ARCOUNT=1, TYPE=41, CLASS=payload size).
     static byte[] queryBytesWithOpt(int id, String dottedName, int qtype, int payloadSize) {
         byte[] base = queryBytes(id, dottedName, qtype, 1);
         byte[] raw = new byte[base.length + 11];
@@ -151,7 +151,7 @@ class DnsPacketParserTest {
                 () -> DnsPacketParser.parse(truncated, truncated.length));
     }
 
-    /** Consulta com rótulos em bytes crus (permite bytes >= 0x80 e UTF-8). */
+    // Consulta com rótulos em bytes crus (permite bytes >= 0x80 e UTF-8).
     static byte[] queryBytesLabels(int id, byte[][] labels, int qtype, int qclass) {
         try {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -182,7 +182,7 @@ class DnsPacketParserTest {
         }
     }
 
-    /** Rótulos em UTF-8 (o que um cliente envia quando manda IDN em vez de punycode). */
+    // Rótulos em UTF-8 (o que um cliente envia quando manda IDN em vez de punycode).
     private static byte[][] utf8Labels(String... labels) {
         byte[][] out = new byte[labels.length][];
         for (int i = 0; i < labels.length; i++) {

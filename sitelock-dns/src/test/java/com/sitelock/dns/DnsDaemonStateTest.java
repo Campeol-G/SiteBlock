@@ -15,14 +15,9 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-/**
- * O registro do daemon DNS ({@code dns-server.json}).
- *
- * <p>Ele é lido pelo {@code dns start}, pelo {@code dns status} e pelo
- * {@code dns stop}: um registro quebrado tranca a máquina, e um registro que
- * aponta para o PID errado faz o {@code stop} mandar sinal num processo
- * alheio.
- */
+// O registro do daemon DNS (dns-server.json). É lido pelo dns start, pelo dns
+// status e pelo dns stop: um registro quebrado tranca a máquina, e um registro
+// que aponta para o PID errado faz o stop mandar sinal num processo alheio.
 class DnsDaemonStateTest {
 
     @TempDir
@@ -44,11 +39,9 @@ class DnsDaemonStateTest {
         assertEquals(agora, lido.getStartedAt());
     }
 
-    /**
-     * JSON pela metade não pode estourar: o registro viraria lixo órfão e o
-     * usuário nunca mais conseguiria subir o servidor DNS sem apagar o
-     * arquivo à mão.
-     */
+    // JSON pela metade não pode estourar: o registro viraria lixo órfão e o
+    // usuário nunca mais conseguiria subir o servidor DNS sem apagar o
+    // arquivo à mão.
     @Test
     void jsonCorrompidoDevolveRegistroVazio() throws Exception {
         Files.createDirectories(tmp);
@@ -58,7 +51,7 @@ class DnsDaemonStateTest {
                 "JSON inválido tem que virar registro órfão, não exceção");
     }
 
-    /** A escrita é atômica: o arquivo trocado de inode, nunca meio escrito. */
+    // A escrita é atômica: o arquivo trocado de inode, nunca meio escrito.
     @Test
     void escritaEhAtomica() throws Exception {
         Instant agora = Instant.parse("2026-01-01T12:00:00Z");
@@ -75,10 +68,8 @@ class DnsDaemonStateTest {
                 "o arquivo temporário não pode sobrar");
     }
 
-    /**
-     * O SO recicla PID: o número existir não prova que o processo é o
-     * daemon. O instante de início é a prova.
-     */
+    // O SO recicla PID: o número existir não prova que o processo é o
+    // daemon. O instante de início é a prova.
     @Test
     void pidRecicladoNaoPassaPorDaemonVivo() throws Exception {
         Files.createDirectories(tmp);
@@ -92,7 +83,7 @@ class DnsDaemonStateTest {
                 "PID de outro processo não é o daemon: o stop mandaria sinal no processo errado");
     }
 
-    /** Registro escrito por uma versão antiga (sem o instante) vale pelo PID. */
+    // Registro escrito por uma versão antiga (sem o instante) vale pelo PID.
     @Test
     void registroAntigoSemInstanteDeInicioContinuaValendoPeloPid() throws Exception {
         Files.createDirectories(tmp);
@@ -105,7 +96,7 @@ class DnsDaemonStateTest {
                 "registro antigo (sem processStartedAt) continua válido pelo PID");
     }
 
-    /** Quem escreve o registro guarda o instante de início do próprio processo. */
+    // Quem escreve o registro guarda o instante de início do próprio processo.
     @Test
     void gravacaoGuardaOInstanteDeInicioDoProcesso() throws Exception {
         Instant agora = Instant.parse("2026-01-01T12:00:00Z");

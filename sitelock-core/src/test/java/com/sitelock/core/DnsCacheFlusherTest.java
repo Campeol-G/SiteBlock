@@ -77,11 +77,9 @@ class DnsCacheFlusherTest {
     }
 
     // ---- O flush é best-effort; ele nunca pode abrir um diálogo de senha ----
-    //
-    // Sem root, `systemd-resolve --flush-caches` não falha e segue em frente:
-    // o systemd-resolved responde pela varlink e o polkit abre "Authentication
-    // Required" no desktop pedindo a senha do usuário. Um passo opcional não
-    // pode cobrar senha a ninguém — e ninguém tem a senha "certa" para aquilo.
+    // Sem root, `systemd-resolve --flush-caches` não falha e segue em frente: o
+    // systemd-resolved responde pela varlink e o polkit abre "Authentication
+    // Required" no desktop pedindo senha. Um passo opcional não pode cobrar senha.
 
     @Test
     void nonRootNeverAttemptsSystemdFlush() {

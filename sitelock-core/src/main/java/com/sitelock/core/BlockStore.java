@@ -68,11 +68,9 @@ public class BlockStore {
                  FileLock ignored = channel.tryLock(0L, Long.MAX_VALUE, true)) {
                 return readAndParse();
             } catch (IOException | UnsupportedOperationException | OverlappingFileLockException e) {
-                // Lock inacessível (ex.: root-owned sem sudo), FS sem lock, ou outra
-                // thread DA MESMA JVM já mantém lock sobre a região (locks de arquivo
-                // são por JVM, não por canal: tryLock concorrente lança
-                // OverlappingFileLockException, unchecked). Em todos os casos a
-                // leitura direta do snapshot atômico é segura.
+                // Lock inacessível (root-owned sem sudo), FS sem lock, ou outra thread
+                // da mesma JVM com lock (locks são por JVM: tryLock concorrente lança
+                // OverlappingFileLockException). Ler o snapshot atômico direto é seguro.
                 return readAndParse();
             }
         }
@@ -114,34 +112,23 @@ public class BlockStore {
             return result;
     }
 
+    // POR QUE: load → transforma → save solto é read-modify-write sem proteção
+    // (o save trava, o load é antes e fora): com o daemon a cada minuto, a
+    // janela entre os dois está sempre aberta.
+
+    // O caso: o daemon lê o estado, outro terminal roda block, e o daemon grava
+    // o estado antigo — o bloqueio some do JSON e continua no hosts, que o
+    // sweep (que varre o JSON) nunca limpa, e o status diz que não está bloqueado.
+
+    // A gravação é um delta sobre o disco, não cega: quem não espera a trava
+    // (outra versão da ferramenta, script, edição manual) não é apagado. É a
+    // mesma verificação otimista que o HostsFileManager.modifyHosts já faz.
     /**
- * Executa uma modifica��ão do estado inteiro sob a trava do arquivo.
- *
- * <p>Existe porque {@code load → transforma → save} solto é um
- * read-modify-write sem proteção: o {@code save} trava, mas o {@code load}
- * acontece antes e fora. Com o daemon rodando a cada minuto, para sempre, a
- * janela entre os dois não é "enquanto alguém digita" — é permanentemente
- * aberta. O caso concreto: o daemon lê o estado, e nesse intervalo outro
- * terminal roda {@code block reddit.com}; o daemon grava o estado que tinha
- * lido, e o novo bloqueio simplesmente desaparece do JSON enquanto continua no
- * {@code /etc/hosts}. O sweep varre o JSON — nunca vai limpá-lo — e o
- * {@code status} diz que não está bloqueado. Um site preso sem registro em
- * lugar nenhum.
- *
- * <p>É a mesma verificação otimista que o {@code HostsFileManager.modifyHosts}
- * já faz contra o hosts, finalmente aplicada ao JSON.
- *
- * <p>Desde que a CLI passou a usar esta transação em todo comando que
- * escreve estado ({@code block}, {@code unblock}, {@code profile apply},
- * {@code profile add/remove/save}), o {@code load} e o {@code save} de um
- * mesmo comando acontecem dentro da mesma trava. E a gravação é um delta
- * sobre o que está no disco, não uma escrita cega: assim uma escrita
- * concorrente de quem não respeita a trava (outra versão da ferramenta, um
- * script, uma edição manual) não é apagada.
- *
- * @param body recebe acesso ao estado já carregado e um {@code save} que não
- *             trava de novo
- */
+     * Executa uma modificação do estado inteiro sob a trava do arquivo.
+     *
+     * @param body recebe acesso ao estado já carregado e um {@code save} que não
+     *             trava de novo
+     */
     public <R> R inTransaction(TransactionBody<R> body) throws IOException {
         ensureParentExists(stateFile);
         ensureParentExists(lockFile);
@@ -158,17 +145,12 @@ public class BlockStore {
         }
     }
 
-    /**
-     * A transação: o estado carregado e o que foi gravado por último.
-     *
-     * <p>POR QUE: o {@code save} de dentro da transação não pode ser uma escrita
-     * cega. O que está no disco pode ter mudado desde o {@code load} — por
-     * outro escritor que não espera a trava — e apagar isso é o lost update
-     * que a transação existe para impedir.
-     */
+    // POR QUE: o save de dentro da transação não pode ser uma escrita cega — o
+    // que está no disco pode ter mudado desde o load (por outro escritor que não
+    // espera a trava), e apagar isso é o lost update que a transação impede.
     private final class LockedState implements Transaction {
 
-        /** O que foi gravado por último: a base do delta da próxima gravação. */
+        // O que foi gravado por último: a base do delta da próxima gravação.
         private Map<String, BlockEntry> lastWritten = new TreeMap<>();
 
         @Override
@@ -189,10 +171,8 @@ public class BlockStore {
             lastWritten = new TreeMap<>(blocks);
         }
 
-        /**
-         * Aplica o delta entre o que foi gravado por último e o que se quer
-         * gravar sobre o que está no disco agora.
-         */
+        // Aplica o delta entre o que foi gravado por último e o que se quer
+        // gravar sobre o que está no disco agora.
         private Map<String, BlockEntry> mergeIntoDisk(Map<String, BlockEntry> blocks)
                 throws IOException {
             Map<String, BlockEntry> onDisk = Files.exists(stateFile)
@@ -227,7 +207,7 @@ public class BlockStore {
         R apply(Transaction tx) throws IOException;
     }
 
-    /** Escrita atômica sem travar de novo — só válida dentro de uma transação. */
+    // Escrita atômica sem travar de novo — só válida dentro de uma transação.
     private void writeAtomically(Map<String, BlockEntry> blocks) throws IOException {
         Path tmp = stateFile.resolveSibling(stateFile.getFileName() + ".tmp");
         String json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(blocks);

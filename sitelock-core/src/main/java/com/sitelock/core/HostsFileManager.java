@@ -65,11 +65,8 @@ public final class HostsFileManager {
         return List.of(base, "www." + base);
     }
 
-    /**
-     * Domínio sem o prefixo "www.".
-     * POR QUE: o bloqueio é o mesmo com ou sem o prefixo, e "www." + "www.x.com"
-     * seria "www.www.x.com" — um host que não existe.
-     */
+    // POR QUE: o bloqueio é o mesmo com ou sem o prefixo "www", e "www." +
+    // "www.x.com" seria "www.www.x.com" — um host que não existe.
     private static String baseDomain(String domain) {
         String d = domain.toLowerCase(Locale.ROOT);
         while (d.startsWith("www.") && d.length() > "www.".length()) {
@@ -140,10 +137,8 @@ public final class HostsFileManager {
         return joinLines(rebuild(all, start, end, kept), terminaComQuebra);
     }
 
-    /**
-     * Linhas entre os marcadores. Marcador repetido dentro da região é descartado:
-     * POR QUE: um arquivo com dois blocos deixa o segundo invisível para a remoção.
-     */
+    // POR QUE: marcador repetido dentro da região é descartado — um arquivo
+    // com dois blocos deixa o segundo invisível para a remoção.
     private static List<String> blockBody(List<String> all, int start, int end) {
         int to = end >= 0 ? end : all.size();
         List<String> body = new ArrayList<>();
@@ -157,10 +152,7 @@ public final class HostsFileManager {
         return body;
     }
 
-    /**
-     * Recria o arquivo com o bloco remontado. O que está fora do bloco é copiado
-     * como está: é conteúdo do usuário.
-     */
+    // POR QUE: o que está fora do bloco é copiado como está — é conteúdo do usuário.
     private static List<String> rebuild(List<String> all, int start, int end, List<String> body) {
         List<String> out = new ArrayList<>(all.subList(0, start + 1));
         out.addAll(body);
@@ -174,7 +166,7 @@ public final class HostsFileManager {
         return out;
     }
 
-    /** Acrescenta um bloco novo no fim do arquivo (quando ainda não existe nenhum). */
+    // Bloco novo entra no fim do arquivo — só é usado quando ainda não existe um.
     private static List<String> appendBlock(List<String> all, List<String> lines) {
         List<String> out = new ArrayList<>(all);
         out.add(START_MARKER);
@@ -183,7 +175,7 @@ public final class HostsFileManager {
         return out;
     }
 
-    /** Linhas que faltam para o domínio ficar completo no bloco (reparo automático). */
+    // Linhas que faltam para o domínio ficar completo no bloco — reparo automático.
     private static List<String> missingLines(List<String> body, List<String> lines, List<String> hosts) {
         String block = String.join("\n", body);
         List<String> insert = new ArrayList<>();
@@ -202,7 +194,7 @@ public final class HostsFileManager {
         return insert;
     }
 
-    /** Linhas do arquivo, sem o terminador final: quem remontar decide se ele volta. */
+    // Linhas do arquivo sem o terminador final: quem remontar decide se ele volta.
     private static List<String> splitLines(String content) {
         if (content.isEmpty()) {
             return new ArrayList<>();
@@ -253,10 +245,8 @@ public final class HostsFileManager {
         return false;
     }
 
-    /**
-     * Remove os hostnames alvo de uma linha.
-     * @return null se a linha inteira deve sumir, senão a linha reescrita.
-     */
+    // ATENÇÃO: null não é "não mudou" — significa "apague esta linha" (sobrou
+    // só o IP). Nos outros casos, devolve a linha reescrita.
     private static String stripHostnames(String line, List<String> hosts) {
         String trimmed = line.strip();
         if (trimmed.isEmpty() || trimmed.startsWith("#")) {
@@ -336,17 +326,11 @@ public final class HostsFileManager {
         blockInFile(hostsPath, backupPath, lockFile, List.of(domain));
     }
 
+    // POR QUE: por domínio são 3 locks e 3 leituras, e a checagem de concorrência compara o hosts
+    // com o que foi lido milissegundos atrás — num apply de 40 domínios, um passo veria o arquivo
+    // mudado e a operação morreria no meio: daí o lote compondo tudo em memória antes do lock.
     /**
      * Aplica o bloqueio de vários domínios numa única leitura e uma única escrita.
-     *
-     * <p>O caminho por domínio custa três locks e três leituras do hosts por
-     * domínio ({@code readHostsLocked} duas vezes, mais a releitura dentro de
-     * {@code modifyHosts}). Em um {@code profile apply} de 40 domínios isso
-     * significa 120 travadas do arquivo — e, pior, a verificação de concorrência
-     * de {@code modifyHosts} compara o conteúdo contra o que foi lido
-     * milissegundos antes: se qualquer um dos 40 passos ver o arquivo mudado, a
-     * operação morre no meio, com estado parcial. Por isso o lote existe, e por
-     * isso a transformação composta acontece em memória antes do lock de escrita.
      */
     public static void blockInFile(Path hostsPath, Path backupPath, Path lockFile, List<String> domains)
             throws IOException {
@@ -414,11 +398,9 @@ public final class HostsFileManager {
         }
     }
 
-    /**
-     * Escrita atômica preservando dono/permissões do alvo.
-     * Se o arquivo se chama "hosts" e está sem leitura para outros,
-     * adiciona leitura de grupo/outros (repara permissão 600 quebrada).
-     */
+    // ATENÇÃO: a escrita preserva dono e permissões do alvo; alvo chamado "hosts"
+    // sem leitura para outros ganha leitura de grupo/outros — é o reparo da
+    // permissão 600 quebrada.
     static void writeAtomically(Path target, String content) throws IOException {
         boolean targetExists = Files.exists(target, LinkOption.NOFOLLOW_LINKS);
         Set<PosixFilePermission> origPerms = null;

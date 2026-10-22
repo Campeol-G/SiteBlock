@@ -23,7 +23,7 @@ class ProfileCommandsTest {
     @TempDir
     Path tmp;
 
-    /** Criar uma vez: reescrever apagaria os bloqueios que o teste acabou de fazer. */
+    // Criar uma vez: reescrever apagaria os bloqueios que o teste acabou de fazer.
     private Path hosts() throws Exception {
         if (hosts == null) {
             hosts = tmp.resolve("hosts");
@@ -154,7 +154,7 @@ class ProfileCommandsTest {
                 "a receita escrita por outro terminal não pode se perder: " + depois.keySet());
     }
 
-    /** Grava o profiles.json por fora da trava, como um escritor que não a respeita. */
+    // Grava o profiles.json por fora da trava, como um escritor que não a respeita.
     private void escreverReceitaPorForaDaTrava(Path file, String nome) throws IOException {
         String json = """
                 {

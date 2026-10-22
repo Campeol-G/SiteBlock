@@ -29,7 +29,7 @@ class ProfileMergeTest {
         return h * 3600_000L;
     }
 
-    /** Estado com um domínio, temporário (restam {@code remainingMillis}) ou permanente. */
+    // Estado com um domínio, temporário (restam remainingMillis) ou permanente.
     private static Map<String, BlockEntry> current(String domain, Long remainingMillis) {
         Map<String, BlockEntry> state = new TreeMap<>();
         if (remainingMillis == null) {
@@ -40,7 +40,7 @@ class ProfileMergeTest {
         return state;
     }
 
-    /** Perfil que oferece {@code offerMillis} para o domínio, ou permanente se nulo. */
+    // Perfil que oferece offerMillis para o domínio, ou permanente se nulo.
     private static Profile offering(String domain, Long offerMillis) {
         Map<String, ProfileEntry> entries = new TreeMap<>();
         entries.put(domain, new ProfileEntry(offerMillis));
@@ -178,7 +178,7 @@ class ProfileMergeTest {
         assertEquals(ProfileMerge.Action.RAISED, out.get("b.com").action());
     }
 
-    /** Simula o que o comando faz: aplica as decisões ao mapa de estado. */
+    // Simula o que o comando faz: aplica as decisões ao mapa de estado.
     private static Map<String, BlockEntry> aplicar(Map<String, BlockEntry> state,
             Map<String, ProfileMerge.Decision> decisions) {
         Map<String, BlockEntry> next = new HashMap<>(state);

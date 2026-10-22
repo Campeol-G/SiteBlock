@@ -38,7 +38,7 @@ class ProfileStoreTest {
         return new Profile(at, at, m);
     }
 
-    /** {@code Map.of} não aceita valor nulo, e "permanente" é justamente {@code null}. */
+    // Map.of não aceita valor nulo, e "permanente" é justamente null.
     private static Map<String, Long> durations(Object... pares) {
         Map<String, Long> m = new TreeMap<>();
         for (int i = 0; i < pares.length; i += 2) {
@@ -99,14 +99,9 @@ class ProfileStoreTest {
         assertTrue(read.containsKey("b"));
     }
 
-    /**
-     * Apagar um perfil não pode apagar o que outro terminal escreveu.
-     *
-     * <p>O {@code delete} solto era um {@code load} seguido de um {@code save}:
-     * a receita que outro terminal gravou no meio do caminho sumia junto. O
-     * teste é determinístico — o outro escritor grava o arquivo por fora da
-     * trava, e o {@code delete} tem que sair de lá sem tocar no que não é dele.
-     */
+    // POR QUE: o delete solto era um load seguido de um save, e a receita que
+    // outro terminal gravou no meio do caminho sumia junto. O teste é
+    // determinístico: o outro escritor grava o arquivo por fora da trava.
     @Test
     void deleteNaoApagaOQueFoiEscritoPorOutro() throws Exception {
         Path file = tmp.resolve("profiles.json");

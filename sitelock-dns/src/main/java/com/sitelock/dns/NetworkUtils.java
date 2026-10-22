@@ -11,26 +11,17 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Descoberta do IP local da máquina para imprimir no terminal ao iniciar o servidor.
- * O usuário aponta o DNS do celular/PC para esse IP sem precisar descobrir manualmente.
- *
- * <p>Caso extremo (múltiplas interfaces — Wi-Fi + Ethernet + VPN + Docker): devolvemos
- * <b>todas</b> as IPv4 não-loopback e destacamos como primário o primeiro endereço
- * site-local (192.168/10/172.16-31), que é o alcançável pelos dispositivos da mesma
- * rede Wi-Fi. Se não houver nenhum, cai para 127.0.0.1 (só a própria máquina alcança).
- *
- * <p>Portabilidade (validado por revisão para Linux/macOS/Windows): a enumeração via
- * {@code NetworkInterface} do Java já é cross-platform por natureza. Filtramos apenas
- * interfaces ativas ({@code isUp}) e não-loopback, ignorando virtuais/desligadas — que
- * aparecem com nomes diferentes em cada SO (ex.: {@code docker0/veth*} no Linux,
- * {@code awdl0/utun*} no macOS, adaptadores Hyper-V/VPN no Windows). Nenhuma lógica
- * por SO foi necessária aqui; só esse filtro.
+ * Descoberta do IP local da máquina para imprimir no terminal ao iniciar o
+ * servidor: o usuário aponta o DNS do celular/PC para esse IP.
  */
 public final class NetworkUtils {
 
     private NetworkUtils() {
     }
 
+    // POR QUE: as site-local (192.168/10/172.16-31) vêm primeiro — com várias
+    // interfaces (Wi-Fi + Ethernet + VPN + Docker), é a alcançável pela rede
+    // local. Filtrar o essencial (ativa, não-loopback, não virtual) dispensa lógica por SO.
     /** Todas as IPv4 locais não-loopback (site-locais primeiro). */
     public static List<String> localIPv4Addresses() {
         List<String> siteLocal = new ArrayList<>();
@@ -72,15 +63,9 @@ public final class NetworkUtils {
         return List.copyOf(all);
     }
 
-    /**
-     * true se o endereço serve para configurar o DNS de um dispositivo da rede.
-     *
-     * <p>POR QUE: link-local (169.254/16 — hotspot, PPPoE) não é roteável, e
-     * o celular apontado para ele não resolve nada; mesmo assim ele passava
-     * pelo filtro e podia virar o "configure o DNS para 169.254.210.73". O
-     * 0.0.0.0 (any-local) não é endereço de ninguém, e o loopback só funciona
-     * na própria máquina.
-     */
+    // true se o endereço serve para configurar o DNS de um dispositivo da rede.
+    // POR QUE: link-local (169.254/16 — hotspot, PPPoE) não é roteável — o
+    // celular apontado para ele não resolve nada; 0.0.0.0 e loopback também não.
     static boolean serveParaApontarDns(InetAddress addr) {
         if (addr == null || !(addr instanceof Inet4Address)) {
             return false;
@@ -101,11 +86,9 @@ public final class NetworkUtils {
     }
 
     /**
-     * Todos os endereços (IPv4 e IPv6) das interfaces da máquina.
-     *
-     * <p>Usado pela política de origem do servidor: uma consulta vinda do
-     * próprio endereço da máquina é local por definição, mesmo que o endereço
-     * não caia em nenhuma rede privada (num VPS com IP público, por exemplo).
+     * Todos os endereços (IPv4 e IPv6) das interfaces da máquina. Usado pela
+     * política de origem: uma consulta vinda do próprio endereço da máquina é
+     * local por definição, mesmo sem cair em rede privada (VPS com IP público).
      */
     public static Set<InetAddress> localAddresses() {
         Set<InetAddress> enderecos = new LinkedHashSet<>();

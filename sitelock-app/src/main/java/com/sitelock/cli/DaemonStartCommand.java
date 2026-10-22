@@ -147,20 +147,13 @@ public class DaemonStartCommand implements Callable<Integer> {
         return 0;
     }
 
-    /**
-     * O mesmo desenho de fork do {@code dns start}, com uma diferença que a
-     * feature depende: as duas properties de caminho são repassadas ao filho.
-     * Sem elas, o {@code start} e o {@code enable} leriam arquivos diferentes.
-     *
-     * <p>A forma da linha é a mesma do {@code daemon enable}, e sai da mesma
-     * fonte: {@link DaemonCommandLine}. A diferença entre os dois caminhos é
-     * que o {@code enable} roda sob o agendador e o {@code start} roda aqui — mas
-     * a JVM que executa o daemon é a mesma, e a linha que a constrói tem que
-     * ser a mesma. Quando as duas eram montadas à mão, o {@code enable} deixava
-     * o nome da classe depois do {@code -jar} e o {@code start} deixava as
-     * properties depois do {@code -jar}: nenhuma das duas invocações subia, e
-     * nenhuma das duas dizia por quê.
-     */
+    // POR QUE: as duas properties de caminho são repassadas ao filho — sem elas
+    // o start e o enable leriam arquivos diferentes. A linha sai da mesma fonte
+    // (DaemonCommandLine): a JVM que executa o daemon é a mesma nos dois casos.
+
+    // ATENÇÃO: quando as duas linhas eram montadas à mão, o enable deixava o
+    // nome da classe depois do -jar e o start deixava as properties: nenhuma das
+    // duas invocações subia, e nenhuma dizia por quê.
     List<String> buildChildCommand(Path stateDir, Path hostsPath) {
         String javaHome = System.getProperty("java.home", "");
         Path javaBin = Paths.get(javaHome, "bin", "java");
@@ -189,22 +182,15 @@ public class DaemonStartCommand implements Callable<Integer> {
                 System.getProperty("java.class.path", "."), properties, appArgs);
     }
 
-    /** Teto de cada geração do log do daemon. */
+    // Teto de cada geração do log do daemon.
     static final long LOG_MAX_BYTES = 64 * 1024;
 
-    /**
-     * Prepara o log do daemon para uma execução nova.
-     *
-     * <p>Sem isto o log só cresce: o {@code appendTo} do filho mantém o que já
-     * estava no arquivo, e o {@code printLogTail} — que existe para mostrar o
-     * erro de AGORA — mostraria a cauda de uma execução antiga. O conteúdo
-     * anterior vai para {@code daemon.log.1}, aparado no teto, e o
-     * {@code daemon.log} recomeça vazio.
-     *
-     * <p>A posse volta para o usuário real: o pai roda como root, e um log que
-     * só o root lê quebra a promessa de que o {@code daemon status} funciona
-     * sem elevação.
-     */
+    // POR QUE: sem isto o log só cresce — o appendTo do filho mantém o que já
+    // estava, e o printLogTail mostraria a cauda de uma execução antiga. O
+    // anterior vai para daemon.log.1, aparado no teto, e o daemon.log recomeça.
+
+    // A posse volta para o usuário real: o pai roda como root, e um log que só
+    // o root lê quebra a promessa de que o daemon status funciona sem elevação.
     static void prepararLog(Path logFile) throws IOException {
         Path anterior = logFile.resolveSibling(logFile.getFileName() + ".1");
         if (Files.exists(logFile) && Files.size(logFile) > 0) {
@@ -223,14 +209,14 @@ public class DaemonStartCommand implements Callable<Integer> {
         SiteLockPaths.chownToUserIfConfigured(anterior);
     }
 
-    /** Guarda a cauda do log anterior no arquivo rotacionado. */
+    // Guarda só a cauda do log anterior no arquivo rotacionado.
     private static void guardarGeracaoAnterior(Path origem, Path destino) throws IOException {
         byte[] cauda = lerCauda(origem, LOG_MAX_BYTES);
         Files.write(destino, cauda, StandardOpenOption.CREATE,
                 StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
     }
 
-    /** Os últimos {@code max} bytes do arquivo, sem a linha cortada no meio. */
+    // Os últimos max bytes do arquivo, sem a linha cortada no meio.
     private static byte[] lerCauda(Path arquivo, long max) throws IOException {
         try (SeekableByteChannel canal = Files.newByteChannel(arquivo, StandardOpenOption.READ)) {
             long tamanho = canal.size();
@@ -238,7 +224,6 @@ public class DaemonStartCommand implements Callable<Integer> {
             canal.position(inicio);
             ByteBuffer buffer = ByteBuffer.allocate((int) (tamanho - inicio));
             while (buffer.hasRemaining() && canal.read(buffer) > 0) {
-                // leitura até o fim do arquivo
             }
             byte[] cauda = buffer.array();
             if (inicio == 0) {
@@ -250,7 +235,7 @@ public class DaemonStartCommand implements Callable<Integer> {
         }
     }
 
-    /** Índice da primeira quebra de linha, ou -1. */
+    // Índice da primeira quebra de linha, ou -1.
     private static int primeiraLinha(byte[] bytes) {
         for (int i = 0; i < bytes.length; i++) {
             if (bytes[i] == '\n') {
@@ -260,20 +245,14 @@ public class DaemonStartCommand implements Callable<Integer> {
         return -1;
     }
 
+    // ATENÇÃO: registro órfão trava o daemon start para sempre (não há --force)
+    // e o daemon stop mandaria sinal para um processo alheio. Devolve true só
+    // quando havia um órfão e ele foi removido.
     /**
-     * Descarta um registro de daemon cujo processo não existe mais.
-     *
-     * <p>Um boot antigo que morreu deixa o {@code daemon.json} para trás. A
-     * checagem de identidade não é só "o PID está vivo": o registro guarda o
+     * A checagem de identidade não é só "o PID está vivo": o registro guarda o
      * instante de início do processo, e é ele que prova que o PID vivo ainda é
-     * o nosso — o SO recicla números de PID, e o registro pode passar a apontar
-     * para um processo alheio. Registro escrito por uma versão antiga, sem o
-     * instante de início, ainda vale pelo PID. Quando o processo já morreu, o
-     * registro é órfão: o {@code daemon stop} mandaria um sinal para um
-     * processo que não é nosso, e o {@code daemon start} recusaria para
-     * sempre, sem haver --force para destravar.
-     *
-     * @return true se havia um registro órfão e ele foi removido
+     * o nosso — o SO recicla números de PID. Registro antigo, sem o instante,
+     * ainda vale pelo PID.
      */
     static boolean descartarRegistroOrfao(Path stateDir) throws IOException {
         Optional<ExpirationDaemonState> existente = ExpirationDaemonState.read(stateDir);
@@ -286,15 +265,12 @@ public class DaemonStartCommand implements Callable<Integer> {
         return true;
     }
 
-    /**
-     * O {@code daemon start} executa o jar de onde ele está — normalmente o do
-     * build, num diretório que o usuário pode trocar. Isto é aviso, nunca
-     * recusa: o alvo é o usuário distraído, não o atacante (quem quer burlar já
-     * edita o /etc/hosts com sudo, que é uma linha a mais).
-     *
-     * <p>A correção já existe e é um comando: o {@code daemon enable} instala
-     * uma cópia do jar num diretório do root e aponta a inicialização para lá.
-     */
+    // O daemon start executa o jar de onde ele está — normalmente o do build,
+    // num diretório que o usuário pode trocar. É aviso, nunca recusa: o alvo é
+    // o usuário distraído, não o atacante.
+
+    // A correção já existe e é um comando: o daemon enable instala uma cópia
+    // do jar num diretório do root e aponta a inicialização para lá.
     private String caminhoGravavelPeloUsuario() {
         String jar = System.getProperty("siteblock.jar");
         if (jar == null || jar.isBlank()) {
@@ -321,7 +297,7 @@ public class DaemonStartCommand implements Callable<Integer> {
         }
     }
 
-    /** Espera o processo terminar; usado pelo {@code daemon stop}. */
+    // Espera o processo terminar; usado pelo daemon stop.
     static boolean esperarAte(Process process, long segundos) {
         try {
             return process.waitFor(segundos, TimeUnit.SECONDS);

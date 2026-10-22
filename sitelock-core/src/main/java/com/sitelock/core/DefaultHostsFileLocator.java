@@ -39,10 +39,8 @@ public final class DefaultHostsFileLocator implements HostsFileLocator {
         this(OsType.detect(osName), () -> System.getenv("SystemRoot"));
     }
 
-    /**
-     * Injeta SO + provedor de SystemRoot (para testes do fallback Windows
-     * sem depender do ambiente da máquina).
-     */
+    // Injeta SO + provedor de SystemRoot (para testes do fallback Windows
+    // sem depender do ambiente da máquina).
     DefaultHostsFileLocator(OsType osType, Supplier<String> systemRootProvider) {
         this.osType = osType == null ? OsType.UNKNOWN : osType;
         this.systemRootProvider = systemRootProvider == null ? () -> null : systemRootProvider;
@@ -57,7 +55,6 @@ public final class DefaultHostsFileLocator implements HostsFileLocator {
         return Paths.get("/etc/hosts");
     }
 
-    /** Monta o caminho Windows a partir do SystemRoot informado. */
     static Path windowsHostsPath(String systemRoot) {
         String root = systemRoot == null || systemRoot.isBlank()
                 ? FALLBACK_WINDOWS_ROOT
@@ -69,12 +66,11 @@ public final class DefaultHostsFileLocator implements HostsFileLocator {
         return Paths.get(root, "System32", "drivers", "etc", "hosts");
     }
 
-    /** Exposto para testes afirmarem o SO resolvido. */
+    // Exposto para testes afirmarem o SO resolvido.
     OsType getOsType() {
         return osType;
     }
 
-    /** Normaliza uma string de SO para exibição em logs (minúsculas). */
     static String normalizeForLog(String osName) {
         return osName == null ? "" : osName.toLowerCase(Locale.ROOT);
     }

@@ -73,14 +73,11 @@ class CliCommandsTest {
         assertTrue(content.contains("127.0.0.1 b.com"));
     }
 
+    // ATENÇÃO: um Scanner novo por pergunta lia o stdin num buffer de 1 KB e
+    // consumia as duas linhas digitadas de uma vez — a pessoa confirmava
+    // duas vezes e o comando dizia que não desbloqueou.
     /**
      * As confirmações digitadas não podem se perder entre si.
-     *
-     * <p>Um {@code Scanner} novo por pergunta lê o stdin num buffer de 1 KB: na
-     * primeira pergunta ele consome as duas linhas que a pessoa digitou, e a
-     * segunda pergunta não tem mais o que ler. O resultado era o pior possível
-     * para uma trava de HPV contra distraído: a pessoa confirmou duas vezes e
-     * o comando dizia que não desbloqueou.
      */
     @Test
     void unblockForceAceitaAsDuasConfirmacoes() throws Exception {

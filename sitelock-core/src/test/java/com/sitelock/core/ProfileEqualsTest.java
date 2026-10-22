@@ -13,10 +13,9 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 /**
  * O perfil é comparado por valor, como o {@link BlockEntry}.
  *
- * <p>O {@code ProfileStore} grava um delta sobre o que está no disco, e o
- * delta precisa saber o que mudou. Com a comparação por identidade, a
- * única forma de a receita parecer mudada era criar um {@code Profile} novo
- * — o que funciona por acidente, e não por desenho. Qualquer caminho que
+ * <p>O {@code ProfileStore} grava um delta sobre o que está no disco, e o delta
+ * precisa saber o que mudou. Por identidade, só um {@code Profile} novo parecia
+ * mudado — o que funciona por acidente, e não por desenho: qualquer caminho que
  * devolvesse um perfil equivalente (ou que alterasse um perfil no lugar)
  * escrevia um delta errado.
  */

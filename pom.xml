@@ -93,10 +93,9 @@
           <artifactId>maven-jar-plugin</artifactId>
           <version>3.5.0</version>
           <configuration>
-            <!-- POR QUE: sem isto, num build sem 'clean' o jar plugin pula de
-                 recriar o jar (ele e mais novo que as classes), e o shade
-                 sombreia o fat-jar anterior: o 'original-' deixa de ser o jar
-                 thin e o artefato final muda de byte para byte. -->
+            <!-- POR QUE: sem isto, num build sem 'clean' o jar plugin nao recria o
+                 jar (ele e mais novo que as classes) e o shade sombreia o fat-jar
+                 anterior: o 'original-' deixa de ser o jar thin. -->
             <forceCreation>true</forceCreation>
           </configuration>
         </plugin>

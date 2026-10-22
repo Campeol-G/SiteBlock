@@ -4,13 +4,11 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * Verifica que a resposta de bloqueio está corretamente formada no nível dos bytes:
- * ID ecoado, flags, contadores, pergunta ecoada e answer com o sinkhole.
- */
+// Verifica que a resposta de bloqueio está corretamente formada no nível dos bytes:
+// ID ecoado, flags, contadores, pergunta ecoada e answer com o sinkhole.
 class DnsPacketBuilderTest {
 
-    /** Tamanho do pseudo-registro OPT do EDNS (RFC 6891). */
+    // Tamanho do pseudo-registro OPT do EDNS (RFC 6891).
     private static final int OPT_LEN = 11;
 
     private static DnsQuery query(int id, String name, int type) throws Exception {

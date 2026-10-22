@@ -129,7 +129,7 @@ class ProfileUnblockTransacaoTest {
                 "o bloqueio de outro terminal não pode ser apagado: " + estado);
     }
 
-    /** Simula outro terminal rodando {@code siteblock block <dominio>}. */
+    // Simula outro terminal rodando siteblock block <dominio>.
     private void bloqueiaComoOutroTerminal(String dominio) throws IOException {
         BlockStore store = new BlockStore(Path.of(state()));
         Map<String, BlockEntry> atual = store.load();
@@ -137,13 +137,9 @@ class ProfileUnblockTransacaoTest {
         store.save(atual);
     }
 
-    /**
-     * true se a trava do arquivo de estado está retida agora.
-     *
-     * <p>Na mesma JVM, um {@code tryLock} sobre um arquivo já travado por ela
-     * estoura {@link OverlappingFileLockException} — é assim que se descobre
-     * que a transação está com a trava.
-     */
+    // ATENÇÃO: na mesma JVM, um tryLock sobre um arquivo já travado por ela
+    // estoura OverlappingFileLockException — é assim que se descobre que a
+    // transação está com a trava.
     private static boolean travaDoEstadoEstaRetida(String stateFile) {
         Path lock = Path.of(stateFile).resolveSibling("blocks.json.lock");
         try (FileChannel channel = FileChannel.open(lock, StandardOpenOption.WRITE)) {
@@ -160,12 +156,9 @@ class ProfileUnblockTransacaoTest {
         }
     }
 
-    /**
-     * Um stdin que dispara uma ação na primeira leitura.
-     *
-     * <p>É o gancho determinístico do teste: a leitura da confirmação é o
-     * ponto em que o comando está com o estado carregado e ainda não gravado.
-     */
+    // Um stdin que dispara uma ação na primeira leitura: é o gancho
+    // determinístico do teste, porque a leitura da confirmação é o ponto em
+    // que o comando está com o estado carregado e ainda não gravado.
     private static final class StdinQueGrava extends InputStream {
 
         private final Runnable aoLer;

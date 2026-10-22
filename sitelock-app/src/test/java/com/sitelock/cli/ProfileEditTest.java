@@ -53,7 +53,7 @@ class ProfileEditTest {
         return tmp.resolve("state/profiles.json");
     }
 
-    /** Roda a CLI de verdade, com o --state-file apontando para o temporário. */
+    // Roda a CLI de verdade, com o --state-file apontando para o temporário.
     private int run(String... args) {
         List<String> todos = new java.util.ArrayList<>(List.of(args));
         todos.add("--state-file");

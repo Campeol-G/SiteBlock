@@ -28,23 +28,17 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/**
- * O servidor DNS de verdade, em socket de verdade (loopback, porta alta).
- *
- * <p>O módulo não tinha nenhum teste de socket: a decisão era testada, o
- * transporte não. Estes testes usam um upstream no escuro (127.0.0.1:53, onde
- * não escuta ninguém) ou um upstream falso local — nunca a internet.
- */
+// O servidor DNS de verdade, em socket de verdade (loopback, porta alta). Antes
+// a decisão era testada e o transporte não: estes testes usam um upstream no
+// escuro (127.0.0.1:53) ou um upstream falso local — nunca a internet.
 class DnsServerTest {
 
     @TempDir
     Path tmp;
 
-    /**
-     * Sobe o servidor. Com {@code upstream} nulo, o upstream fica no escuro
-     * (127.0.0.1:53, onde não escuta ninguém) — um encaminhamento acaba em
-     * SERVFAIL, que é o sintoma do defeito de bloqueio.
-     */
+    // Sobe o servidor. Com upstream nulo, o upstream fica no escuro (127.0.0.1:53,
+    // onde não escuta ninguém) — um encaminhamento acaba em SERVFAIL, que é o
+    // sintoma do defeito de bloqueio.
     private DnsServer subirServidor(String... bloqueados) throws Exception {
         return subirServidor(null, bloqueados);
     }
@@ -104,11 +98,9 @@ class DnsServerTest {
         }
     }
 
-    /**
-     * O mesmo servidor precisa atender por TCP: quando a resposta não cabe no
-     * UDP, o cliente retransmite por TCP (RFC 7766 §8) e, sem listener, a
-     * resolução falha com erro de DNS.
-     */
+    // O mesmo servidor precisa atender por TCP: quando a resposta não cabe no
+    // UDP, o cliente retransmite por TCP (RFC 7766 §8) e, sem listener, a
+    // resolução falha com erro de DNS.
     @Test
     void tcpRespondeConsultaBloqueada() throws Exception {
         DnsServer server = subirServidor("youtube.com");
@@ -164,7 +156,7 @@ class DnsServerTest {
         }
     }
 
-    /** Conexão que abre e não manda nada não pode prender o servidor. */
+    // Conexão que abre e não manda nada não pode prender o servidor.
     @Test
     void conexaoTcpOciosaNaoPrendeOServidor() throws Exception {
         DnsServer server = subirServidor("youtube.com");
@@ -190,11 +182,9 @@ class DnsServerTest {
         return buffer;
     }
 
-    /**
-     * O ID do cliente não pode trafegar em claro até o upstream: quem escuta o
-     * caminho passa a poder forjar a resposta. O upstream recebe um ID
-     * próprio, e o cliente recebe a resposta com o ID dele.
-     */
+    // O ID do cliente não pode trafegar em claro até o upstream: quem escuta o
+    // caminho passa a poder forjar a resposta. O upstream recebe um ID próprio, e
+    // o cliente recebe a resposta com o ID dele.
     @Test
     void upstreamRecebeIdDiferenteDoCliente() throws Exception {
         FakeUpstream upstream = new FakeUpstream();
@@ -218,7 +208,7 @@ class DnsServerTest {
         }
     }
 
-    /** Resposta com ID trocado é de outra transação: vira SERVFAIL, não dado falso. */
+    // Resposta com ID trocado é de outra transação: vira SERVFAIL, não dado falso.
     @Test
     void respostaComIdErradoNaoChegaAoCliente() throws Exception {
         FakeUpstream upstream = new FakeUpstream();
@@ -238,7 +228,7 @@ class DnsServerTest {
         }
     }
 
-    /** Pacote que não é resposta (QR=0) também é descartado. */
+    // Pacote que não é resposta (QR=0) também é descartado.
     @Test
     void pacoteQueNaoERespostaNaoChegaAoCliente() throws Exception {
         FakeUpstream upstream = new FakeUpstream();
@@ -258,12 +248,9 @@ class DnsServerTest {
         }
     }
 
-    /**
-     * Uma rajada de consultas não pode criar uma thread por consulta nem um
-     * socket por consulta: o pool antigo ("cached") crescia sem teto e cada
-     * encaminhamento abria um socket novo — uma rajada esgota as portas
-     * efêmeras do SO.
-     */
+    // Uma rajada de consultas não pode criar uma thread por consulta nem um socket
+    // por consulta: o pool antigo ("cached") crescia sem teto e cada encaminhamento
+    // abria um socket novo — uma rajada esgota as portas efêmeras do SO.
     @Test
     void rajadaNaoCriaUmaThreadNemUmSocketPorConsulta() throws Exception {
         FakeUpstream upstream = new FakeUpstream();
@@ -295,7 +282,7 @@ class DnsServerTest {
         }
     }
 
-    /** Threads do pool de UDP (o de TCP tem outro prefixo). */
+    // Threads do pool de UDP (o de TCP tem outro prefixo).
     private static int contaThreadsDoPool() {
         int total = 0;
         for (Thread t : Thread.getAllStackTraces().keySet()) {
@@ -306,10 +293,9 @@ class DnsServerTest {
         return total;
     }
 
-    /**
-     * Origem de fora não recebe nada: responder seria amplificar a consulta
-     * para a vítima e revelaria o que a rede consulta.
-     */    @Test
+    // Origem de fora não recebe nada: responder seria amplificar a consulta para
+    // a vítima e revelaria o que a rede consulta.
+    @Test
     void origemRecusadaNaoRecebeResposta() throws Exception {
         Path estado = DnsTestSupport.arquivoDeBloqueios(tmp, "youtube.com");
         int porta = DnsTestSupport.portaLivre();

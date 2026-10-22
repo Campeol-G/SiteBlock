@@ -21,13 +21,12 @@ import java.util.Map;
 import java.util.TreeMap;
 
 /**
- * Persistência do {@code profiles.json} com escrita atômica e lock entre
- * processos — a mesma disciplina do {@link BlockStore}, pelas mesmas razões:
- * dois {@code profile save} simultâneos não podem deixar o arquivo pela
- * metade, e JSON ilegível vira {@link CorruptedStateException} sem apagar nada.
+ * Persistência do {@code profiles.json} com escrita atômica e lock entre processos.
  *
- * <p>O caminho vem do construtor porque quem decide o {@code stateDir} é a
- * camada de CLI, que resolve o {@code --state-file} dos testes.
+ * <p>Disciplina igual à do {@link BlockStore}: dois {@code profile save} simultâneos
+ * não podem deixar o arquivo pela metade, e JSON ilegível vira
+ * {@link CorruptedStateException} sem apagar nada. O caminho vem do construtor
+ * porque quem decide o {@code stateDir} é a camada de CLI.
  */
 public class ProfileStore {
 
@@ -67,10 +66,9 @@ public class ProfileStore {
                  FileLock ignored = channel.tryLock(0L, Long.MAX_VALUE, true)) {
                 return readAndParse();
             } catch (IOException | UnsupportedOperationException | OverlappingFileLockException e) {
-                // Lock inacessível (ex.: root-owned sem sudo), FS sem lock, ou outra
-                // thread da MESMA JVM já o mantém (locks de arquivo são por JVM,
-                // não por canal: tryLock concorrente lança OverlappingFileLockException,
-                // unchecked). Ler o snapshot atômico direto é seguro em todos eles.
+                // ATENÇÃO: lock inacessível (ex.: root-owned sem sudo), FS sem lock, ou outra
+                // thread da MESMA JVM já o mantém: lock é por JVM, então tryLock concorrente
+                // lança OverlappingFileLockException (unchecked). Ler o snapshot direto é seguro.
                 return readAndParse();
             }
         }
@@ -120,14 +118,12 @@ public class ProfileStore {
     /**
      * Executa uma modificação das receitas sob a trava do arquivo.
      *
-     * <p>Mesma disciplina do {@link BlockStore}, pelas mesmas razões: dois
-     * {@code profile add} simultâneos não podem se perder. Cada um lia a
-     * receita, acrescentava o seu domínio e gravava o arquivo inteiro — o
+     * <p>Dois {@code profile add} simultâneos não podem se perder: sem a trava, o
      * último a gravar apagava o domínio do outro. Receita é trabalho digitado;
      * perdê-lo é pior do que perder estado de bloqueio, que se reconstrói.
      *
-     * <p>Como no {@code BlockStore}, a gravação é um delta sobre o que está no
-     * disco: uma escrita concorrente de quem não espera a trava não é apagada.
+     * <p>A gravação é um delta sobre o que está no disco: quem escreve sem esperar
+     * a trava não é apagado.
      *
      * @param body recebe acesso às receitas já carregadas e um {@code save} que
      *             não trava de novo
@@ -157,16 +153,12 @@ public class ProfileStore {
         R apply(Transaction tx) throws IOException;
     }
 
-    /**
-     * A transação: as receitas carregadas e o que foi gravado por último.
-     *
-     * <p>POR QUE: o {@code save} de dentro da transação não pode ser uma escrita
-     * cega — o que está no disco pode ter mudado desde o {@code load}, e apagar
-     * isso é o lost update que a transação existe para impedir.
-     */
+    // A transação: as receitas carregadas e o que foi gravado por último.
+    // POR QUE: o save de dentro dela não pode ser escrita cega — o que está no
+    // disco pode ter mudado desde o load, e apagar isso é o lost update.
     private final class LockedProfiles implements Transaction {
 
-        /** O que foi gravado por último: a base do delta da próxima gravação. */
+        // O que foi gravado por último: a base do delta da próxima gravação.
         private Map<String, Profile> lastWritten = new TreeMap<>();
 
         @Override
@@ -184,10 +176,8 @@ public class ProfileStore {
             lastWritten = copia(perfis);
         }
 
-        /**
-         * Aplica o delta entre o que foi gravado por último e o que se quer
-         * gravar sobre o que está no disco agora.
-         */
+        // Aplica o delta entre o que foi gravado por último e o que se quer
+        // gravar sobre o que está no disco agora.
         private Map<String, Profile> mergeIntoDisk(Map<String, Profile> perfis)
                 throws IOException {
             Map<String, Profile> onDisk = Files.exists(profilesFile)
@@ -210,13 +200,9 @@ public class ProfileStore {
         }
     }
 
-    /**
-     * A cópia de comparação do delta.
-     *
-     * <p>POR QUE: a base do delta tem que ser o estado como ele estava antes
-     * da mudança. Guardando os mesmos objetos carregados, uma alteração feita
-     * no lugar mudaria a base junto — e o delta não veria mudança nenhuma.
-     */
+    // POR QUE: a cópia de comparação tem que ser o estado como ele estava antes da
+    // mudança — guardar os mesmos objetos carregados faria uma alteração no lugar
+    // mudar a base junto, e o delta não veria mudança nenhuma.
     private static Map<String, Profile> copia(Map<String, Profile> perfis) {
         Map<String, Profile> copia = new TreeMap<>();
         for (Map.Entry<String, Profile> e : perfis.entrySet()) {
@@ -242,7 +228,6 @@ public class ProfileStore {
         return copia;
     }
 
-    /** Escrita atômica das receitas. */
     private void writeAtomically(Map<String, Profile> toSave) throws IOException {
         ensureParentExists(profilesFile);
         ensureParentExists(lockFile);

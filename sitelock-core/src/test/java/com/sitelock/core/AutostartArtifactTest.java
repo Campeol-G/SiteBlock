@@ -13,14 +13,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * O artefato de autostart é testado como <b>texto gerado</b>, não como
- * agendador: o CI roda em Linux e Windows e nunca em macOS, então testar o
- * {@code systemctl}/{@code launchctl}/{@code schtasks} de verdade é impossível.
+ * O artefato de autostart é testado como <b>texto gerado</b>, não como agendador:
+ * o CI roda em Linux e Windows, nunca em macOS, então o {@code systemctl}/
+ * {@code launchctl}/{@code schtasks} de verdade não pode ser exercitado.
  *
  * <p>A asserção que importa é de substring: o texto tem que conter o
- * {@code stateDir} e o {@code hostsFile} absolutos. É exatamente ela que pega o
- * daemon apontando para {@code /root} — o bug que a spec chama de "a feature
- * inteira é um no-op silencioso".
+ * {@code stateDir} e o {@code hostsFile} absolutos — é ela que pega o daemon
+ * apontando para {@code /root}.
  */
 class AutostartArtifactTest {
 

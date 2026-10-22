@@ -10,19 +10,6 @@ package com.sitelock.dns;
  *     TTL, RDLENGTH, RDATA (sinkhole)
  *   + OPT do EDNS (11 bytes, RFC 6891)
  * </pre>
- *
- * <h2>0.0.0.0 vs 127.0.0.1 — por que 0.0.0.0</h2>
- * <ul>
- *   <li><b>0.0.0.0</b> é o endereço "unspecified" (RFC 1122 §3.2.1.3). Quando um app tenta
- *       {@code connect()} para 0.0.0.0, o SO falha na hora (EADDRNOTAVAIL/EINVAL) sem emitir
- *       nenhum pacote na rede. O bloqueio é instantâneo e não toca em nada na máquina local.
- *       É o padrão usado por listas como StevenBlack e pelo Pi-hole.</li>
- *   <li><b>127.0.0.1</b> aponta para o loopback: o cliente tenta abrir conexão <i>consigo
- *       mesmo</i>. Se houver algum serviço ouvindo naquela porta, o app pode receber resposta
- *       inesperada; se não houver, ele espera até o timeout de conexão (lento, drena bateria
- *       no celular) e gera logs confusos de "conexão recusada pelo localhost".</li>
- * </ul>
- * <p>Por isso o sinkhole aqui é <b>0.0.0.0</b> para A e <b>::</b> (16 bytes zero) para AAAA.
  */
 public final class DnsPacketBuilder {
 
@@ -34,9 +21,13 @@ public final class DnsPacketBuilder {
      */
     public static final int DEFAULT_EDNS_PAYLOAD_SIZE = 4096;
 
-    /** Tamanho do pseudo-registro OPT: nome raiz (1) + TYPE (2) + CLASS (2) + TTL (4) + RDLEN (2). */
+    // Tamanho do pseudo-registro OPT: nome raiz (1) + TYPE (2) + CLASS (2) + TTL (4) + RDLEN (2).
     private static final int OPT_LEN = 11;
 
+    // POR QUE: 0.0.0.0 (endereço "unspecified", RFC 1122 §3.2.1.3) e não 127.0.0.1:
+    // contra o loopback o app pode receber resposta inesperada ou esperar o timeout
+    // de conexão; contra 0.0.0.0 o connect() falha na hora (EADDRNOTAVAIL/EINVAL).
+    // É o padrão do Pi-hole.
     private static final byte[] SINKHOLE_V4 = {0, 0, 0, 0};
     private static final byte[] SINKHOLE_V6 = new byte[16];
 
@@ -136,13 +127,9 @@ public final class DnsPacketBuilder {
         return out;
     }
 
-    /**
-     * Escreve o pseudo-registro OPT do EDNS (RFC 6891): nome raiz, TYPE=41,
-     * CLASS = payload size (o do cliente, quando conhecido), TTL=0 e RDLEN=0.
-     *
-     * <p>Alguns resolvers e firewalls descartam a resposta sem OPT — e o cliente
-     * EDNS espera um na resposta.
-     */
+    // Escreve o pseudo-registro OPT do EDNS (RFC 6891): nome raiz, TYPE=41, CLASS =
+    // payload size (o do cliente, quando conhecido), TTL=0 e RDLEN=0. Alguns
+    // resolvers e firewalls descartam a resposta sem OPT — e o cliente EDNS espera um.
     private static void writeOpt(byte[] out, int off, DnsQuery query) {
         int size = query.ednsPayloadSize() > 0
                 ? query.ednsPayloadSize()
@@ -160,14 +147,9 @@ public final class DnsPacketBuilder {
         out[off + 10] = 0x00;
     }
 
-    /**
-     * Header de resposta: ID ecoado, QR=1, OPCODE=0, RD copiado da pergunta,
-     * RA=1 (aceitamos recursão via upstream), RCODE informado.
-     *
-     * <p>AA=1 nas respostas locais de bloqueio/NODATA: para o nome bloqueado o
-     * servidor é a autoridade. AA=0 nas respostas de erro (SERVFAIL): lá não
-     * há answer e não somos autoridade do nome.
-     */
+    // Header de resposta: ID ecoado, QR=1, OPCODE=0, RD copiado da pergunta,
+    // RA=1 (aceitamos recursão via upstream), RCODE informado. AA=1 nas respostas
+    // locais de bloqueio/NODATA (o servidor é a autoridade do nome) e AA=0 nas de erro.
     private static void writeHeader(byte[] out, DnsQuery query, int rcode,
                                     int anCount, boolean authoritative) {
         int id = query.transactionId();

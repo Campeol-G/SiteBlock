@@ -112,13 +112,12 @@ class ElevacaoComandosTest {
         assertTrue(saida.contains("Administrador"), saida);
     }
 
+    // ATENÇÃO: o instalador é forçado para Linux de propósito — no Windows o
+    // autostart é uma Tarefa do Agendador, que não existe nesta máquina. O
+    // texto da elevação vem do SO detectado, que é o que o teste mede.
     /**
      * O {@code daemon disable} só fala do daemon que continua rodando quando
      * o autostart existia.
-     *
-     * <p>ATENÇÃO: o instalador é forçado para Linux de propósito — no Windows
-     * o autostart é uma Tarefa do Agendador, que não existe nesta máquina. O
-     * texto da elevação vem do SO detectado, que é o que o teste mede.
      */
     @Test
     void oDaemonDisableNaoMandaSudoNoWindows() throws Exception {
@@ -165,11 +164,9 @@ class ElevacaoComandosTest {
         return jar;
     }
 
-    /**
-     * Um jar de verdade, com o {@code Main-Class} do manifest e o classpath
-     * inteiro apontado pelo atributo {@code Class-Path} — o daemon sobe com
-     * ele, como sobe em produção.
-     */
+    // Um jar de verdade, com o Main-Class do manifest e o classpath inteiro
+    // apontado pelo atributo Class-Path — o daemon sobe com ele, como sobe
+    // em produção.
     private Path buildJar() throws Exception {
         StringBuilder classPath = new StringBuilder();
         for (String entry : System.getProperty("java.class.path").split(File.pathSeparator)) {
@@ -188,12 +185,12 @@ class ElevacaoComandosTest {
 
         Path jar = tmp.resolve("siteblock-teste.jar");
         try (JarOutputStream out = new JarOutputStream(Files.newOutputStream(jar), mf)) {
-            // jar sem entradas: as classes vêm do Class-Path do manifest
+            // POR QUE: jar sem entradas — as classes vêm do Class-Path do manifest.
         }
         return jar;
     }
 
-    /** Mata o daemon que o start subiu, se ele tiver subido. */
+    // Mata o daemon que o start subiu, se ele tiver subido.
     private static void matarDaemon(Path estado) {
         try {
             ExpirationDaemonState.read(estado).ifPresent(state -> {
@@ -204,7 +201,7 @@ class ElevacaoComandosTest {
         }
     }
 
-    /** O que o comando imprimiu, no stdout e no stderr. */
+    // O que o comando imprimiu, no stdout e no stderr.
     private static String capturar(ThrowingRunnable r) {
         PrintStream outOriginal = System.out;
         PrintStream errOriginal = System.err;
