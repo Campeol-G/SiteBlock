@@ -50,6 +50,11 @@ class DnsStartCommandTest {
                     "o daemon precisa anunciar que está escutando: " + texto);
             assertTrue(texto.contains("203.0.113.0/24"),
                     "a origem liberada tem que chegar ao daemon: " + texto);
+            DnsDaemonState state = DnsDaemonState.read(estado).orElseThrow();
+            assertTrue(state.getProcessStartedAt() != null,
+                    "o pai tem que gravar a identidade do filho, não só o PID");
+            assertTrue(DnsDaemonState.isAlive(state),
+                    "o registro do filho tem que passar na checagem de identidade");
         } finally {
             encerrar(estado);
         }

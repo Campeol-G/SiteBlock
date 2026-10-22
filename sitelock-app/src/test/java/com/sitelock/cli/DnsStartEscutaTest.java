@@ -47,6 +47,11 @@ class DnsStartEscutaTest {
         Path stateFile = tmp.resolve("blocks.json");
         Files.writeString(stateFile, "{}", StandardCharsets.UTF_8);
         Path estado = tmp; // o estado do daemon mora junto do --state-file
+        // Marca de uma execução anterior: sem o offset, o start encontraria
+        // esta linha e anunciaria sucesso com o filho mudo de agora.
+        Files.writeString(DnsDaemonState.logPath(estado),
+                "[antigo] " + DnsStartCommand.LISTENING_MARKER + "\n",
+                StandardCharsets.UTF_8, java.nio.file.StandardOpenOption.CREATE);
 
         ByteArrayOutputStream saida = new ByteArrayOutputStream();
         PrintStream original = System.out;

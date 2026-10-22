@@ -208,6 +208,19 @@ public class DnsDaemonState {
     Files.deleteIfExists(statePath(stateDir));
   }
 
+  /**
+   * Apaga o registro somente se ele ainda descrever o processo informado.
+   *
+   * <p>Um `dns start` que falha não pode apagar o registro de outro daemon que
+   * subiu no meio do caminho; o dono do PID é a única prova local barata.
+   */
+  public static void deleteIfOwned(Path stateDir, long pid) throws IOException {
+    Optional<DnsDaemonState> atual = read(stateDir);
+    if (atual.isPresent() && atual.get().getPid() == pid) {
+      delete(stateDir);
+    }
+  }
+
   // POR QUE: o SO recicla PID, então "o PID existe" mente — o `dns stop`
   // mandaria SIGTERM num processo que não é o SiteLock. A prova de identidade é
   // o instante de início do processo: dois processos não começam no mesmo instante.

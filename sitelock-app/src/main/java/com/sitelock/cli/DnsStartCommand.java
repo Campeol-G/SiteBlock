@@ -3,8 +3,10 @@ package com.sitelock.cli;
 import com.sitelock.core.BlockEntry;
 import com.sitelock.core.BlockStore;
 import com.sitelock.core.DurationParser;
+import com.sitelock.core.OsType;
 import com.sitelock.core.PermissionAdvisor;
 import com.sitelock.core.SiteLockPaths;
+import com.sitelock.dns.DnsDaemonLock;
 import com.sitelock.dns.DnsDaemonState;
 import com.sitelock.dns.DnsServer;
 import com.sitelock.dns.NetworkUtils;
@@ -13,9 +15,14 @@ import picocli.CommandLine.Option;
 
 import java.io.IOException;
 import java.net.InetAddress;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -36,6 +43,11 @@ import java.util.concurrent.Callable;
         description = "Inicia o servidor DNS local em background.",
         mixinStandardHelpOptions = true)
 public class DnsStartCommand implements Callable<Integer> {
+
+    // O log é append entre execuções; acima disto, a próxima subida o arquiva.
+    // 5 MiB guarda várias subidas e ainda abre rápido no printLogTail.
+    static final long LOG_ROTATE_BYTES = 5L * 1024 * 1024;
+    static final String LISTENING_MARKER = "SITELOCK_DNS_LISTENING";
 
     @Option(names = "--port", paramLabel = "<porta>", defaultValue = "53",
             description = "Porta UDP local (default: 53; use 5300 p/ testar sem sudo).")
@@ -88,10 +100,10 @@ public class DnsStartCommand implements Callable<Integer> {
             return 2;
         }
 
-        // ATENÇÃO: porta privilegiada (< 1024) exige elevação nos três SOs: a falha
-        // vem rápida e clara, não como exceção genérica no daemon. No Windows o
-        // user.name nunca é "root", então o aviso sempre dispara — o bind falha e o log mostra.
-        if (port < 1024 && !isRoot()) {
+        // ATENÇÃO: porta privilegiada (< 1024) exige elevação só nos Unix. No
+        // Windows o Administrador não se chama "root"; o bind abaixo falha e o
+        // log mostra o motivo, sem um falso aviso de sudo antes de tentar.
+        if (requiresElevationForPort(port, OsType.detect()) && !isRoot()) {
             String retry = "dns start" + (forDuration != null ? " --for " + forDuration : "");
             System.err.println("Erro: " + new PermissionAdvisor().privilegedPortHint(port, retry));
             return 1;
@@ -111,6 +123,31 @@ public class DnsStartCommand implements Callable<Integer> {
                 ? Paths.get(stateFileOverride)
                 : stateDir.resolve("blocks.json");
 
+        // A trava cobre a leitura do estado E a subida do filho. Sem ela, dois
+        // `dns start` simultâneos leem "parado", sobem dois daemons e o último
+        // registro apaga o do primeiro. O SO solta a trava se o processo morrer.
+        final DnsDaemonLock lock;
+        try {
+            lock = DnsDaemonLock.tryAcquire(stateDir).orElse(null);
+        } catch (IOException e) {
+            System.err.println("Erro ao obter a trava de inicialização do DNS: " + e.getMessage());
+            return 1;
+        }
+        if (lock == null) {
+            System.err.println("Erro: outro 'siteblock dns start' está em andamento. "
+                    + "Aguarde ele terminar e tente de novo.");
+            return 1;
+        }
+        try (DnsDaemonLock ignored = lock) {
+            return startLocked(stateDir, stateFile, duration, upstreamAddr);
+        } catch (IOException e) {
+            System.err.println("Erro ao liberar a trava de inicialização do DNS: " + e.getMessage());
+            return 1;
+        }
+    }
+
+    private int startLocked(Path stateDir, Path stateFile, Duration duration,
+                            InetAddress upstreamAddr) {
         try {
             Optional<DnsDaemonState> existing = DnsDaemonState.read(stateDir);
             if (existing.isPresent() && DnsDaemonState.isAlive(existing.get())) {
@@ -129,6 +166,13 @@ public class DnsStartCommand implements Callable<Integer> {
 
         List<String> cmd = buildChildCommand(upstreamAddr.getHostAddress());
         Path logFile = DnsDaemonState.logPath(stateDir);
+        final long logOffset;
+        try {
+            logOffset = prepareLog(logFile);
+        } catch (IOException e) {
+            System.err.println("Erro ao preparar o log do daemon: " + e.getMessage());
+            return 1;
+        }
         final Process process;
         try {
             SiteLockPaths.createDirectories(stateDir);
@@ -152,8 +196,12 @@ public class DnsStartCommand implements Callable<Integer> {
         Instant now = Instant.now(Clock.systemUTC());
         Instant expiresAt = duration == null ? null : now.plus(duration);
         try {
-            DnsDaemonState.write(stateDir,
-                    new DnsDaemonState(pid, port, upstreamAddr.getHostAddress(), now, expiresAt));
+            // O pai vê o instante de início do FILHO; gravá-lo aqui fecha a
+            // janela em que o registro existe sem identidade e vale só pelo PID.
+            DnsDaemonState state = new DnsDaemonState(
+                    pid, port, upstreamAddr.getHostAddress(), now, expiresAt);
+            process.info().startInstant().ifPresent(state::setProcessStartedAt);
+            DnsDaemonState.write(stateDir, state);
         } catch (IOException e) {
             System.err.println("Erro ao registrar o daemon (pid " + pid + "): " + e.getMessage());
             process.destroyForcibly();
@@ -175,7 +223,7 @@ public class DnsStartCommand implements Callable<Integer> {
                 break;
             }
             vivo = true;
-            if (logShowsListening(logFile)) {
+            if (logShowsListening(logFile, logOffset)) {
                 escutando = true;
                 break;
             }
@@ -184,7 +232,7 @@ public class DnsStartCommand implements Callable<Integer> {
             System.err.println("Erro: o servidor DNS não subiu (pid " + pid + " encerrou).");
             printLogTail(logFile);
             try {
-                DnsDaemonState.delete(stateDir);
+                DnsDaemonState.deleteIfOwned(stateDir, pid);
             } catch (IOException ignored) {
             }
             return 1;
@@ -198,7 +246,7 @@ public class DnsStartCommand implements Callable<Integer> {
             process.destroyForcibly();
             printLogTail(logFile);
             try {
-                DnsDaemonState.delete(stateDir);
+                DnsDaemonState.deleteIfOwned(stateDir, pid);
             } catch (IOException ignored) {
             }
             return 1;
@@ -273,10 +321,60 @@ public class DnsStartCommand implements Callable<Integer> {
         return "root".equals(System.getProperty("user.name"));
     }
 
-    private static boolean logShowsListening(Path logFile) {
-        try {
-            String text = Files.readString(logFile);
-            return text.contains("SITELOCK_DNS_LISTENING");
+    /**
+     * Porta &lt; 1024 exige elevação só no Unix. No Windows a elevação é um
+     * token de Administrador, não o nome de usuário "root"; tentar o bind e
+     * mostrar o log é mais útil do que recusar antes de tentar.
+     */
+    static boolean requiresElevationForPort(int port, OsType os) {
+        return port > 0 && port < 1024 && os != null && !os.isWindows();
+    }
+
+    /**
+     * Devolve o offset a partir do qual a subida atual escreve no log.
+     *
+     * <p>Log acima de {@link #LOG_ROTATE_BYTES} vira {@code .1} e o offset é
+     * zero; assim a marca de escuta de uma execução antiga não é confundida
+     * com a desta.
+     */
+    static long prepareLog(Path logFile) throws IOException {
+        if (!Files.exists(logFile)) {
+            return 0;
+        }
+        long size = Files.size(logFile);
+        if (size <= LOG_ROTATE_BYTES) {
+            return size;
+        }
+        Path arquivado = logFile.resolveSibling(logFile.getFileName() + ".1");
+        Files.move(logFile, arquivado, StandardCopyOption.REPLACE_EXISTING);
+        return 0;
+    }
+
+    static boolean logShowsListening(Path logFile, long offset) {
+        byte[] needle = LISTENING_MARKER.getBytes(StandardCharsets.UTF_8);
+        try (FileChannel channel = FileChannel.open(logFile, StandardOpenOption.READ)) {
+            if (offset > channel.size()) {
+                return false; // arquivo trocado/truncado durante a subida
+            }
+            channel.position(offset);
+            ByteBuffer buffer = ByteBuffer.allocate(8192);
+            int matched = 0;
+            while (channel.read(buffer) > 0) {
+                buffer.flip();
+                while (buffer.hasRemaining()) {
+                    byte b = buffer.get();
+                    if (b == needle[matched]) {
+                        matched++;
+                        if (matched == needle.length) {
+                            return true;
+                        }
+                    } else {
+                        matched = b == needle[0] ? 1 : 0;
+                    }
+                }
+                buffer.clear();
+            }
+            return false;
         } catch (IOException e) {
             return false;
         }

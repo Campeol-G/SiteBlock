@@ -107,4 +107,26 @@ class DnsDaemonStateTest {
         assertTrue(DnsDaemonState.isAlive(lido),
                 "o registro do processo atual tem que ser reconhecido como vivo");
     }
+
+    @Test
+    void deleteIfOwnedNaoApagaRegistroDeOutroPid() throws Exception {
+        Instant agora = Instant.parse("2026-01-01T12:00:00Z");
+        DnsDaemonState.write(tmp, new DnsDaemonState(111, 53, "1.1.1.1", agora, null));
+
+        DnsDaemonState.deleteIfOwned(tmp, 222);
+
+        assertTrue(DnsDaemonState.read(tmp).isPresent(),
+                "o dns start que falhou não pode apagar o registro de outro daemon");
+    }
+
+    @Test
+    void deleteIfOwnedApagaRegistroDoProprioPid() throws Exception {
+        Instant agora = Instant.parse("2026-01-01T12:00:00Z");
+        DnsDaemonState.write(tmp, new DnsDaemonState(111, 53, "1.1.1.1", agora, null));
+
+        DnsDaemonState.deleteIfOwned(tmp, 111);
+
+        assertTrue(DnsDaemonState.read(tmp).isEmpty(),
+                "o dono do registro tem que conseguir limpá-lo");
+    }
 }

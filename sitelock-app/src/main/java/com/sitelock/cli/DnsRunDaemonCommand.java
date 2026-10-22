@@ -101,7 +101,7 @@ public class DnsRunDaemonCommand implements Callable<Integer> {
                 scheduler.shutdownNow();
             }
             try {
-                DnsDaemonState.delete(stateDir);
+                DnsDaemonState.deleteIfOwned(stateDir, ProcessHandle.current().pid());
             } catch (IOException ignored) {
             }
         }
