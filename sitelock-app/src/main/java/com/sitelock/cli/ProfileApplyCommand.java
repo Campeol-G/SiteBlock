@@ -142,7 +142,7 @@ public class ProfileApplyCommand implements Callable<Integer> {
                         return plano;
                     },
                     (p, estado, tx) -> {
-                        if (p.erroAoSalvar != null || p.alterados == 0) {
+                        if (p.erroAoSalvar != null) {
                             return;
                         }
                         // ATENÇÃO: todos os domínios, inclusive os KEPT — reescrevê-los conserta
@@ -153,6 +153,7 @@ public class ProfileApplyCommand implements Callable<Integer> {
                         // faziam 40 travadas do hosts, e a verificação otimista do
                         // HostsFileManager podia matá-lo no domínio k, com os k-1 já aplicados.
                         service.getBlocker().blockAll(todos);
+                        p.hostsAplicado = true;
                     });
         } catch (IOException e) {
             // O hosts não aceitou: a transação já devolveu o estado ao que era.
@@ -168,10 +169,9 @@ public class ProfileApplyCommand implements Callable<Integer> {
             System.err.println("Erro ao salvar o estado: " + plano.erroAoSalvar.getMessage());
             return 1;
         }
-        if (plano.alterados > 0) {
+        if (plano.hostsAplicado) {
             CliSupport.flushDnsBestEffort();
         }
-
         System.out.println("Perfil '" + valid + "': " + plano.decisions.size() + " domínio(s), "
                 + plano.alterados + " alterados, " + plano.mantidos + " mantidos.");
         // O aviso depende do ESTADO FINAL e não da mudança: um KEPT deixa o
@@ -194,6 +194,7 @@ public class ProfileApplyCommand implements Callable<Integer> {
         Map<String, BlockEntry> estadoFinal = new TreeMap<>();
         int alterados;
         int mantidos;
+        boolean hostsAplicado;
         IOException erroAoSalvar;
     }
 

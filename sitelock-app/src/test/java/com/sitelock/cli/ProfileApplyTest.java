@@ -1,6 +1,7 @@
 package com.sitelock.cli;
 
 import com.sitelock.blocker.SiteBlocker;
+import com.sitelock.core.HostsFileManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -99,6 +100,25 @@ class ProfileApplyTest {
 
         assertEquals(antes, hostsContent(), "o segundo apply não pode tocar no hosts");
         assertFalse(saida.contains("(novo)"), "nada pode ser criado de novo: " + saida);
+    }
+
+    @Test
+    void applyRestoresHostsWhenEveryDecisionIsKept() throws Exception {
+        block("tiktok.com");
+        assertEquals(0, save("trabalho"));
+        assertEquals(0, apply("trabalho"));
+
+        // Simula um apply anterior que gravou o estado e morreu antes do hosts.
+        String semLinha = HostsFileManager.removeDomain(hostsContent(), "tiktok.com");
+        Files.writeString(hosts(), semLinha, StandardCharsets.UTF_8);
+        assertFalse(hostsContent().contains("127.0.0.1 tiktok.com"), hostsContent());
+
+        assertEquals(0, apply("trabalho"));
+
+        String depois = hostsContent();
+        assertTrue(depois.contains("127.0.0.1 tiktok.com"),
+                "KEPT também precisa reparar o hosts: " + depois);
+        assertTrue(depois.contains("::1 tiktok.com"), depois);
     }
 
     @Test
