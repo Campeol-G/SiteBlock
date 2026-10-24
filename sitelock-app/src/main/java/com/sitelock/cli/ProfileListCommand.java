@@ -35,7 +35,7 @@ public class ProfileListCommand implements Callable<Integer> {
         }
 
         if (profiles.isEmpty()) {
-            System.out.println("Nenhum perfil salvo. Crie um com: siteblock profile save <nome>");
+            System.out.println("Nenhum perfil salvo. Crie um com: siteblock save profile <nome>");
             return 0;
         }
 

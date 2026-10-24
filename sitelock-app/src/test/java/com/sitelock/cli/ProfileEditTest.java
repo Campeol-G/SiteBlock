@@ -204,21 +204,21 @@ class ProfileEditTest {
     /**
      * O nome do perfil virou posicional do comando {@code profile}. O perigo
      * concreto é o picocli passar a engolir o nome dos subcomandos que já o
-     * tinham como posicional próprio — {@code profile save trabalho} tem que
+     * tinham como posicional próprio — {@code save profile trabalho} tem que
      * continuar funcionando, senão o comando inteiro quebra.
      */
     @Test
     void saveAndDeleteStillTakeTheirOwnName() throws Exception {
         block("tiktok.com");
 
-        assertEquals(0, run("profile", "save", "trabalho"));
+        assertEquals(0, run("save", "profile", "trabalho"));
         assertTrue(perfil().contains("tiktok.com"), perfil());
 
         // O delete pede confirmação digitada lendo o System.in.
         java.io.InputStream originalIn = System.in;
         System.setIn(new java.io.ByteArrayInputStream("SIM\n".getBytes(StandardCharsets.UTF_8)));
         try {
-            assertEquals(0, run("profile", "delete", "trabalho"));
+            assertEquals(0, run("delete", "profile", "trabalho"));
         } finally {
             System.setIn(originalIn);
         }

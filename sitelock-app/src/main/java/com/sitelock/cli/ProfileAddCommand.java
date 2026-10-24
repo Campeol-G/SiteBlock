@@ -130,7 +130,7 @@ public class ProfileAddCommand implements Callable<Integer> {
         if (naoExiste[0]) {
             System.err.println("Perfil '" + nome + "' não existe.");
             System.err.println("Para criar um perfil novo, bloqueie os domínios e rode: "
-                    + "siteblock profile save " + nome);
+                    + "siteblock save profile " + nome);
             return 1;
         }
 

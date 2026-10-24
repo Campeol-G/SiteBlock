@@ -86,11 +86,14 @@ sudo ./run.sh dns stop
 sudo ./run.sh dns stop --force  # encerra antes do prazo, com confirmação
 
 # Conjuntos de domínios com nome
-sudo ./run.sh profile save trabalho      # guarda o que está bloqueado agora
+sudo ./run.sh save profile trabalho      # guarda o que está bloqueado agora
 ./run.sh profile list
-./run.sh profile apply trabalho         # recarrega sem nunca encurtar o prazo
-sudo ./run.sh profile unblock trabalho --force
-./run.sh profile delete trabalho         # apaga a receita (pede confirmação)
+./run.sh profile trabalho apply             # recarrega sem nunca encurtar o prazo
+sudo ./run.sh profile trabalho unblock --force
+./run.sh delete profile trabalho         # apaga a receita (pede confirmação)
+
+# Criar vazio, sem bloquear nada agora
+./run.sh create profile trabalho
 
 # Editar a receita de um perfil que já existe
 ./run.sh profile trabalho add tiktok.com            # entra permanente
@@ -122,7 +125,7 @@ Todo comando devolve um código, para quem quiser montar script em cima:
 ### Por que precisa de sudo
 
 Editar o arquivo de hosts exige permissão de administrador nos três sistemas.
-`block`, `unblock`, `profile apply`, `profile unblock` e `dns start` pedem.
+`block`, `unblock`, `profile <nome> apply`, `profile <nome> unblock` e `dns start` pedem.
 `status`, `reset`, `profile list` e `daemon status` não.
 
 Os comandos de daemon (`enable`, `start`, `stop`, `disable`) mexem no sistema
@@ -207,22 +210,22 @@ desligou, quando voltar ainda restam 1h30m.
 
 O `daemon` existe para fechar o outro lado dessa mesma conta: sozinho, ele
 acorda, vê o que venceu e tira do `/etc/hosts`. Ele **só remove** — bloquear
-continua sendo coisa do `block` e do `profile apply` — e escreve o resultado em
+continua sendo coisa do `block` e do `profile <nome> apply` — e escreve o resultado em
 `daemon.json` para o `daemon status` mostrar quando foi a última vez que algo
 expirou por conta própria.
 
 Os `perfis` guardam um conjunto de domínios com nome para não remontar a
 mesma lista todo dia. O que fica gravado é o **prazo restante** no momento do
 save, nunca o horário original: um perfil é uma receita, não um histórico.
-Aplicar um perfil **só aumenta** prazo, nunca encurta — repetir `profile apply`
+Aplicar um perfil **só aumenta** prazo, nunca encurta — repetir `profile <nome> apply`
 várias vezes no dia é seguro.
 
-`profile add` e `profile remove` editam a receita de um perfil que já existe,
+`profile <nome> add` e `profile <nome> remove` editam a receita de um perfil que já existe,
 sem passar pelo `block`: o `add` grava o domínio com o prazo pedido (ou
 permanente, sem `--for`) e o `remove` tira o domínio da receita. Nenhum dos
 dois toca no `/etc/hosts` — o que está bloqueado continua bloqueado, e o
 `remove` avisa quando o domínio que saiu da receita continua preso, porque o
-`profile unblock` só alcança o que ainda está no perfil.
+`profile <nome> unblock` só alcança o que ainda está no perfil.
 
 Para instalar o autostart (o passo recomendado depois de instalar):
 

@@ -17,10 +17,8 @@ import java.util.concurrent.Callable;
         description = "Conjuntos de dominios salvos com nome.",
         mixinStandardHelpOptions = true,
         subcommands = {
-                ProfileSaveCommand.class,
                 ProfileListCommand.class,
                 ProfileShowCommand.class,
-                ProfileDeleteCommand.class,
                 ProfileApplyCommand.class,
                 ProfileUnblockCommand.class,
                 ProfileAddCommand.class,
@@ -38,9 +36,11 @@ public class ProfileCommand implements Callable<Integer> {
     public Integer call() {
         if (name != null && !name.isBlank()) {
             System.err.println("Informe o que fazer com o perfil '" + name + "':");
-            System.err.println("  siteblock profile " + name + " add <dominio>");
-            System.err.println("  siteblock profile " + name + " remove <dominio>");
-            System.err.println("  siteblock profile show|apply|unblock " + name);
+            System.err.println("  siteblock profile " + name + " show");
+            System.err.println("  siteblock profile " + name + " apply");
+            System.err.println("  siteblock profile " + name + " unblock [--force]");
+            System.err.println("  siteblock profile " + name + " add <dominio...> [--for <duracao>]");
+            System.err.println("  siteblock profile " + name + " remove <dominio...>");
             return 2;
         }
         CommandLine.usage(this, System.out);
