@@ -97,7 +97,8 @@ class ElevationCommandsTest {
         Files.createDirectories(state);
         // The daemon warning only appears when the jar is real: it is the
         // path the daemon executes, and the text points to the right command.
-        System.setProperty("siteblock.jar", buildJar().toString());
+        Path jarPath = buildJar();
+        System.setProperty("siteblock.jar", jarPath.toString());
 
         String output;
         try {
@@ -105,6 +106,15 @@ class ElevationCommandsTest {
                     state.resolve("blocks.json").toString()).call());
         } finally {
             killDaemon(state);
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+            }
+            // On Windows the child JVM can keep the jar memory-mapped for a
+            // moment after exit; @TempDir cleanup would otherwise fail. Delete
+            // it here with retries and ignore any leftover.
+            deleteQuietlyWithRetry(jarPath);
         }
 
         assertFalse(output.contains("sudo"), "on Windows there is no sudo: " + output);
@@ -200,6 +210,25 @@ class ElevationCommandsTest {
             });
         } catch (Exception e) {
             // the test that matters is the elevation text
+        }
+    }
+
+    // Best-effort deletion for files that Windows may still have locked right
+    // after the child JVM exits. Never throws: a leftover temp file is better
+    // than a failed test.
+    private static void deleteQuietlyWithRetry(Path file) {
+        for (int i = 0; i < 50; i++) {
+            try {
+                Files.deleteIfExists(file);
+                return;
+            } catch (Exception e) {
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
         }
     }
 

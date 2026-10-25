@@ -35,6 +35,11 @@ class DnsStartPropertiesTest {
 
     @Test
     void childReceivesTheSameStateDirAndUser() throws Exception {
+        // Reading the child command line requires /proc: skip on OSes without it
+        // (Windows, macOS) before starting any daemon, so no process or temp file
+        // is left behind.
+        assumeTrue(Files.exists(Path.of("/proc")), "requires /proc to read the command line");
+
         Path state = tmp.resolve("state");
         Files.createDirectories(state);
         String originalStateDir = System.getProperty("sitelock.stateDir");
