@@ -9,13 +9,13 @@ import java.nio.file.Path;
 import java.util.concurrent.Callable;
 
 /**
- * siteblock reset --yes — apaga o blocks.json. Não altera o arquivo hosts.
+ * siteblock reset --yes — deletes blocks.json. Does not change the hosts file.
  */
-@Command(name = "reset", description = "Apaga o estado (blocks.json), recriando-o vazio. Nao altera o arquivo hosts.",
+@Command(name = "reset", description = "Deletes the state (blocks.json), recreating it empty. Does not change the hosts file.",
         mixinStandardHelpOptions = true)
 public class ResetCommand implements Callable<Integer> {
 
-    @Option(names = {"-y", "--yes"}, description = "Confirma a operação sem perguntar.")
+    @Option(names = {"-y", "--yes"}, description = "Confirms the operation without asking.")
     boolean yes;
 
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
@@ -31,20 +31,20 @@ public class ResetCommand implements Callable<Integer> {
     @Override
     public Integer call() {
         if (!yes) {
-            System.err.println("Isso apagará TODOS os registros de bloqueio do estado (blocks.json).");
-            System.err.println("O arquivo hosts (" + SiteLockPaths.getHostsPath() + ") NÃO será alterado por este comando.");
-            System.err.println("Rode de novo com --yes para confirmar: siteblock reset --yes");
+            System.err.println("This will delete ALL block records from the state (blocks.json).");
+            System.err.println("The hosts file (" + SiteLockPaths.getHostsPath() + ") will NOT be changed by this command.");
+            System.err.println("Run again with --yes to confirm: siteblock reset --yes");
             return 2;
         }
         Path stateFile = CliSupport.resolveStateFile(stateFileOverride);
         try {
             new BlockStore(stateFile).clear();
         } catch (Exception e) {
-            System.err.println("Erro ao recriar estado: " + e.getMessage());
+            System.err.println("Error recreating the state: " + e.getMessage());
             return 1;
         }
-        System.out.println("Estado recriado vazio em " + stateFile + ".");
-        System.out.println("Lembrete: o arquivo hosts não foi alterado; use 'unblock' para limpar bloqueios restantes.");
+        System.out.println("State recreated empty at " + stateFile + ".");
+        System.out.println("Reminder: the hosts file was not changed; use 'unblock' to clear any remaining blocks.");
         return 0;
     }
 }

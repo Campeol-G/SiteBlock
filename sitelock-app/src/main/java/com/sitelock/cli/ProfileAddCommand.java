@@ -22,35 +22,35 @@ import java.util.TreeMap;
 import java.util.concurrent.Callable;
 
 /**
- * siteblock profile &lt;nome&gt; add &lt;dominio...&gt; [--for &lt;duracao&gt;].
+ * siteblock profile &lt;name&gt; add &lt;domain...&gt; [--for &lt;duration&gt;].
  *
- * <p>Adiciona domínios à receita de um perfil que já existe — o complemento do
- * {@code profile save}, que só sabe guardar o que já está bloqueado. Não pede sudo e
- * não escreve no hosts.
+ * <p>Adds domains to the recipe of an existing profile — the counterpart of
+ * {@code save profile}, which can only save what is already blocked. It does not ask for
+ * sudo and does not write to the hosts file.
  */
 @Command(name = "add",
-        description = "Adiciona dominios a um perfil existente.",
+        description = "Adds domains to an existing profile.",
         mixinStandardHelpOptions = true)
 public class ProfileAddCommand implements Callable<Integer> {
 
     @ParentCommand
     ProfileCommand parent;
 
-    @Parameters(index = "0..*", paramLabel = "<dominio>",
-            description = "Um ou mais dominios. Ex.: tiktok.com vm.tiktok.com",
+    @Parameters(index = "0..*", paramLabel = "<domain>",
+            description = "One or more domains. E.g. tiktok.com vm.tiktok.com",
             arity = "1..*")
     List<String> domainsRaw = new ArrayList<>();
 
-    @Option(names = "--for", paramLabel = "<duracao>",
-            description = "Prazo guardado no perfil. Ex.: 30m, 2h, 1d. Omitido = permanente.")
+    @Option(names = "--for", paramLabel = "<duration>",
+            description = "Deadline stored in the profile. E.g. 30m, 2h, 1d. Omitted = permanent.")
     String forDuration;
 
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
 
-    // Relógio injetado pelo teste; null = o do sistema.
+    // Clock injected by the test; null = use the system clock.
     Clock clockOverride;
 
-    // Store injetado pelo teste; null = usa o do stateDir.
+    // Store injected by the test; null = use the one from the state directory.
     ProfileStore storeOverride;
 
     public ProfileAddCommand() {
@@ -58,8 +58,8 @@ public class ProfileAddCommand implements Callable<Integer> {
 
     @Override
     public Integer call() {
-        final String nome = nomeDoPerfil();
-        if (nome == null) {
+        final String profileName = profileName();
+        if (profileName == null) {
             return 1;
         }
 
@@ -68,14 +68,14 @@ public class ProfileAddCommand implements Callable<Integer> {
             try {
                 DomainUtils.NormalizationResult r = DomainUtils.normalize(raw);
                 if (r.normalized()) {
-                    System.out.println("Aviso: entrada normalizada de '" + r.original()
-                            + "' para '" + r.domain() + "'.");
+                    System.out.println("Warning: normalized input from '" + r.original()
+                            + "' to '" + r.domain() + "'.");
                 }
                 if (!domains.contains(r.domain())) {
                     domains.add(r.domain());
                 }
             } catch (IllegalArgumentException e) {
-                System.err.println("Erro: " + e.getMessage());
+                System.err.println("Error: " + e.getMessage());
                 return 1;
             }
         }
@@ -84,89 +84,89 @@ public class ProfileAddCommand implements Callable<Integer> {
         try {
             duration = forDuration == null ? null : DurationParser.parse(forDuration);
         } catch (IllegalArgumentException e) {
-            System.err.println("Erro: " + e.getMessage());
+            System.err.println("Error: " + e.getMessage());
             return 1;
         }
 
         ProfileStore store = storeOverride != null ? storeOverride
                 : new ProfileStore(CliSupport.resolveProfilesFile(stateFileOverride));
 
-        // O que fica guardado é o prazo restante do momento do add, como no save:
-        // um perfil é receita, não histórico.
+        // What is stored is the remaining deadline at the moment of the add, as in save:
+        // a profile is a recipe, not history.
         Long millis = duration == null ? null : duration.toMillis();
-        List<String> adicionados = new ArrayList<>();
-        List<String> substituidos = new ArrayList<>();
-        boolean[] naoExiste = {false};
-        // A leitura e a gravação da receita dentro de uma transação: dois
-        // `profile add` simultâneos não podem se perder.
+        List<String> added = new ArrayList<>();
+        List<String> replaced = new ArrayList<>();
+        boolean[] missing = {false};
+        // Read and record the recipe inside one transaction: two simultaneous
+        // `profile add` calls cannot be allowed to lose each other's changes.
         try {
             store.inTransaction(tx -> {
                 Map<String, Profile> profiles = tx.load();
-                Profile profile = profiles.get(nome);
+                Profile profile = profiles.get(profileName);
                 if (profile == null) {
-                    naoExiste[0] = true;
+                    missing[0] = true;
                     return null;
                 }
                 Map<String, ProfileEntry> entries = new TreeMap<>(profile.getEntries());
-                // POR QUE: um domínio que já estava no perfil substitui a entrada, em vez
-                // de acumular — o que fica gravado é o que você pediu agora. Uma receita
-                // com duas durações para o mesmo domínio não é receita de ninguém.
+                // WHY: a domain already in the profile replaces its entry instead of
+                // accumulating — what gets stored is what you asked for now. A recipe
+                // with two durations for the same domain is nobody's recipe.
                 for (String domain : domains) {
                     if (entries.containsKey(domain)) {
-                        substituidos.add(domain);
+                        replaced.add(domain);
                     } else {
-                        adicionados.add(domain);
+                        added.add(domain);
                     }
                     entries.put(domain, new ProfileEntry(millis));
                 }
-                profiles.put(nome, new Profile(profile.getCreatedAt(), Instant.now(clock()), entries));
+                profiles.put(profileName, new Profile(profile.getCreatedAt(), Instant.now(clock()), entries));
                 tx.save(profiles);
                 return null;
             });
         } catch (IOException e) {
-            System.err.println("Erro ao salvar o perfil: " + e.getMessage());
+            System.err.println("Error saving the profile: " + e.getMessage());
             return 1;
         }
-        if (naoExiste[0]) {
-            System.err.println("Perfil '" + nome + "' não existe.");
-            System.err.println("Para criar um perfil novo, bloqueie os domínios e rode: "
-                    + "siteblock save profile " + nome);
+        if (missing[0]) {
+            System.err.println("Profile '" + profileName + "' does not exist.");
+            System.err.println("To create a new profile, block the domains and run: "
+                    + "siteblock save profile " + profileName);
             return 1;
         }
 
-        String prazo = duration == null ? "permanente"
+        String deadline = duration == null ? "permanent"
                 : DurationParser.formatRemaining(duration);
-        System.out.println("Perfil '" + nome + "': " + adicionados.size() + " domínio(s) adicionado(s), "
-                + substituidos.size() + " substituído(s).");
-        for (String domain : adicionados) {
-            System.out.println("  + " + domain + " — " + prazo);
+        System.out.println("Profile '" + profileName + "': " + added.size() + " domain(s) added, "
+                + replaced.size() + " replaced.");
+        for (String domain : added) {
+            System.out.println("  + " + domain + " — " + deadline);
         }
-        for (String domain : substituidos) {
-            System.out.println("  ~ " + domain + " — " + prazo + " (substituiu a entrada anterior)");
+        for (String domain : replaced) {
+            System.out.println("  ~ " + domain + " — " + deadline + " (replaced the previous entry)");
         }
-        System.out.println("A receita mudou; o que está bloqueado agora não mudou. "
-                + "Rode 'siteblock profile apply " + nome + "' para aplicar.");
+        System.out.println("The recipe changed; what is blocked right now did not. "
+                + "Run 'siteblock profile apply " + profileName + "' to apply it.");
         return 0;
     }
 
-    // O relógio do comando: o injetado pelo teste, ou o da CLI.
+    // The command's clock: the one injected by the test, or the CLI's.
     private Clock clock() {
         return clockOverride != null ? clockOverride : CliSupport.clock();
     }
 
-    // POR QUE: sem nome não há o que fazer, e a mensagem diz a forma inteira porque o
-    // erro mais provável é a pessoa ter digitado "siteblock profile add" esperando que
-    // o "add" fosse o nome do perfil.
-    private String nomeDoPerfil() {
+    // WHY: without a name there is nothing to do, and the message spells out the full
+    // form because the most likely mistake is typing "siteblock profile add" and expecting
+    // "add" to be the profile name.
+    private String profileName() {
         if (parent == null || parent.name == null || parent.name.isBlank()) {
-            System.err.println("Erro: informe o nome do perfil. "
-                    + "Uso: siteblock profile <nome> add <dominio>");
+            System.err.println("Error: provide the profile name. "
+                    + "Usage: siteblock profile <name> add <domain>");
             return null;
         }
         try {
             return ProfileNames.require(parent.name);
         } catch (IllegalArgumentException e) {
-            System.err.println("Erro: " + e.getMessage());
+            System.err.println("Error: " + e.getMessage());
             return null;
         }
     }

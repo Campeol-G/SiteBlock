@@ -9,12 +9,12 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Testa apenas a <i>seleção</i> dos comandos de flush por SO, com runner fake.
+ * Tests only the per-OS <i>selection</i> of flush commands, with a fake runner.
  *
- * <p>Limitação conhecida (documentada no README e no {@link DnsCacheFlusher}):
- * a execução real do flush ({@code systemd-resolve}, {@code dscacheutil},
- * {@code ipconfig}) não é testada no CI em todos os SOs — exige runners
- * Windows/macOS + permissões. Validar manualmente.
+ * <p>Known limitation (documented in the README and in {@link DnsCacheFlusher}):
+ * the real flush execution ({@code systemd-resolve}, {@code dscacheutil},
+ * {@code ipconfig}) is not tested on CI for every OS — it requires Windows/macOS
+ * runners + permissions. Validate manually.
  */
 class DnsCacheFlusherTest {
 
@@ -53,7 +53,7 @@ class DnsCacheFlusherTest {
         DnsCacheFlusher f = new DnsCacheFlusher(OsType.LINUX, true, cmd -> {
             attempted.add(cmd);
             if (cmd.get(0).equals("systemd-resolve")) {
-                throw new IOException("comando não encontrado: systemd-resolve");
+                throw new IOException("command not found: systemd-resolve");
             }
             return 0;
         });
@@ -70,16 +70,16 @@ class DnsCacheFlusherTest {
     @Test
     void flushBestEffortNeverThrows() {
         DnsCacheFlusher f = new DnsCacheFlusher(OsType.WINDOWS, true, cmd -> {
-            throw new IOException("sem ipconfig aqui");
+            throw new IOException("no ipconfig here");
         });
         assertDoesNotThrow(f::flushBestEffort);
         assertFalse(f.flushBestEffort());
     }
 
-    // ---- O flush é best-effort; ele nunca pode abrir um diálogo de senha ----
-    // Sem root, `systemd-resolve --flush-caches` não falha e segue em frente: o
-    // systemd-resolved responde pela varlink e o polkit abre "Authentication
-    // Required" no desktop pedindo senha. Um passo opcional não pode cobrar senha.
+    // ---- The flush is best-effort; it must never open a password dialog ----
+    // Without root, `systemd-resolve --flush-caches` does not fail and goes ahead: the
+    // systemd-resolved answers over varlink and polkit opens "Authentication
+    // Required" on the desktop asking for a password. An optional step must not demand one.
 
     @Test
     void nonRootNeverAttemptsSystemdFlush() {
@@ -90,7 +90,7 @@ class DnsCacheFlusherTest {
         });
         f.flush();
         assertTrue(attempted.isEmpty(),
-                "sem root nada pode ser tentado, senão o polkit abre o diálogo: " + attempted);
+                "without root nothing may be attempted, otherwise polkit opens the dialog: " + attempted);
     }
 
     @Test
@@ -101,7 +101,7 @@ class DnsCacheFlusherTest {
             return 0;
         });
         assertTrue(f.flush().success());
-        assertEquals(1, attempted.size(), "o primeiro comando que funciona encerra a tentativa");
+        assertEquals(1, attempted.size(), "the first command that works ends the attempt");
         assertEquals(List.of("systemd-resolve", "--flush-caches"), attempted.get(0));
     }
 
@@ -112,7 +112,7 @@ class DnsCacheFlusherTest {
             attempted.add(cmd);
             return 0;
         }).flush();
-        assertTrue(attempted.isEmpty(), "dscacheutil também cobra elevação: " + attempted);
+        assertTrue(attempted.isEmpty(), "dscacheutil also demands elevation: " + attempted);
     }
 
     @Test
@@ -137,11 +137,11 @@ class DnsCacheFlusherTest {
         } finally {
             System.setErr(original);
         }
-        String saida = err.toString();
-        assertTrue(saida.contains("reiniciar o navegador"), saida);
-        assertFalse(saida.contains("Permission denied"), saida);
-        assertFalse(saida.contains("systemd-resolve"),
-                "não tentamos nada, então não há comando para culpar: " + saida);
+        String output = err.toString();
+        assertTrue(output.contains("restarting your browser"), output);
+        assertFalse(output.contains("Permission denied"), output);
+        assertFalse(output.contains("systemd-resolve"),
+                "we attempted nothing, so there is no command to blame: " + output);
     }
 
     @Test

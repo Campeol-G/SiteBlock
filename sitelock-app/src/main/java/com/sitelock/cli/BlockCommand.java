@@ -19,24 +19,24 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 
 /**
- * siteblock block <dominio...> [--for <duracao>].
- * Valida todos antes de aplicar; se um for inválido, nada muda.
+ * siteblock block <domain...> [--for <duration>].
+ * Validates everything before applying; if any input is invalid, nothing changes.
  */
 @Command(name = "block",
-        description = "Bloqueia um ou mais dominios.",
+        description = "Blocks one or more domains.",
         mixinStandardHelpOptions = true)
 public class BlockCommand implements Callable<Integer> {
 
-    @Parameters(index = "0..*", paramLabel = "<dominio>",
-            description = "Um ou mais dominios. Ex.: tiktok.com vm.tiktok.com",
+    @Parameters(index = "0..*", paramLabel = "<domain>",
+            description = "One or more domains. E.g. tiktok.com vm.tiktok.com",
             arity = "1..*")
     List<String> domainsRaw = new ArrayList<>();
 
-    @Option(names = "--for", paramLabel = "<duracao>",
-            description = "Duracao do bloqueio. Ex.: 30m, 2h, 1h30m, 1d. Omitido = permanente.")
+    @Option(names = "--for", paramLabel = "<duration>",
+            description = "Block duration. E.g. 30m, 2h, 1h30m, 1d. Omitted = permanent.")
     String forDuration;
 
-    // Overrides para testes.
+    // Test overrides.
     @Option(names = "--hosts-file", hidden = true) String hostsFileOverride;
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
 
@@ -61,11 +61,11 @@ public class BlockCommand implements Callable<Integer> {
                 DomainUtils.NormalizationResult r = DomainUtils.normalize(raw);
                 domain = r.domain();
                 if (r.normalized()) {
-                    System.out.println("Aviso: entrada normalizada de '" + r.original()
-                            + "' para '" + r.domain() + "'.");
+                    System.out.println("Warning: normalized input from '" + r.original()
+                            + "' to '" + r.domain() + "'.");
                 }
             } catch (IllegalArgumentException e) {
-                System.err.println("Erro: " + e.getMessage());
+                System.err.println("Error: " + e.getMessage());
                 return 2;
             }
             if (!domains.contains(domain)) {
@@ -78,14 +78,14 @@ public class BlockCommand implements Callable<Integer> {
         try {
             duration = forDuration == null ? null : DurationParser.parse(forDuration);
         } catch (IllegalArgumentException e) {
-            System.err.println("Erro: " + e.getMessage());
+            System.err.println("Error: " + e.getMessage());
             return 2;
         }
 
         BlockService service = CliSupport.newService(hostsFileOverride, stateFileOverride);
 
         if (!service.isHostsWritable()) {
-            System.err.println("Erro: " + CliSupport.elevationHint("block " + String.join(" ", domains)
+            System.err.println("Error: " + CliSupport.elevationHint("block " + String.join(" ", domains)
                     + (forDuration != null ? " --for " + forDuration : "")));
             return 1;
         }
@@ -93,53 +93,53 @@ public class BlockCommand implements Callable<Integer> {
         try {
             BlockService.SweepResult sweep = service.sweepExpired();
             if (!sweep.removed().isEmpty()) {
-                System.out.println("Limpeza: bloqueios expirados removidos: "
+                System.out.println("Cleanup: expired blocks removed: "
                         + String.join(", ", sweep.removed()));
             }
         } catch (CorruptedStateException e) {
-            System.err.println("Erro: estado corrompido (" + e.getMessage() + ").");
-            System.err.println("Nada foi alterado. Para recriar do zero, apague o arquivo manualmente ou rode: siteblock reset --yes");
-            System.err.println("(O arquivo hosts (" + service.getHostsPath() + ") NÃO foi modificado por segurança.)");
+            System.err.println("Error: corrupted state (" + e.getMessage() + ").");
+            System.err.println("Nothing was changed. To recreate from scratch, delete the file manually or run: siteblock reset --yes");
+            System.err.println("(The hosts file (" + service.getHostsPath() + ") was NOT modified for safety.)");
             return 1;
         } catch (IOException e) {
-            System.err.println("Erro ao limpar bloqueios expirados: " + e.getMessage());
+            System.err.println("Error cleaning expired blocks: " + e.getMessage());
             return 1;
         }
 
         Instant now = Instant.now(service.getClock());
         final Instant expiresAt = duration == null ? null : now.plus(duration);
-        Plano plano = new Plano();
+        Plan plan = new Plan();
         try {
             service.inTransaction(
                     (state, tx) -> {
                         for (String domain : domains) {
                             BlockEntry previous = state.get(domain);
-                            plano.anteriores.put(domain, previous);
+                            plan.previous.put(domain, previous);
                             state.put(domain, new BlockEntry(domain, now, expiresAt));
                             try {
                                 tx.save(state);
                             } catch (IOException e) {
-                                System.err.println("Erro ao salvar estado de '" + domain + "': "
+                                System.err.println("Error saving state for '" + domain + "': "
                                         + e.getMessage());
                                 if (previous == null) {
                                     state.remove(domain);
                                 } else {
                                     state.put(domain, previous);
                                 }
-                                plano.falhas++;
+                                plan.failures++;
                                 continue;
                             }
-                            plano.gravados.add(domain);
+                            plan.recorded.add(domain);
                         }
-                        return plano;
+                        return plan;
                     },
                     (p, state, tx) -> {
-                        for (String domain : p.gravados) {
+                        for (String domain : p.recorded) {
                             try {
                                 service.getBlocker().block(domain);
                             } catch (IOException e) {
                                 try {
-                                    BlockEntry previous = p.anteriores.get(domain);
+                                    BlockEntry previous = p.previous.get(domain);
                                     if (previous == null) {
                                         state.remove(domain);
                                     } else {
@@ -147,28 +147,28 @@ public class BlockCommand implements Callable<Integer> {
                                     }
                                     tx.save(state);
                                 } catch (IOException rollbackFailure) {
-                                    System.err.println("Erro CRÍTICO: falha no hosts E ao reverter o estado de '"
+                                    System.err.println("CRITICAL ERROR: hosts failure AND state rollback failure for '"
                                             + domain + "': " + rollbackFailure.getMessage());
                                 }
-                                System.err.println("Erro ao bloquear '" + domain + "': " + e.getMessage());
-                                p.falhas++;
+                                System.err.println("Error blocking '" + domain + "': " + e.getMessage());
+                                p.failures++;
                                 continue;
                             }
                             if (expiresAt == null) {
-                                System.out.println("Bloqueado " + domain + ".");
+                                System.out.println("Blocked " + domain + ".");
                             } else {
-                                System.out.println("Bloqueado " + domain + " por "
+                                System.out.println("Blocked " + domain + " for "
                                         + DurationParser.formatRemaining(duration) + ".");
                             }
                         }
                     });
         } catch (IOException e) {
-            System.err.println("Erro ao gravar o estado: " + e.getMessage());
+            System.err.println("Error writing state: " + e.getMessage());
             return 1;
         }
-        int failures = plano.falhas;
+        int failures = plan.failures;
         if (failures == 0) {
-            // Best-effort: não muda o exit code; só avisa se o flush falhar.
+            // Best-effort: does not change exit code; only warns if flush fails.
             CliSupport.flushDnsBestEffort();
             if (forDuration != null) {
                 CliSupport.warnIfNoDaemon(stateFileOverride);
@@ -178,13 +178,12 @@ public class BlockCommand implements Callable<Integer> {
         return 1;
     }
 
-    // O que a transação do block carrega entre o estado e o hosts: os dois lados
-    // precisam saber o que foi gravado e qual era a entrada anterior de cada domínio,
-    // para reverter só o domínio que falhou, sem desfazer os outros.
-    private static final class Plano {
-
-        final List<String> gravados = new ArrayList<>();
-        final Map<String, BlockEntry> anteriores = new LinkedHashMap<>();
-        int falhas;
+    // What the block transaction carries between state and hosts: both sides
+    // need to know what was recorded and which was the previous entry for each domain,
+    // to roll back only the domain that failed, without undoing the others.
+    private static final class Plan {
+        final List<String> recorded = new ArrayList<>();
+        final Map<String, BlockEntry> previous = new LinkedHashMap<>();
+        int failures;
     }
 }

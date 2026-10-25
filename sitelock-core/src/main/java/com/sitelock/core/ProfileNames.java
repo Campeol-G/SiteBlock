@@ -3,12 +3,12 @@ package com.sitelock.core;
 import java.util.regex.Pattern;
 
 /**
- * Validação do nome de um perfil.
+ * Validation of a profile name.
  *
- * <p>O nome vira chave de objeto JSON e pode aparecer em log e em nome de
- * arquivo. Uma lista de caracteres proibidos sempre deixa um buraco — o
- * Windows não usa os mesmos separadores, e ninguém lembra de proibir o que não
- *occurreu. Uma regex só não tem buraco: ela é a definição do que é aceitável.
+ * <p>The name becomes a JSON object key and may appear in logs and in file
+ * names. A list of forbidden characters always leaves a gap — Windows uses
+ * different separators, and nobody remembers to forbid what never came up. A
+ * regex has no gaps: it defines exactly what is acceptable.
  */
 public final class ProfileNames {
 
@@ -22,14 +22,14 @@ public final class ProfileNames {
     }
 
     /**
-     * @throws IllegalArgumentException (e não {@code IllegalStateException}) com
-     *         mensagem pronta para o usuário final: o chamador não precisa
-     *         espalhar código de saída
+     * @throws IllegalArgumentException (not {@code IllegalStateException}) with a
+     *         message ready for the end user: the caller does not need to
+     *         spread exit codes around
      */
     public static String require(String name) {
         if (!isValid(name)) {
-            throw new IllegalArgumentException("Nome de perfil inválido: '" + name
-                    + "'. Use apenas letras, números, '-' e '_' (até 64 caracteres).");
+            throw new IllegalArgumentException("Invalid profile name: '" + name
+                    + "'. Use only letters, numbers, '-' and '_' (up to 64 characters).");
         }
         return name;
     }

@@ -8,11 +8,11 @@ import java.util.Map;
 import java.util.TreeMap;
 
 /**
- * Raiz do {@code profiles.json}: a versão do formato e os perfis por nome.
+ * Root of {@code profiles.json}: the format version and the profiles by name.
  *
- * <p>O {@code version} existe desde já pelo mesmo motivo do {@code version} em
- * qualquer arquivo de estado que vai evoluir: quando o formato mudar, o leitor
- * antigo precisa saber que está olhando outra coisa.
+ * <p>The {@code version} exists for the same reason as the {@code version} in
+ * any state file that will evolve: when the format changes, the old
+ * reader needs to know it is looking at a different format.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ProfileDocument {
@@ -22,7 +22,7 @@ public class ProfileDocument {
     private int version = CURRENT_VERSION;
     private Map<String, Profile> profiles = new TreeMap<>();
 
-    /** Construtor para o Jackson. */
+    /** Constructor for Jackson. */
     @JsonCreator
     public ProfileDocument(@JsonProperty("version") int version,
             @JsonProperty("profiles") Map<String, Profile> profiles) {

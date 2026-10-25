@@ -15,57 +15,56 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * O {@code dns start} de verdade: sobe um daemon numa porta alta e conversa
- * com ele.
+ * The real {@code dns start}: it brings up a daemon on a high port and talks to it.
  *
- * <p>Os testes do módulo DNS não tinham nenhum teste de socket; aqui o daemon
- * sobe de verdade (outro processo), o que é o caminho que o usuário percorre.
+ * <p>The DNS module tests had no socket test; here the daemon really comes up
+ * (another process), which is the path the user takes.
  */
 class DnsStartCommandTest {
 
     @TempDir
     Path tmp;
 
-    private static final int PORTA = 15399;
+    private static final int PORT = 15399;
 
     @Test
-    void allowFromChegaAoDaemon() throws Exception {
+    void allowFromReachesTheDaemon() throws Exception {
         Path stateFile = tmp.resolve("blocks.json");
         Files.writeString(stateFile, "{}", StandardCharsets.UTF_8);
-        // O estado do daemon mora no mesmo diretório do --state-file.
-        Path estado = tmp;
+        // The daemon state lives in the same directory as --state-file.
+        Path state = tmp;
 
         int exit = new CommandLine(new DnsCommand()).execute(
                 "start",
-                "--port", String.valueOf(PORTA),
+                "--port", String.valueOf(PORT),
                 "--upstream", "127.0.0.1",
                 "--allow-from", "203.0.113.0/24",
                 "--state-file", stateFile.toString());
 
         try {
-            assertEquals(0, exit, "o daemon deveria ter subido");
-            Path log = DnsDaemonState.logPath(estado);
-            String texto = Files.readString(log, StandardCharsets.UTF_8);
-            assertTrue(texto.contains("SITELOCK_DNS_LISTENING"),
-                    "o daemon precisa anunciar que está escutando: " + texto);
-            assertTrue(texto.contains("203.0.113.0/24"),
-                    "a origem liberada tem que chegar ao daemon: " + texto);
-            DnsDaemonState state = DnsDaemonState.read(estado).orElseThrow();
-            assertTrue(state.getProcessStartedAt() != null,
-                    "o pai tem que gravar a identidade do filho, não só o PID");
-            assertTrue(DnsDaemonState.isAlive(state),
-                    "o registro do filho tem que passar na checagem de identidade");
+            assertEquals(0, exit, "the daemon should have started");
+            Path log = DnsDaemonState.logPath(state);
+            String logText = Files.readString(log, StandardCharsets.UTF_8);
+            assertTrue(logText.contains("SITELOCK_DNS_LISTENING"),
+                    "the daemon must announce that it is listening: " + logText);
+            assertTrue(logText.contains("203.0.113.0/24"),
+                    "the allowed origin must reach the daemon: " + logText);
+            DnsDaemonState snapshot = DnsDaemonState.read(state).orElseThrow();
+            assertTrue(snapshot.getProcessStartedAt() != null,
+                    "the parent must record the child's identity, not only the PID");
+            assertTrue(DnsDaemonState.isAlive(snapshot),
+                    "the child's record must pass the identity check");
         } finally {
-            encerrar(estado);
+            stop(state);
         }
     }
 
     /**
-     * Um registro corrompido não pode trancar a máquina: o usuário precisa
-     * conseguir subir o servidor DNS sem apagar arquivo à mão.
+     * A corrupted record must not lock the machine: the user needs to be able to
+     * start the DNS server without deleting a file by hand.
      */
     @Test
-    void registroCorrompidoNaoImpedeOServidorDeSubir() throws Exception {
+    void corruptedRecordDoesNotPreventTheServerFromStarting() throws Exception {
         Path stateFile = tmp.resolve("blocks.json");
         Files.writeString(stateFile, "{}", StandardCharsets.UTF_8);
         Files.writeString(tmp.resolve("dns-server.json"),
@@ -73,57 +72,57 @@ class DnsStartCommandTest {
 
         int exit = new CommandLine(new DnsCommand()).execute(
                 "start",
-                "--port", String.valueOf(PORTA + 1),
+                "--port", String.valueOf(PORT + 1),
                 "--upstream", "127.0.0.1",
                 "--state-file", stateFile.toString());
         try {
             assertEquals(0, exit,
-                    "um registro corrompido não pode impedir o servidor DNS de subir");
-            DnsDaemonState state = DnsDaemonState.read(tmp).orElseThrow();
-            assertTrue(state.getPid() > 0, "o registro novo tem que valer");
+                    "a corrupted record must not prevent the DNS server from starting");
+            DnsDaemonState snapshot = DnsDaemonState.read(tmp).orElseThrow();
+            assertTrue(snapshot.getPid() > 0, "the new record must be valid");
         } finally {
-            encerrar(tmp);
+            stop(tmp);
         }
     }
 
-    // Derruba o daemon que o teste subiu (o PID está no registro de estado).
-    private void encerrar(Path estado) {
-        final Optional<DnsDaemonState> state;
+    // Takes down the daemon the test started (the PID is in the state record).
+    private void stop(Path state) {
+        final Optional<DnsDaemonState> snapshot;
         try {
-            state = DnsDaemonState.read(estado);
+            snapshot = DnsDaemonState.read(state);
         } catch (IOException ignored) {
             return;
         }
-        if (state.isEmpty() || state.get().getPid() <= 0) {
+        if (snapshot.isEmpty() || snapshot.get().getPid() <= 0) {
             return;
         }
 
-        long pid = state.get().getPid();
+        long pid = snapshot.get().getPid();
         ProcessHandle handle = ProcessHandle.of(pid).orElse(null);
         if (handle == null) {
             return;
         }
-        ProcessosDeTeste.matar(handle);
+        TestProcesses.kill(handle);
         if (handle.isAlive()) {
-            throw new AssertionError("o daemon não morreu: pid " + pid);
+            throw new AssertionError("the daemon did not die: pid " + pid);
         }
 
-        // O Windows pode segurar o handle do log por um instante depois do
-        // kill; apagar aqui (com retry) evita que o @TempDir falhe na limpeza.
-        Path log = DnsDaemonState.logPath(estado);
+        // Windows may hold the log handle for a moment after the kill; deleting it
+        // here (with retry) keeps @TempDir from failing during cleanup.
+        Path log = DnsDaemonState.logPath(state);
         for (int i = 0; i < 50; i++) {
             try {
                 Files.deleteIfExists(log);
                 return;
             } catch (IOException e) {
-                dormir(100);
+                sleep(100);
             }
         }
-        throw new AssertionError("o log do daemon continua travado: " + log
-                + " (pid " + pid + ", vivo=" + handle.isAlive() + ")");
+        throw new AssertionError("the daemon log is still locked: " + log
+                + " (pid " + pid + ", alive=" + handle.isAlive() + ")");
     }
 
-    private static void dormir(long millis) {
+    private static void sleep(long millis) {
         try {
             Thread.sleep(millis);
         } catch (InterruptedException e) {

@@ -4,48 +4,48 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A invocação da JVM que sobe o daemon de expiração.
+ * The JVM invocation that brings up the expiration daemon.
  *
- * <p>Fonte única para os quatro lugares que sobem o daemon: a unit do systemd,
- * a LaunchDaemon do macOS, a tarefa do Windows e o fork do {@code daemon
- * start}. Quando a linha de comando da JVM era montada em cada um deles, cada
- * um tinha a sua própria forma — e cada forma tinha o seu próprio defeito.
+ * <p>Single source for the four places that start the daemon: the systemd
+ * unit, the macOS LaunchDaemon, the Windows task and the {@code daemon
+ * start} fork. When the JVM command line was assembled in each of them, each
+ * had its own shape — and each shape had its own defect.
  *
- * <p><b>A regra que a JVM impõe:</b> com {@code -jar <jar>} a JVM lê o
- * {@code Main-Class} do manifest e <b>para de interpretar opções</b> — tudo
- * que vier depois do caminho do jar é argumento do programa. Duas consequências,
- * e as duas já quebraram o daemon de verdade:
+ * <p><b>The rule the JVM imposes:</b> with {@code -jar <jar>} the JVM reads the
+ * {@code Main-Class} from the manifest and <b>stops interpreting options</b> — everything
+ * after the jar path is a program argument. Two consequences,
+ * both of which have already broken the daemon in production:
  *
  * <ul>
- *   <li>o nome da classe depois do {@code -jar} sobra como argumento órfão, e
- *       o picocli recusa a invocação inteira com "Unmatched argument at
- *       index 0" e código de saída 2;</li>
- *   <li>uma {@code -D} depois do {@code -jar} deixa de ser property e vira
- *       argumento — "Unknown options", código 2 de novo.</li>
+ *   <li>the class name after {@code -jar} is left as a dangling argument, and
+ *       picocli rejects the whole invocation with "Unmatched argument at
+ *       index 0" and exit code 2;</li>
+ *   <li>a {@code -D} after {@code -jar} stops being a property and becomes
+ *       an argument — "Unknown options", exit code 2 again.</li>
  * </ul>
  *
- * <p>Sem {@code -jar} não há manifest: aí a JVM precisa do nome da classe, e
- * as {@code -D} podem vir antes ou depois do {@code -cp}, porque o classpath é
- * uma opção que consome um argumento só. É por isso que o nome da classe é
- * acrescentado só no caminho do classpath.
+ * <p>Without {@code -jar} there is no manifest: then the JVM needs the class name, and
+ * the {@code -D}s can come before or after {@code -cp}, because the classpath is an
+ * option that consumes exactly one argument. That is why the class name is
+ * appended only on the classpath path.
  *
- * <p>Ordem final: {@code java} → properties → {@code -jar} <i>ou</i>
- * {@code -cp} + classe → argumentos do programa.
+ * <p>Final order: {@code java} → properties → {@code -jar} <i>or</i>
+ * {@code -cp} + class → program arguments.
  */
 public final class DaemonCommandLine {
 
-    /** Classe principal; é o {@code Main-Class} do manifest do fat-jar. */
+    /** Main class; it is the {@code Main-Class} of the fat-jar manifest. */
     public static final String MAIN_CLASS = "com.sitelock.SiteLockApplication";
 
     private DaemonCommandLine() {
     }
 
     /**
-     * @param javaBin      executável da JVM
-     * @param jarPath      caminho do fat-jar; null ou vazio = usar o classpath
-     * @param classpath    classpath de reserva, usado só quando não há jar
-     * @param jvmProperties properties {@code -D...}, já no formato final
-     * @param appArgs      argumentos do programa (o que vem depois da classe)
+     * @param javaBin      the JVM executable
+     * @param jarPath      path of the fat-jar; null or empty = use the classpath
+     * @param classpath    fallback classpath, used only when there is no jar
+     * @param jvmProperties {@code -D...} properties, already in final form
+     * @param appArgs      program arguments (what comes after the class)
      */
     public static List<String> build(String javaBin, String jarPath, String classpath,
                                      List<String> jvmProperties, List<String> appArgs) {
@@ -57,7 +57,7 @@ public final class DaemonCommandLine {
         if (jarPath != null && !jarPath.isBlank()) {
             cmd.add("-jar");
             cmd.add(jarPath);
-            // Sem o nome da classe: com -jar, o manifest já diz qual é.
+            // No class name: with -jar, the manifest already says which one.
         } else {
             cmd.add("-cp");
             cmd.add(classpath == null ? "." : classpath);

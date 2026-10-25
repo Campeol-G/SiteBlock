@@ -9,27 +9,27 @@ import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Instala e remove o artefato de autostart, e chama o agendador.
+ * Installs and removes the autostart artifact, and invokes the scheduler.
  *
- * <p>{@code systemRoot} é {@code /} em produção e um diretório temporário nos
- * testes; todo caminho do artefato sai de {@code systemRoot.resolve(...)}, e é
- * isso que torna o enable/disable testável sem root.
+ * <p>{@code systemRoot} is {@code /} in production and a temporary directory in
+ * tests; every artifact path comes from {@code systemRoot.resolve(...)}, and that
+ * is what makes enable/disable testable without root.
  */
 public final class AutostartInstaller {
 
     /**
-     * Resultado de enable/disable: sucesso e o detalhe para o usuário.
+     * Result of enable/disable: success and the detail for the user.
      *
-     * <p>O caminho vem separado do texto: um para o olho da pessoa, outro para
-     * o artefato. Misturar os dois gerou uma unit apontando para o nada:
-     * {@code -jar "O jar já está no lugar: /opt/sitelock/siteblock.jar"}.
+     * <p>The path comes separately from the text: one is for the person's eyes,
+     * the other for the artifact. Mixing the two produced a unit pointing at
+     * nothing: {@code -jar "The jar is already in place: /opt/sitelock/siteblock.jar"}.
      *
-     * @param detail a mensagem para o usuário
-     * @param path   o caminho do jar ou do artefato; null quando não há
+     * @param detail the message for the user
+     * @param path   the path of the jar or artifact; null when there is none
      */
     public record InstallResult(boolean success, String detail, Path path) {
 
-        /** Resultado sem caminho: só a mensagem. */
+        /** Result without a path: just the message. */
         public InstallResult(boolean success, String detail) {
             this(success, detail, null);
         }
@@ -48,18 +48,17 @@ public final class AutostartInstaller {
     }
 
     /**
-     * Onde o jar do daemon é instalado: um diretório do sistema, que só o root
-     * escreve.
+     * Where the daemon jar is installed: a system directory that only root writes to.
      *
-     * <p><b>{@code mvn clean} não derruba mais o daemon.</b> A unit apontava
-     * para o {@code target/}, que o clean apaga: o systemd entrava em loop de
-     * crash e o prazo dos bloqueios parava de ser cumprido em silêncio.
+     * <p><b>{@code mvn clean} no longer brings the daemon down.</b> The unit pointed
+     * at {@code target/}, which clean deletes: systemd entered a crash loop, and
+     * block deadlines silently stopped being honored.
      *
-     * <p>O daemon também deixa de executar código que o usuário pode trocar:
-     * o jar original vive num diretório gravável por construção, que era o
-     * motivo do aviso de elevação. A cópia vive num diretório do root.
+     * <p>The daemon also stops running code the user can replace: the original jar
+     * lives in a directory that is writable by design, which was the reason for the
+     * elevation warning. The copy lives in a root-owned directory.
      *
-     * @param systemRoot {@code /} em produção; raiz de teste nos testes
+     * @param systemRoot {@code /} in production; a test root in tests
      */
     public static Path installDir(OsType os, Path systemRoot) {
         Path root = systemRoot == null ? Path.of("/") : systemRoot;
@@ -72,61 +71,62 @@ public final class AutostartInstaller {
         return root.resolve("opt/sitelock");
     }
 
-    /** O caminho do jar instalado. */
+    /** The path of the installed jar. */
     public static Path installJarPath(OsType os, Path systemRoot) {
         return installDir(os, systemRoot).resolve("siteblock.jar");
     }
 
     /**
-     * Copia o jar para o local estável.
+     * Copies the jar to the stable location.
      *
-     * <p>Sempre sobrescreve: reinstalar é como o daemon passa a rodar a versão
-     * nova depois de um rebuild. Copiar o jar para cima de si mesmo é pulado —
-     * o destino some no meio da cópia e o daemon fica sem executável.
+     * <p>Always overwrites: reinstalling is how the daemon starts running the new
+     * version after a rebuild. Copying the jar over itself is skipped — the
+     * destination vanishes in the middle of the copy and leaves the daemon without
+     * an executable.
      *
-     * @param origem jar a instalar; null ou inexistente = erro
+     * @param source jar to install; null or missing = error
      */
-    public static InstallResult installJar(OsType os, Path systemRoot, Path origem) {
-        if (origem == null) {
+    public static InstallResult installJar(OsType os, Path systemRoot, Path source) {
+        if (source == null) {
             return new InstallResult(false,
-                    "Não sei qual jar instalar. Rode a partir do siteblock empacotado, ou "
-                            + "informe o caminho: siteblock daemon enable --jar <caminho>");
+                    "I don't know which jar to install. Run from the packaged siteblock, or "
+                            + "provide the path: siteblock daemon enable --jar <path>");
         }
-        Path origemAbs = origem.toAbsolutePath();
-        if (!Files.exists(origemAbs)) {
-            return new InstallResult(false, "O jar " + origemAbs + " não existe. "
-                    + "Rode 'mvn package' para gerar, ou informe outro caminho com --jar.");
+        Path sourceAbs = source.toAbsolutePath();
+        if (!Files.exists(sourceAbs)) {
+            return new InstallResult(false, "The jar " + sourceAbs + " does not exist. "
+                    + "Run 'mvn package' to build it, or provide another path with --jar.");
         }
-        Path destino = installJarPath(os, systemRoot);
-        if (destino.toAbsolutePath().equals(origemAbs)) {
-            return new InstallResult(true, "O jar já está no lugar: " + destino, destino);
+        Path target = installJarPath(os, systemRoot);
+        if (target.toAbsolutePath().equals(sourceAbs)) {
+            return new InstallResult(true, "The jar is already in place: " + target, target);
         }
         try {
-            Path parent = destino.getParent();
+            Path parent = target.getParent();
             if (parent != null) {
                 Files.createDirectories(parent);
             }
-            Files.copy(origemAbs, destino,
+            Files.copy(sourceAbs, target,
                     java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            return new InstallResult(true, "Jar instalado em " + destino, destino);
+            return new InstallResult(true, "Jar installed at " + target, target);
         } catch (IOException e) {
             return new InstallResult(false,
-                    "Falha ao instalar o jar em " + destino + ": " + e.getMessage());
+                    "Failed to install the jar at " + target + ": " + e.getMessage());
         }
     }
 
     /**
-     * Onde vive o artefato neste SO.
+     * Where the artifact lives on this OS.
      *
-     * <p>No Windows não existe arquivo: a definição vive na Tarefa do
-     * Agendador, que não está em lugar nenhum que se possa apontar. Por isso
-     * devolve {@code null} e {@link #install} não escreve nada.
+     * <p>On Windows there is no file: the definition lives in the Task Scheduler
+     * task, so there is no path to return. That is why this returns
+     * {@code null} and {@link #install} writes nothing.
      *
-     * <p>Escrever criaria uma árvore {@code C:\etc\systemd\system\} de lixo com
-     * uma unit Linux dentro, e ainda assim imprimiria "instalado".
+     * <p>Writing would create a garbage {@code C:\etc\systemd\system\} tree with a
+     * Linux unit inside it, and still print "installed".
      *
-     * @param systemRoot {@code /} em produção; raiz de teste nos testes
-     * @return o caminho do artefato, ou null se este SO não usa arquivo
+     * @param systemRoot {@code /} in production; a test root in tests
+     * @return the artifact path, or null if this OS does not use a file
      */
     public static Path artifactPath(OsType os, Path systemRoot) {
         if (os != null && os.isWindows()) {
@@ -144,15 +144,15 @@ public final class AutostartInstaller {
     }
 
     /**
-     * O autostart está ligado?
+     * Is autostart enabled?
      *
-     * <p>Estático e sem {@code CommandRunner} de propósito: o
-     * {@code daemon status} e o aviso do {@code block --for} consultam isto sem
-     * precisar de elevação nem montar executor nenhum.
+     * <p>Static and without a {@code CommandRunner} on purpose: {@code daemon status}
+     * and the {@code block --for} warning check this without needing elevation or
+     * building an executor.
      *
-     * <p>No Linux e no macOS é só teste de existência do arquivo. No Windows
-     * não há arquivo, então é um {@code schtasks /query} — também sem elevação,
-     * e também só leitura.
+     * <p>On Linux and macOS it is just an existence check for the file. On Windows
+     * there is no file, so it is a {@code schtasks /query} — also without elevation,
+     * and also read-only.
      */
     public static boolean isEnabled(OsType os, Path systemRoot) {
         if (os != null && os.isWindows()) {
@@ -167,76 +167,76 @@ public final class AutostartInstaller {
         return artifact != null && Files.exists(artifact);
     }
 
-    /** Escreve o artefato e liga o agendador. */
+    /** Writes the artifact and enables the scheduler. */
     public InstallResult install(AutostartPaths paths) {
         Path target = artifactPath();
         if (target == null) {
-            // Windows: a definição vive na Tarefa, não em arquivo.
-            List<String> comando = AutostartArtifact.schtasksArgs(paths);
+            // Windows: the definition lives in the task, not in a file.
+            List<String> command = AutostartArtifact.schtasksArgs(paths);
             try {
-                int exit = runner.run(comando);
+                int exit = runner.run(command);
                 if (exit != 0) {
                     return new InstallResult(false,
-                            String.join(" ", comando) + " falhou com código " + exit);
+                            String.join(" ", command) + " failed with code " + exit);
                 }
             } catch (IOException e) {
-                return new InstallResult(false, String.join(" ", comando) + ": " + e.getMessage());
+                return new InstallResult(false, String.join(" ", command) + ": " + e.getMessage());
             }
-            return new InstallResult(true, String.join(" ", comando));
+            return new InstallResult(true, String.join(" ", command));
         }
         try {
             Path parent = target.getParent();
             if (parent != null) {
                 Files.createDirectories(parent);
             }
-            String conteudo = os.isMac()
+            String content = os.isMac()
                     ? AutostartArtifact.launchdPlist(paths)
                     : AutostartArtifact.systemdUnit(paths);
-            Files.writeString(target, conteudo, StandardCharsets.UTF_8);
+            Files.writeString(target, content, StandardCharsets.UTF_8);
         } catch (IOException e) {
             return new InstallResult(false,
-                    "Falha ao escrever " + target + ": " + e.getMessage());
+                    "Failed to write " + target + ": " + e.getMessage());
         }
 
-        List<String> comando = schedulerEnableCommand(os, systemRoot);
+        List<String> command = schedulerEnableCommand(os, systemRoot);
         try {
-            // daemon-reload antes de enable: sem ele o systemd pode responder com
-            // a unit antiga em cache e ignorar a que acabamos de escrever.
+            // daemon-reload before enable: without it, systemd may answer with the
+            // old unit cached and ignore the one we just wrote.
             runner.run(List.of("systemctl", "daemon-reload"));
         } catch (IOException ignored) {
-            // Sem systemd não há o que recarregar; o enable abaixo avisa.
+            // Without systemd there is nothing to reload; enable below reports it.
         }
         try {
-            int exit = runner.run(comando);
+            int exit = runner.run(command);
             if (exit != 0) {
-                return new InstallResult(false, String.join(" ", comando) + " falhou com código " + exit);
+                return new InstallResult(false, String.join(" ", command) + " failed with code " + exit);
             }
         } catch (IOException e) {
-            return new InstallResult(false, String.join(" ", comando) + ": " + e.getMessage());
+            return new InstallResult(false, String.join(" ", command) + ": " + e.getMessage());
         }
-        return new InstallResult(true, String.join(" ", comando), target);
+        return new InstallResult(true, String.join(" ", command), target);
     }
 
-    /** Remove o artefato e desliga o agendador. */
+    /** Removes the artifact and disables the scheduler. */
     public InstallResult disable() {
         Path target = artifactPath();
         if (target != null) {
             try {
                 Files.deleteIfExists(target);
             } catch (IOException e) {
-                return new InstallResult(false, "Falha ao remover o artefato: " + e.getMessage());
+                return new InstallResult(false, "Failed to remove the artifact: " + e.getMessage());
             }
         }
-        List<String> comando = os.isWindows() ? AutostartArtifact.schtasksDeleteArgs()
+        List<String> command = os.isWindows() ? AutostartArtifact.schtasksDeleteArgs()
                 : schedulerDisableCommand(os, systemRoot);
         try {
-            runner.run(comando);
+            runner.run(command);
         } catch (IOException e) {
-            // O artefato já foi removido; o agendador não existir é o menor problema.
-            return new InstallResult(true, "Artefato removido; " + String.join(" ", comando)
-                    + " não pôde ser executado (" + e.getMessage() + ").", target);
+            // The artifact is already gone; a missing scheduler is the least of our problems.
+            return new InstallResult(true, "Artifact removed; " + String.join(" ", command)
+                    + " could not be run (" + e.getMessage() + ").", target);
         }
-        return new InstallResult(true, String.join(" ", comando), target);
+        return new InstallResult(true, String.join(" ", command), target);
     }
 
     static List<String> schedulerEnableCommand(OsType os, Path systemRoot) {
@@ -258,8 +258,8 @@ public final class AutostartInstaller {
     static int runWithProcessBuilder(List<String> command) throws IOException {
         ProcessBuilder pb = new ProcessBuilder(command);
         pb.redirectErrorStream(true);
-        // Nada da saída é usado aqui; descartar evita encher o pipe e travar
-        // antes do waitFor em um comando verboso.
+        // None of the output is used here; discarding it avoids filling the pipe and
+        // hanging before waitFor on a verbose command.
         pb.redirectOutput(ProcessBuilder.Redirect.DISCARD);
         Process p = pb.start();
         boolean done;
@@ -268,11 +268,11 @@ public final class AutostartInstaller {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             p.destroyForcibly();
-            throw new IOException("interrompido aguardando " + command.get(0), e);
+            throw new IOException("interrupted while waiting for " + command.get(0), e);
         }
         if (!done) {
             p.destroyForcibly();
-            throw new IOException("timeout (" + COMMAND_TIMEOUT_SECONDS + "s) em "
+            throw new IOException("timeout (" + COMMAND_TIMEOUT_SECONDS + "s) on "
                     + String.join(" ", command).toLowerCase(Locale.ROOT));
         }
         return p.exitValue();

@@ -14,85 +14,85 @@ import java.util.TreeMap;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * A transação do {@link BlockStore}.
+ * The transaction of the {@link BlockStore}.
  *
- * <p>Ela existe para impedir um read-modify-write sem proteção: o {@code load}
- * acontece fora da trava, e o bloqueio feito por outro terminal nesse intervalo
- * é apagado do JSON enquanto continua no {@code /etc/hosts}.
+ * <p>It exists to prevent an unprotected read-modify-write: the {@code load}
+ * happens outside the lock, and a block made by another terminal in that interval
+ * is erased from the JSON while it remains in {@code /etc/hosts}.
  *
- * <p>No teste, o outro escritor grava o arquivo por fora da trava, e a transação
- * tem que aplicar a própria mudança <b>por cima</b> do que está no disco.
+ * <p>In the test, the other writer writes the file outside the lock, and the transaction
+ * has to apply its own change <b>on top</b> of what is on disk.
  */
 class BlockStoreTransactionTest {
 
     @TempDir
     Path tmp;
 
-    private static final Instant AGORA = Instant.parse("2026-10-15T12:00:00Z");
+    private static final Instant NOW = Instant.parse("2026-10-15T12:00:00Z");
 
-    private static BlockEntry entrada(String domain) {
-        return new BlockEntry(domain, AGORA, null);
+    private static BlockEntry entry(String domain) {
+        return new BlockEntry(domain, NOW, null);
     }
 
-    // Grava o estado por fora da trava, como um escritor que não a respeita.
-    private void escreverPorForaDaTrava(Path stateFile, Map<String, BlockEntry> estado)
+    // Writes the state outside the lock, like a writer that does not respect it.
+    private void writeOutsideTheLock(Path stateFile, Map<String, BlockEntry> state)
             throws IOException {
         Files.writeString(stateFile, BlockStore.defaultMapper()
-                .writerWithDefaultPrettyPrinter().writeValueAsString(estado),
+                .writerWithDefaultPrettyPrinter().writeValueAsString(state),
                 StandardCharsets.UTF_8);
     }
 
     @Test
-    void escritaConcorrenteNaoSePerde() throws Exception {
+    void concurrentWriteIsNotLost() throws Exception {
         Path stateFile = tmp.resolve("blocks.json");
         BlockStore store = new BlockStore(stateFile);
-        Map<String, BlockEntry> inicial = new TreeMap<>();
-        inicial.put("a.com", entrada("a.com"));
-        store.save(inicial);
+        Map<String, BlockEntry> initial = new TreeMap<>();
+        initial.put("a.com", entry("a.com"));
+        store.save(initial);
 
         store.inTransaction(tx -> {
             Map<String, BlockEntry> state = tx.load();
-            state.put("b.com", entrada("b.com"));
+            state.put("b.com", entry("b.com"));
 
-            // Outra via: enquanto a transação segura a trava, alguém grava o
-            // estado por fora dela. É o "block de outro terminal": lê o que
-            // está no disco, acrescenta o domínio e grava.
-            Map<String, BlockEntry> concorrente = new TreeMap<>(store.load());
-            concorrente.put("c.com", entrada("c.com"));
-            escreverPorForaDaTrava(stateFile, concorrente);
+            // Another path: while the transaction holds the lock, someone writes the
+            // state outside of it. That is the "block from another terminal": read what
+            // is on disk, add the domain and write.
+            Map<String, BlockEntry> concurrent = new TreeMap<>(store.load());
+            concurrent.put("c.com", entry("c.com"));
+            writeOutsideTheLock(stateFile, concurrent);
 
             tx.save(state);
             return null;
         });
 
-        Map<String, BlockEntry> depois = store.load();
-        assertTrue(depois.containsKey("c.com"),
-                "a escrita concorrente não pode se perder: " + depois.keySet());
-        assertTrue(depois.containsKey("b.com"),
-                "a mudança da transação tem que estar lá: " + depois.keySet());
-        assertTrue(depois.containsKey("a.com"),
-                "o que já existia tem que continuar: " + depois.keySet());
+        Map<String, BlockEntry> after = store.load();
+        assertTrue(after.containsKey("c.com"),
+                "the concurrent write must not be lost: " + after.keySet());
+        assertTrue(after.containsKey("b.com"),
+                "the transaction's change has to be there: " + after.keySet());
+        assertTrue(after.containsKey("a.com"),
+                "what already existed must remain: " + after.keySet());
     }
 
     @Test
-    void aTransacaoGravaOrdenado() throws Exception {
+    void transactionWritesInSortedOrder() throws Exception {
         Path stateFile = tmp.resolve("blocks.json");
         BlockStore store = new BlockStore(stateFile);
 
         store.inTransaction(tx -> {
             Map<String, BlockEntry> state = tx.load();
-            state.put("zeta.com", entrada("zeta.com"));
-            state.put("alfa.com", entrada("alfa.com"));
-            state.put("mike.com", entrada("mike.com"));
+            state.put("zeta.com", entry("zeta.com"));
+            state.put("alpha.com", entry("alpha.com"));
+            state.put("mike.com", entry("mike.com"));
             tx.save(state);
             return null;
         });
 
         String json = Files.readString(stateFile, StandardCharsets.UTF_8);
         int zeta = json.indexOf("zeta.com");
-        int alfa = json.indexOf("alfa.com");
+        int alpha = json.indexOf("alpha.com");
         int mike = json.indexOf("mike.com");
-        assertTrue(alfa < mike && mike < zeta,
-                "o JSON tem que sair ordenado: " + json);
+        assertTrue(alpha < mike && mike < zeta,
+                "the JSON must be sorted: " + json);
     }
 }

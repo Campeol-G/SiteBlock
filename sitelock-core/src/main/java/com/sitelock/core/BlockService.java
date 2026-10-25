@@ -13,8 +13,8 @@ import java.util.Map;
 import java.util.TreeMap;
 
 /**
- * Mantém JSON ({@link BlockStore}) e arquivo hosts ({@link SiteBlocker}) em sync.
- * Todo comando CLI chama {@link #sweepExpired()} no início.
+ * Keeps the JSON ({@link BlockStore}) and the hosts file ({@link SiteBlocker}) in sync.
+ * Every CLI command calls {@link #sweepExpired()} at the start.
  */
 public class BlockService {
 
@@ -31,27 +31,27 @@ public class BlockService {
     }
 
     /**
-     * Resultado de uma varredura.
+     * Result of a sweep.
      *
-     * @param removed domínios efetivamente liberados do hosts e do estado
-     * @param failures vazio sempre — o desbloqueio em lote é atômico (tudo sai ou
-     *                 nada sai), então o campo só sobra por compatibilidade de
-     *                 assinatura; os chamadores leem {@code removed}
-     * @param skippedDueToPermission true quando o hosts não está gravável e nada
-     *                 foi tentado
-     * @param state o estado depois da varredura
+     * @param removed domains actually released from the hosts file and the state
+     * @param failures always empty — the batch unblock is atomic (everything comes out or
+     *                 nothing does), so the field only remains for signature
+     *                 compatibility; callers read {@code removed}
+     * @param skippedDueToPermission true when the hosts file is not writable and nothing
+     *                 was attempted
+     * @param state the state after the sweep
      */
     public record SweepResult(List<String> removed, List<String> failures,
                               boolean skippedDueToPermission, Map<String, BlockEntry> state) {
     }
 
-    // POR QUE: o load → unblockAll → save roda inteiro numa transação do BlockStore:
-    // fora dela, um block de outro terminal entre o load e o save seria apagado do
-    // estado, e o domínio ficaria preso no hosts sem registro (janela sempre aberta).
+    // WHY: the load → unblockAll → save runs entirely inside a BlockStore transaction:
+    // outside it, a block from another terminal between the load and the save would be erased from
+    // the state, and the domain would be stuck in the hosts file with no record (a window that is always open).
     /**
-     * Remove do hosts e do JSON os bloqueios já expirados.
-     * Se o hosts não for gravável e houver expirados, nada muda e
-     * {@code skippedDueToPermission} volta true.
+     * Removes the already expired blocks from the hosts file and the JSON.
+     * If the hosts file is not writable and there are expired blocks, nothing changes and
+     * {@code skippedDueToPermission} comes back true.
      */
     public SweepResult sweepExpired() throws IOException {
         return store.inTransaction(tx -> {
@@ -72,14 +72,14 @@ public class BlockService {
             try {
                 blocker.unblockAll(expired);
             } catch (IOException e) {
-                // O lote é atômico: ou o hosts inteiro foi reescrito, ou nada foi.
-                // Por isso o estado não é tocado — a próxima varredura tenta de novo,
-                // em vez de deixar o domínio preso no JSON (que o sweep não varre).
+                // The batch is atomic: either the whole hosts file was rewritten, or none of it was.
+                // That is why the state is not touched — the next sweep tries again,
+                // instead of leaving the domain stuck in the JSON (which the sweep does not walk).
                 List<String> failures = new ArrayList<>();
                 for (String domain : expired) {
                     failures.add(domain + ": " + e.getMessage());
                 }
-                throw new IOException("Falha ao limpar expirados do hosts: "
+                throw new IOException("Failed to clear expired entries from the hosts file: "
                         + String.join("; ", failures), e);
             }
             state.keySet().removeAll(expired);
@@ -96,29 +96,29 @@ public class BlockService {
         return parent == null || Files.isWritable(parent);
     }
 
-    // POR QUE: o status roda sem elevação e precisa conferir o hosts contra o
-    // estado — isHostsWritable() fala de GRAVAR, não de LER, e só a leitura interessa.
+    // WHY: status runs without elevation and needs to check the hosts file against the
+    // state — isHostsWritable() is about WRITING, not READING, and only reading matters here.
     /**
-     * O conteúdo do hosts.
+     * The content of the hosts file.
      *
-     * @throws IOException se o hosts não pôde ser lido
+     * @throws IOException if the hosts file could not be read
      */
     public String readHostsContent() throws IOException {
         return HostsFileManager.readHosts(hostsPath);
     }
 
-    // POR QUE: load, save e a escrita no hosts ficam sob a mesma trava do
-    // BlockStore — fora dela, um block de outro terminal entre o load e o save
-    // seria apagado do JSON, e o domínio continuaria no hosts sem registro.
+    // WHY: load, save and the hosts write stay under the same lock as the
+    // BlockStore — outside it, a block from another terminal between the load and the save
+    // would be erased from the JSON, and the domain would remain in the hosts file with no record.
 
-    // A ordem é Estado → hosts e não a inversa: o caminho inverso prende o domínio
-    // para sempre (o sweep varre o JSON, não o hosts). A ordem escolhida deixa o
-    // domínio livre se o processo morrer no meio — fail-open e silencioso.
+    // The order is State → hosts and not the reverse: the reverse path traps the domain
+    // forever (the sweep walks the JSON, not the hosts file). The chosen order leaves the
+    // domain free if the process dies halfway — fail-open and silent.
     /**
-     * Aplica uma mudança de estado e a escrita no hosts como uma unidade.
+     * Applies a state change and the hosts write as one unit.
      *
-     * @param transform o que fazer com o estado carregado; recebe uma cópia
-     *                  que pode mutar à vontade e a transação, para gravar
+     * @param transform what to do with the loaded state; receives a copy
+     *                  that may be mutated freely, and the transaction to save with
      */
     public <R> R inTransaction(StateTransform<R> transform, HostsWriter<R> hosts)
             throws IOException {
@@ -129,8 +129,8 @@ public class BlockService {
             try {
                 hosts.write(result, working, tx);
             } catch (IOException e) {
-                // O hosts não aceitou: o estado tem que voltar, senão o JSON
-                // diz "bloqueado" e o hosts não tem a linha.
+                // The hosts file refused: the state has to be rolled back, otherwise the JSON
+                // says "blocked" and the hosts file has no line.
                 try {
                     tx.save(before);
                 } catch (IOException rollback) {
@@ -142,13 +142,13 @@ public class BlockService {
         });
     }
 
-    /** O que se faz com o estado carregado, dentro da transação. */
+    /** What is done with the loaded state, inside the transaction. */
     @FunctionalInterface
     public interface StateTransform<R> {
         R apply(Map<String, BlockEntry> state, BlockStore.Transaction tx) throws IOException;
     }
 
-    /** A escrita no hosts, dentro da transação. */
+    /** The hosts write, inside the transaction. */
     @FunctionalInterface
     public interface HostsWriter<R> {
         void write(R result, Map<String, BlockEntry> state, BlockStore.Transaction tx)

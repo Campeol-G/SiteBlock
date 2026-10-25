@@ -24,7 +24,6 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
@@ -34,15 +33,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * O laço de expiração e o seu ciclo de vida.
+ * The expiration loop and its lifecycle.
  *
- * <p>O teste que importa aqui é
- * {@link #pinnedStateDirIsUsedWhenSudoUserIsAbsent()}: ele sobe o daemon num
- * subprocesso com {@code SUDO_USER} removido do ambiente e {@code user.home}
- * apontando para um diretório vazio, e afirma que ele operou sobre o
- * {@code stateDir} cravado. Um daemon que caísse no {@code user.home} leria o
- * {@code blocks.json} do root, não acharia nada, e todo o resto continuaria
- * verde — é um no-op silencioso, e nenhum teste escrito à mão o veria.
+ * <p>The test that matters here is
+ * {@link #pinnedStateDirIsUsedWhenSudoUserIsAbsent()}: it starts the daemon in a
+ * subprocess with {@code SUDO_USER} removed from the environment and {@code user.home}
+ * pointing at an empty directory, and asserts that it operated on the pinned
+ * {@code stateDir}. A daemon that fell back to {@code user.home} would read root's
+ * {@code blocks.json}, find nothing, and every other test would stay green — it is a
+ * silent no-op, and no hand-written test would see it.
  */
 class DaemonCliTest {
 
@@ -60,52 +59,52 @@ class DaemonCliTest {
     }
 
     private Path stateDir() {
-        return tmp.resolve("estado");
+        return tmp.resolve("state");
     }
 
     private Path stateFile() {
         return stateDir().resolve("blocks.json");
     }
 
-    private void semear(Map<String, Instant> entradas) throws Exception {
+    private void seed(Map<String, Instant> entries) throws Exception {
         Files.createDirectories(stateDir());
         Map<String, BlockEntry> state = new TreeMap<>();
-        Instant criadas = Instant.parse("2026-10-15T08:00:00Z");
-        for (Map.Entry<String, Instant> e : entradas.entrySet()) {
-            state.put(e.getKey(), new BlockEntry(e.getKey(), criadas, e.getValue()));
+        Instant created = Instant.parse("2026-10-15T08:00:00Z");
+        for (Map.Entry<String, Instant> e : entries.entrySet()) {
+            state.put(e.getKey(), new BlockEntry(e.getKey(), created, e.getValue()));
         }
         new BlockStore(stateFile()).save(state);
     }
 
-    private static Map<String, Instant> prazos(Object... pares) {
+    private static Map<String, Instant> deadlines(Object... pairs) {
         Map<String, Instant> m = new TreeMap<>();
-        for (int i = 0; i < pares.length; i += 2) {
-            m.put((String) pares[i], (Instant) pares[i + 1]);
+        for (int i = 0; i < pairs.length; i += 2) {
+            m.put((String) pairs[i], (Instant) pairs[i + 1]);
         }
         return m;
     }
 
-    private String estado() throws Exception {
+    private String state() throws Exception {
         return Files.readString(stateFile(), StandardCharsets.UTF_8);
     }
 
-    private String hostsConteudo() throws Exception {
+    private String hostsContent() throws Exception {
         return Files.readString(hosts(), StandardCharsets.UTF_8);
     }
 
-    // ---- execução do daemon num subprocesso ----
+    // ---- running the daemon in a subprocess ----
 
-    private List<String> comandoDoDaemon(String... extras) throws Exception {
+    private List<String> daemonCommand(String... extras) throws Exception {
         List<String> cmd = new ArrayList<>();
         cmd.add(Paths.get(System.getProperty("java.home"), "bin", "java").toString());
         cmd.add("-cp");
         cmd.add(System.getProperty("java.class.path"));
         cmd.add("-Dsitelock.stateDir=" + stateDir());
         cmd.add("-Dsitelock.hostsFile=" + hosts());
-        cmd.add("-Duser.home=" + tmp.resolve("home-vazio"));
+        cmd.add("-Duser.home=" + tmp.resolve("empty-home"));
         cmd.add("-Dsiteblock.user=" + System.getProperty("user.name", ""));
-        // O log do teste é lido como UTF-8; no Windows o padrão do processo é
-        // a codepage nativa, que quebra a leitura em "próxima volta".
+        // The test log is read as UTF-8; on Windows the process default is the
+        // native code page, which breaks the "next turn" read.
         cmd.add("-Dstdout.encoding=UTF-8");
         cmd.add("-Dstderr.encoding=UTF-8");
         cmd.add("com.sitelock.SiteLockApplication");
@@ -117,22 +116,22 @@ class DaemonCliTest {
         return cmd;
     }
 
-    private Process iniciar(String... extras) throws Exception {
-        Files.createDirectories(tmp.resolve("home-vazio"));
-        ProcessBuilder pb = new ProcessBuilder(comandoDoDaemon(extras));
-        // Sem SUDO_USER: é o que o systemd, o launchd e o Task Scheduler fazem.
+    private Process start(String... extras) throws Exception {
+        Files.createDirectories(tmp.resolve("empty-home"));
+        ProcessBuilder pb = new ProcessBuilder(daemonCommand(extras));
+        // No SUDO_USER: this is what systemd, launchd, and Task Scheduler do.
         pb.environment().remove("SUDO_USER");
         pb.redirectErrorStream(true);
-        // A saída vai para arquivo, e não para um pipe: um daemon de laço nunca
-        // fecha stdout, e ler o stream até o EOF travaria o teste para sempre.
-        log = tmp.resolve("daemon-saida.log");
+        // Output goes to a file, not to a pipe: a loop daemon never closes stdout,
+        // and reading the stream to EOF would hang the test forever.
+        log = tmp.resolve("daemon-output.log");
         pb.redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile()));
         return pb.start();
     }
 
     private Path log;
 
-    private String saidaDoDaemon() {
+    private String daemonOutput() {
         try {
             return Files.exists(log) ? Files.readString(log, StandardCharsets.UTF_8) : "";
         } catch (Exception e) {
@@ -140,47 +139,47 @@ class DaemonCliTest {
         }
     }
 
-    // ---- os testes ----
+    // ---- the tests ----
 
     @Test
     void pinnedStateDirIsUsedWhenSudoUserIsAbsent() throws Exception {
         HostsFileManager.blockInFile(hosts(), tmp.resolve("hosts.backup"), tmp.resolve("hosts.lock"),
-                List.of("vencido.com"));
-        semear(prazos("vencido.com", Instant.parse("2020-01-01T00:00:00Z")));
+                List.of("expired.com"));
+        seed(deadlines("expired.com", Instant.parse("2020-01-01T00:00:00Z")));
 
-        Process p = iniciar("--once");
+        Process p = start("--once");
         int exit = p.waitFor();
-        String saida = saidaDoDaemon();
+        String output = daemonOutput();
 
-        assertEquals(0, exit, "o daemon falhou:\n" + saida);
-        assertFalse(hostsConteudo().contains("vencido.com"),
-                "o hosts cravado deveria ter perdido o domínio — se não perdeu, o daemon "
-                        + "leu user.home em vez do stateDir:\n" + saida);
-        assertFalse(estado().contains("vencido.com"), "o estado cravado deveria ter perdido o domínio");
+        assertEquals(0, exit, "the daemon failed:\n" + output);
+        assertFalse(hostsContent().contains("expired.com"),
+                "the pinned hosts file should have lost the domain — if it did not, the daemon "
+                        + "read user.home instead of the stateDir:\n" + output);
+        assertFalse(state().contains("expired.com"), "the pinned state should have lost the domain");
     }
 
     @Test
     void onceSweepRemovesNothingWhenNothingExpired() throws Exception {
         HostsFileManager.blockInFile(hosts(), tmp.resolve("hosts.backup"), tmp.resolve("hosts.lock"),
-                List.of("permanente.com"));
-        semear(prazos("permanente.com", null));
-        String antes = hostsConteudo();
+                List.of("permanent.com"));
+        seed(deadlines("permanent.com", null));
+        String before = hostsContent();
 
-        Process p = iniciar("--once");
+        Process p = start("--once");
         int exit = p.waitFor();
-        String saida = saidaDoDaemon();
+        String output = daemonOutput();
 
-        assertEquals(0, exit, saida);
-        assertEquals(antes, hostsConteudo(), "permanente não pode ser tocado");
-        assertTrue(estado().contains("permanente.com"));
+        assertEquals(0, exit, output);
+        assertEquals(before, hostsContent(), "a permanent block must not be touched");
+        assertTrue(state().contains("permanent.com"));
     }
 
     @Test
     void childWritesItsOwnStateFile() throws Exception {
-        semear(prazos("permanente.com", null));
-        Files.createDirectories(tmp.resolve("home-vazio"));
+        seed(deadlines("permanent.com", null));
+        Files.createDirectories(tmp.resolve("empty-home"));
 
-        Process p = iniciar("--interval", "1");
+        Process p = start("--interval", "1");
         Path daemonJson = ExpirationDaemonState.statePath(stateDir());
 
         try {
@@ -192,55 +191,55 @@ class DaemonCliTest {
                 }
             }
             assertTrue(state != null,
-                "o daemon tem que escrever o próprio daemon.json — sob autostart não há pai "
-                        + "para escrever por ele");
-            assertEquals(p.pid(), state.getPid(), "o PID gravado tem que ser o do próprio daemon");
+                "the daemon must write its own daemon.json — under autostart there is no parent "
+                        + "to write it for the child");
+            assertEquals(p.pid(), state.getPid(), "the recorded PID must be the daemon's own");
             assertEquals(stateDir().toString(), state.getStateDir(),
-                    "o stateDir gravado tem que ser o cravado, não o do user.home");
+                    "the recorded stateDir must be the pinned one, not the one from user.home");
         } finally {
             p.destroyForcibly();
             p.waitFor();
         }
 
-        // ATENÇÃO: destroyForcibly é SIGKILL, o shutdown hook NÃO roda e o
-        // registro órfão fica para trás — é por isso que o lock de instância
-        // única é FileLock e não "o PID existe".
+        // WARNING: destroyForcibly is SIGKILL, the shutdown hook does NOT run, and the
+        // orphan record is left behind — that is why the single-instance lock is a
+        // FileLock and not "the PID exists".
         if (Files.exists(daemonJson)) {
             assertFalse(ExpirationDaemonState.isAlive(
                             ExpirationDaemonState.read(stateDir()).orElse(null)),
-                    "um registro de processo morto tem que ser reconhecido como morto");
+                    "a record of a dead process must be recognized as dead");
         }
     }
 
     @Test
     void concurrentBlocksSurviveADaemonSweep() throws Exception {
-        // POR QUE: sem a transação no BlockStore, o sweep grava o estado que
-        // leu antes e o bloqueio concorrente some do JSON — fica preso no hosts
-        // sem registro, e o sweep nunca repara porque varre justamente o JSON.
-        semear(prazos("vencido.com", Instant.parse("2020-01-01T00:00:00Z")));
+        // WHY: without the transaction in BlockStore, the sweep writes the state it
+        // read earlier and the concurrent block disappears from the JSON — it stays stuck in
+        // the hosts file with no record, and the sweep never repairs it because it walks the JSON.
+        seed(deadlines("expired.com", Instant.parse("2020-01-01T00:00:00Z")));
 
-        Process daemon = iniciar("--interval", "1");
+        Process daemon = start("--interval", "1");
         try {
             for (int i = 0; i < 100 && !Files.exists(ExpirationDaemonState.statePath(stateDir())); i++) {
                 Thread.sleep(100);
             }
-            assertTrue(daemon.isAlive(), "o daemon não subiu");
+            assertTrue(daemon.isAlive(), "the daemon did not start");
 
             for (int i = 0; i < 5; i++) {
-                assertEquals(0, new BlockCommand(List.of("concorrente" + i + ".com"), null,
+                assertEquals(0, new BlockCommand(List.of("concurrent" + i + ".com"), null,
                         hosts().toString(), stateFile().toString()).call());
                 Thread.sleep(150);
             }
 
-            // Deixa o sweep completar mais vezes ainda.
+            // Let the sweep complete a few more times.
             Thread.sleep(1500);
 
-            String estado = Files.readString(stateFile(), StandardCharsets.UTF_8);
+            String state = Files.readString(stateFile(), StandardCharsets.UTF_8);
             for (int i = 0; i < 5; i++) {
-                assertTrue(estado.contains("concorrente" + i + ".com"),
-                        "o bloqueio concorrente " + i + " foi apagado pelo sweep:\n" + estado);
+                assertTrue(state.contains("concurrent" + i + ".com"),
+                        "concurrent block " + i + " was erased by the sweep:\n" + state);
             }
-            assertFalse(estado.contains("vencido.com"), "o expirado tem que ter saido");
+            assertFalse(state.contains("expired.com"), "the expired entry must be gone");
         } finally {
             daemon.destroyForcibly();
             daemon.waitFor();
@@ -249,23 +248,23 @@ class DaemonCliTest {
 
     @Test
     void theLoopSurvivesCorruptedState() throws Exception {
-        // O teste precisa do LAÇO, não do --once: o caminho de --once sai com 1
-        // e nunca itera, então ele não prova nada sobre "o daemon renasce".
+        // The test needs the LOOP, not --once: the --once path exits with 1
+        // and never iterates, so it proves nothing about "the daemon comes back".
         Files.createDirectories(stateDir());
-        Files.writeString(stateFile(), "{ nao é json", StandardCharsets.UTF_8);
+        Files.writeString(stateFile(), "{ not json", StandardCharsets.UTF_8);
 
-        Process p = iniciar("--interval", "1");
+        Process p = start("--interval", "1");
         try {
-            String acumulado = "";
-            for (int i = 0; i < 40 && !acumulado.contains("corromp"); i++) {
+            String accumulated = "";
+            for (int i = 0; i < 40 && !accumulated.contains("corrupted"); i++) {
                 Thread.sleep(100);
-                acumulado = saidaDoDaemon();
+                accumulated = daemonOutput();
             }
-            assertTrue(p.isAlive(), "o daemon não pode morrer por estado corrompido — "
-                    + "quem volta a avisar é ele:\n" + acumulado);
-            assertTrue(acumulado.toLowerCase().contains("corromp"), acumulado);
-            assertTrue(acumulado.contains("próxima volta"),
-                    "tem que dizer que vai tentar de novo: " + acumulado);
+            assertTrue(p.isAlive(), "the daemon must not die because of corrupted state — "
+                    + "it is the one that keeps warning:\n" + accumulated);
+            assertTrue(accumulated.toLowerCase().contains("corrupted"), accumulated);
+            assertTrue(accumulated.contains("next turn"),
+                    "it must say that it will try again: " + accumulated);
         } finally {
             p.destroyForcibly();
             p.waitFor();
@@ -275,33 +274,33 @@ class DaemonCliTest {
     @Test
     void onceSweepFailsLoudlyOnCorruptedState() throws Exception {
         Files.createDirectories(stateDir());
-        Files.writeString(stateFile(), "{ nao é json", StandardCharsets.UTF_8);
+        Files.writeString(stateFile(), "{ not json", StandardCharsets.UTF_8);
 
-        Process p = iniciar("--once");
+        Process p = start("--once");
         int exit = p.waitFor();
-        String saida = saidaDoDaemon();
+        String output = daemonOutput();
 
-        assertEquals(1, exit, "estado corrompido é erro: " + saida);
-        assertTrue(saida.toLowerCase().contains("corromp"), saida);
-        assertFalse(saida.contains("Exception in thread"), "não pode estourar pilha:\n" + saida);
+        assertEquals(1, exit, "corrupted state is an error: " + output);
+        assertTrue(output.toLowerCase().contains("corrupted"), output);
+        assertFalse(output.contains("Exception in thread"), "it must not dump a stack trace:\n" + output);
     }
 
     @Test
     void theLoopHoldsTheLockWhileAlive() throws Exception {
-        // --once não trava nada por desenho, então medir "lock liberado" depois
-        // dele mede nada. O que importa é o LAÇO segurar a trava, que é o que
-        // impede duas instâncias.
-        semear(prazos("permanente.com", null));
-        Process p = iniciar("--interval", "1");
+        // --once holds no lock by design, so measuring "lock released" after it
+        // measures nothing. What matters is the LOOP holding the lock, which is what
+        // prevents two instances.
+        seed(deadlines("permanent.com", null));
+        Process p = start("--interval", "1");
         try {
             Path daemonJson = ExpirationDaemonState.statePath(stateDir());
             for (int i = 0; i < 100 && !Files.exists(daemonJson); i++) {
                 Thread.sleep(100);
             }
-            IOException erro = assertThrows(IOException.class,
+            IOException error = assertThrows(IOException.class,
                     () -> ExpirationDaemonLock.acquire(stateDir()),
-                    "com o daemon vivo, nenhuma outra instância pode pegar a trava");
-            assertTrue(erro.getMessage().contains("daemon de expiração rodando"), erro.getMessage());
+                    "while the daemon is alive, no other instance may take the lock");
+            assertTrue(error.getMessage().contains("already running"), error.getMessage());
         } finally {
             p.destroyForcibly();
             p.waitFor();
@@ -310,8 +309,8 @@ class DaemonCliTest {
 
     @Test
     void lockIsReleasedWhenTheProcessDies() throws Exception {
-        semear(prazos("permanente.com", null));
-        Process p = iniciar("--interval", "1");
+        seed(deadlines("permanent.com", null));
+        Process p = start("--interval", "1");
         Path daemonJson = ExpirationDaemonState.statePath(stateDir());
         for (int i = 0; i < 100 && !Files.exists(daemonJson); i++) {
             Thread.sleep(100);
@@ -319,48 +318,47 @@ class DaemonCliTest {
         p.destroyForcibly();
         p.waitFor();
 
-        // O SO libera o FileLock na morte do processo; é o motivo de o lock ser
-        // FileLock e não "o PID existe".
+        // The OS releases the FileLock when the process dies; that is why the lock is a
+        // FileLock and not "the PID exists".
         ExpirationDaemonLock lock = ExpirationDaemonLock.acquire(stateDir());
         assertTrue(lock != null);
         lock.close();
     }
 
-    // ATENÇÃO: no Windows não existe SIGTERM. Process.destroy() chama
-    // TerminateProcess e NÃO roda shutdown hooks; o caminho do hook só pode ser
-    // exercitado nos Unix.
+    // WARNING: Windows has no SIGTERM. Process.destroy() calls TerminateProcess
+    // and does NOT run shutdown hooks; the hook path can only be exercised on Unix.
     @Test
     @EnabledOnOs({OS.LINUX, OS.MAC})
-    void sigtermFazVarreduraFinalAntesDeSair() throws Exception {
-        // O daemon fica dormindo 60s. O primeiro expirado prova que o sweep
-        // inicial terminou (e o laço dormiu); aí o segundo é semeado, e só a
-        // varredura do shutdown pode removê-lo.
+    void sigtermRunsFinalSweepBeforeExit() throws Exception {
+        // The daemon is sleeping for 60s. The first expired entry proves that the initial
+        // sweep finished (and the loop went to sleep); then the second one is seeded, and only
+        // the shutdown sweep can remove it.
         HostsFileManager.blockInFile(hosts(), tmp.resolve("hosts.backup"),
-                tmp.resolve("hosts.lock"), List.of("inicial.com"));
-        semear(prazos("inicial.com", Instant.parse("2020-01-01T00:00:00Z")));
+                tmp.resolve("hosts.lock"), List.of("initial.com"));
+        seed(deadlines("initial.com", Instant.parse("2020-01-01T00:00:00Z")));
 
-        Process p = iniciar("--interval", "60");
+        Process p = start("--interval", "60");
         Path daemonJson = ExpirationDaemonState.statePath(stateDir());
         int exit = -1;
         try {
             for (int i = 0; i < 100 && !Files.exists(daemonJson); i++) {
                 Thread.sleep(100);
             }
-            assertTrue(Files.exists(daemonJson), "o daemon não registrou o próprio estado");
+            assertTrue(Files.exists(daemonJson), "the daemon did not record its own state");
 
-            for (int i = 0; i < 100 && estado().contains("inicial.com"); i++) {
+            for (int i = 0; i < 100 && state().contains("initial.com"); i++) {
                 Thread.sleep(100);
             }
-            assertFalse(estado().contains("inicial.com"),
-                    "o sweep inicial não terminou; o teste não consegue isolar o hook");
-            Thread.sleep(200); // deixa o laço entrar no sono longo
+            assertFalse(state().contains("initial.com"),
+                    "the initial sweep did not finish; the test cannot isolate the hook");
+            Thread.sleep(200); // let the loop enter the long sleep
 
-            semear(prazos("vencido.com", Instant.parse("2020-01-01T00:00:00Z")));
+            seed(deadlines("expired.com", Instant.parse("2020-01-01T00:00:00Z")));
             HostsFileManager.blockInFile(hosts(), tmp.resolve("hosts.backup"),
-                    tmp.resolve("hosts.lock"), List.of("vencido.com"));
+                    tmp.resolve("hosts.lock"), List.of("expired.com"));
 
-            assertTrue(p.isAlive(), "o daemon morreu antes do SIGTERM:\n" + saidaDoDaemon());
-            p.destroy(); // SIGTERM: dispara o shutdown hook
+            assertTrue(p.isAlive(), "the daemon died before SIGTERM:\n" + daemonOutput());
+            p.destroy(); // SIGTERM: triggers the shutdown hook
             exit = p.waitFor();
         } finally {
             if (p.isAlive()) {
@@ -369,36 +367,36 @@ class DaemonCliTest {
             }
         }
 
-        assertFalse(hostsConteudo().contains("vencido.com"),
-                "o hook de shutdown precisa liberar o expirado do hosts (exit=" + exit + "):\n"
-                        + hostsConteudo()
-                        + "\n--- estado ---\n" + estado()
-                        + "\n--- daemon ---\n" + saidaDoDaemon());
-        assertFalse(estado().contains("vencido.com"),
-                "o hook de shutdown precisa liberar o expirado do estado:\n" + estado()
-                        + "\n--- daemon ---\n" + saidaDoDaemon());
+        assertFalse(hostsContent().contains("expired.com"),
+                "the shutdown hook must release the expired entry from the hosts file (exit=" + exit + "):\n"
+                        + hostsContent()
+                        + "\n--- state ---\n" + state()
+                        + "\n--- daemon ---\n" + daemonOutput());
+        assertFalse(state().contains("expired.com"),
+                "the shutdown hook must release the expired entry from the state:\n" + state()
+                        + "\n--- daemon ---\n" + daemonOutput());
     }
 
-    // ---- comandos de ciclo de vida ----
+    // ---- lifecycle commands ----
 
     @Test
     void startRefusesWithoutRoot() throws Exception {
-        Path semGravacao = tmp.resolve("sem-pai/hosts");
-        semear(prazos("permanente.com", null));
+        Path notWritable = tmp.resolve("no-parent/hosts");
+        seed(deadlines("permanent.com", null));
 
-        Capture saida = captureErr(() -> new DaemonStartCommand("60", semGravacao.toString(),
+        Capture output = captureErr(() -> new DaemonStartCommand("60", notWritable.toString(),
                 stateFile().toString()).call());
 
-        assertEquals(1, saida.exit());
-        assertTrue(saida.texto().contains("sudo") || saida.texto().toLowerCase().contains("permiss"),
-                saida.texto());
+        assertEquals(1, output.exit());
+        assertTrue(output.text().contains("sudo") || output.text().toLowerCase().contains("permission"),
+                output.text());
         assertFalse(Files.exists(ExpirationDaemonState.statePath(stateDir())),
-                "nem pode ter forked um filho que não conseguiria escrever no hosts");
+                "it must not have forked a child that could not write to the hosts file");
     }
 
     @Test
     void startRefusesWhenDaemonAlreadyRunning() throws Exception {
-        semear(prazos("permanente.com", null));
+        seed(deadlines("permanent.com", null));
         ExpirationDaemonState.write(stateDir(), new ExpirationDaemonState(
                 ProcessHandle.current().pid(), Instant.now(), stateDir().toString(), null));
 
@@ -409,62 +407,62 @@ class DaemonCliTest {
 
     @Test
     void staleRegistrationIsDiscardedInsteadOfBlockingForever() throws Exception {
-        // PID que não existe + registro no disco: sem isto o start recusa para
-        // sempre, e não há --force para destravar.
-        semear(prazos("permanente.com", null));
+        // A PID that does not exist plus a record on disk: without this, start refuses
+        // forever, and there is no --force to unlock it.
+        seed(deadlines("permanent.com", null));
         ExpirationDaemonState.write(stateDir(), new ExpirationDaemonState(
                 Integer.MAX_VALUE + 7, Instant.now(), stateDir().toString(), null));
 
-        assertTrue(DaemonStartCommand.descartarRegistroOrfao(stateDir()));
+        assertTrue(DaemonStartCommand.discardOrphanRecord(stateDir()));
         assertFalse(Files.exists(ExpirationDaemonState.statePath(stateDir())));
     }
 
     @Test
     void liveRegistrationIsNeverDiscarded() throws Exception {
-        semear(prazos("permanente.com", null));
+        seed(deadlines("permanent.com", null));
         ExpirationDaemonState.write(stateDir(), new ExpirationDaemonState(
                 ProcessHandle.current().pid(), Instant.now(), stateDir().toString(), null));
 
-        assertFalse(DaemonStartCommand.descartarRegistroOrfao(stateDir()),
-                "registro de processo vivo não pode ser apagado");
+        assertFalse(DaemonStartCommand.discardOrphanRecord(stateDir()),
+                "a record of a live process must not be deleted");
         assertTrue(Files.exists(ExpirationDaemonState.statePath(stateDir())));
     }
 
     @Test
     void statusReportsNoDaemonWhenPidFileIsMissing() throws Exception {
-        Capture saida = captureOut(() -> new DaemonStatusCommand(stateFile().toString()).call());
-        assertEquals(0, saida.exit());
-        assertTrue(saida.texto().contains("não está rodando"), saida.texto());
+        Capture output = captureOut(() -> new DaemonStatusCommand(stateFile().toString()).call());
+        assertEquals(0, output.exit());
+        assertTrue(output.text().contains("not running"), output.text());
     }
 
-    // No Windows o autostart é uma Tarefa do Agendador e isEnabled consulta o
-    // schtasks de verdade; não dá para semear o artefato como aqui.
+    // On Windows autostart is a Task Scheduler job and isEnabled queries the real
+    // schtasks; it is not possible to seed the artifact like here.
     @Test
     @EnabledOnOs({OS.LINUX, OS.MAC})
     void statusSaysTheInstalledJarIsMissing() throws Exception {
-        // O sintoma do mvn clean: a unit aponta para um jar que não existe
-        // mais. Sem esta linha, o status só diria "não está rodando" e a
-        // pessoa não teria por onde começar.
-        semear(prazos("permanente.com", null));
-        // Raiz temporária: o teste não pode mexer no /opt de verdade, que é do
-        // root — e o diretório de instalação nem existe aí.
+        // The symptom of mvn clean: the unit points at a jar that no longer
+        // exists. Without this line, status would only say "not running" and the
+        // user would have no place to start.
+        seed(deadlines("permanent.com", null));
+        // Temporary root: the test cannot touch the real /opt, which belongs to
+        // root — and the install directory does not even exist there.
         OsType os = OsType.detect();
-        Path raiz = tmp.resolve("sys");
-        Path jar = AutostartInstaller.installJarPath(os, raiz);
+        Path root = tmp.resolve("sys");
+        Path jar = AutostartInstaller.installJarPath(os, root);
         Files.createDirectories(jar.getParent());
         Files.writeString(jar, "jar");
         Files.delete(jar);
-        // A unit precisa existir: o aviso do jar só aparece quando o autostart
-        // está instalado — senão não há daemon para reclamar.
-        Path unit = AutostartInstaller.artifactPath(os, raiz);
+        // The unit must exist: the jar warning only appears when autostart is
+        // installed — otherwise there is no daemon to complain about.
+        Path unit = AutostartInstaller.artifactPath(os, root);
         Files.createDirectories(unit.getParent());
         Files.writeString(unit, "[Unit]\n");
         try {
-            Capture r = captureOut(() -> new DaemonStatusCommand(stateFile().toString(), raiz).call());
-            assertTrue(r.texto().contains("NÃO EXISTE") || r.texto().contains("não existe mais"),
-                    r.texto());
-            assertTrue(r.texto().contains("daemon enable"),
-                    "tem que dizer como consertar: " + r.texto());
+            Capture r = captureOut(() -> new DaemonStatusCommand(stateFile().toString(), root).call());
+            assertTrue(r.text().contains("DOES NOT EXIST") || r.text().contains("no longer exists"),
+                    r.text());
+            assertTrue(r.text().contains("daemon enable"),
+                    "it must say how to fix it: " + r.text());
         } finally {
             Files.deleteIfExists(jar);
             Files.deleteIfExists(unit);
@@ -473,28 +471,28 @@ class DaemonCliTest {
 
     @Test
     void statusNeverRepeatsSudo() throws Exception {
-        semear(prazos("permanente.com", null));
+        seed(deadlines("permanent.com", null));
         Capture r = captureOut(() -> new DaemonStatusCommand(stateFile().toString()).call());
-        assertFalse(r.texto().contains("sudo sudo"),
-                "a saída não pode repetir o sudo:\n" + r.texto());
+        assertFalse(r.text().contains("sudo sudo"),
+                "the output must not repeat sudo:\n" + r.text());
     }
 
     @Test
     void statusWorksWithoutRoot() throws Exception {
-        semear(prazos("permanente.com", null));
+        seed(deadlines("permanent.com", null));
         Instant sweep = Instant.parse("2026-10-15T11:00:00Z");
         ExpirationDaemonState.write(stateDir(), new ExpirationDaemonState(
                 ProcessHandle.current().pid(), Instant.now(), stateDir().toString(), sweep));
 
-        Capture saida = captureOut(() -> new DaemonStatusCommand(stateFile().toString()).call());
+        Capture output = captureOut(() -> new DaemonStatusCommand(stateFile().toString()).call());
 
-        assertEquals(0, saida.exit());
-        assertTrue(saida.texto().contains(String.valueOf(ProcessHandle.current().pid())), saida.texto());
-        // O instante é gravado em UTC e mostrado no fuso da máquina: o teste
-        // formata do mesmo jeito em vez de cravar "11:00".
-        String esperado = DateTimeFormatter.ofPattern("dd/MM HH:mm")
+        assertEquals(0, output.exit());
+        assertTrue(output.text().contains(String.valueOf(ProcessHandle.current().pid())), output.text());
+        // The instant is stored in UTC and shown in the machine's time zone: the test
+        // formats it the same way instead of pinning "11:00".
+        String expected = DateTimeFormatter.ofPattern("dd/MM HH:mm")
                 .withZone(ZoneId.systemDefault()).format(sweep);
-        assertTrue(saida.texto().contains(esperado), "esperava '" + esperado + "':\n" + saida.texto());
+        assertTrue(output.text().contains(expected), "expected '" + expected + "':\n" + output.text());
     }
 
     @Test
@@ -503,20 +501,20 @@ class DaemonCliTest {
         assertEquals(1, exit);
     }
 
-    // ---- captura de saída ----
+    // ---- output capture ----
 
-    private record Capture(int exit, String texto) {
+    private record Capture(int exit, String text) {
     }
 
-    private static Capture captureOut(ThrowingInt r) throws Exception {
+    private static Capture captureOut(IntCall r) throws Exception {
         return capture(r, false);
     }
 
-    private static Capture captureErr(ThrowingInt r) throws Exception {
+    private static Capture captureErr(IntCall r) throws Exception {
         return capture(r, true);
     }
 
-    private static Capture capture(ThrowingInt r, boolean stderr) throws Exception {
+    private static Capture capture(IntCall r, boolean stderr) throws Exception {
         PrintStream original = stderr ? System.err : System.out;
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         PrintStream fake = new PrintStream(buffer, true, StandardCharsets.UTF_8);
@@ -539,7 +537,7 @@ class DaemonCliTest {
     }
 
     @FunctionalInterface
-    private interface ThrowingInt {
+    private interface IntCall {
         int run() throws Exception;
     }
 }

@@ -6,7 +6,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Testa add/remove do bloco em memória. */
+/** Tests add/remove of the block in memory. */
 class HostsFileManagerTest {
 
     private static final String BASE_HOSTS =
@@ -106,7 +106,7 @@ class HostsFileManagerTest {
         String out = HostsFileManager.removeDomain(content, "tiktok.com");
 
         assertTrue(out.contains("127.0.0.1 tiktok.com"),
-                "linha do usuário fora do bloco não pode ser apagada: " + out);
+                "a user line outside the block must not be deleted: " + out);
         assertTrue(out.contains("10.0.0.5 intranet.local"), out);
         assertTrue(out.contains("127.0.0.1 youtube.com"), out);
     }
@@ -121,7 +121,7 @@ class HostsFileManagerTest {
         String out = HostsFileManager.removeDomain(content, "tiktok.com");
 
         assertTrue(out.contains("127.0.0.1 tiktok.com intranet.local"),
-                "linha do usuário fora do bloco não pode ser reescrita: " + out);
+                "a user line outside the block must not be rewritten: " + out);
     }
 
     @Test
@@ -138,14 +138,14 @@ class HostsFileManagerTest {
     @Test
     void removeKeepsCommentsInsideBlock() {
         String content = "# SITELOCK-START\n"
-                + "# bloqueio manual\n"
+                + "# manual block\n"
                 + "127.0.0.1 youtube.com\n"
                 + "127.0.0.1 tiktok.com\n"
                 + "# SITELOCK-END\n";
 
         String out = HostsFileManager.removeDomain(content, "tiktok.com");
 
-        assertTrue(out.contains("# bloqueio manual"), out);
+        assertTrue(out.contains("# manual block"), out);
         assertTrue(out.contains("127.0.0.1 youtube.com"), out);
         assertFalse(out.contains("127.0.0.1 tiktok.com"), out);
     }
@@ -161,7 +161,7 @@ class HostsFileManagerTest {
         assertFalse(out.contains("127.0.0.1 # note"), out);
         assertFalse(out.contains("tiktok.com"), out);
         assertFalse(out.contains(HostsFileManager.START_MARKER),
-                "bloco sem entradas tem que sumir inteiro: " + out);
+                "a block with no entries has to disappear entirely: " + out);
         assertFalse(out.contains(HostsFileManager.END_MARKER), out);
     }
 
@@ -180,13 +180,13 @@ class HostsFileManagerTest {
     @Test
     void removeTreatsIpPlusCommentAsAnEmptyBlock() {
         String content = "# SITELOCK-START\n"
-                + "127.0.0.1 # comentario solto\n"
+                + "127.0.0.1 # stray comment\n"
                 + "# SITELOCK-END\n";
 
-        String out = HostsFileManager.removeDomain(content, "outro.com");
+        String out = HostsFileManager.removeDomain(content, "other.com");
 
         assertFalse(out.contains(HostsFileManager.START_MARKER),
-                "IP + comentario nao e entrada: " + out);
+                "IP + comment is not an entry: " + out);
         assertFalse(out.contains(HostsFileManager.END_MARKER), out);
     }
 

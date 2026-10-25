@@ -31,12 +31,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Estado e lock de instância única do daemon.
+ * State and single-instance lock of the daemon.
  *
- * <p>O lock é {@code FileLock} e não "está rodando porque o PID existe": um
- * {@code kill -9} não órfãoa um {@code FileLock}, porque o SO o libera na
- * morte do processo. Um lock por PID sobreviveria ao processo e travaria o
- * próximo boot.
+ * <p>The lock is a {@code FileLock} and not "it is running because the PID exists": a
+ * {@code kill -9} does not orphan a {@code FileLock}, because the OS releases it when
+ * the process dies. A PID-based lock would outlive the process and block the
+ * next boot.
  */
 class ExpirationDaemonStateTest {
 
@@ -76,73 +76,73 @@ class ExpirationDaemonStateTest {
     void updateLastSweepKeepsPidAndStartedAt() throws Exception {
         ExpirationDaemonState.write(tmp, new ExpirationDaemonState(4242, NOW, tmp.toString(), null));
 
-        Instant depois = NOW.plusSeconds(300);
-        ExpirationDaemonState.updateLastSweep(tmp, depois);
+        Instant later = NOW.plusSeconds(300);
+        ExpirationDaemonState.updateLastSweep(tmp, later);
 
         ExpirationDaemonState state = ExpirationDaemonState.read(tmp).orElseThrow();
-        assertEquals(depois, state.getLastSweepAt());
-        assertEquals(4242, state.getPid(), "atualizar o sweep não pode trocar o dono do registro");
+        assertEquals(later, state.getLastSweepAt());
+        assertEquals(4242, state.getPid(), "updating the sweep must not change the record's owner");
         assertEquals(NOW, state.getStartedAt());
         assertEquals(tmp.toString(), state.getStateDir());
     }
 
-    // POR QUE: a escrita substitui o arquivo inteiro em vez de truncar o mesmo —
-    // um Files.writeString deixa o daemon.json vazio entre o truncate e o write,
-    // e quem lê nesse instante ("daemon status", "daemon stop") recebe "não há daemon".
+    // WHY: the write replaces the whole file instead of truncating it —
+    // a plain Files.writeString leaves the daemon.json empty between truncate and write,
+    // and whoever reads at that instant ("daemon status", "daemon stop") gets "no daemon".
     @Test
-    void aEscritaSubstituiOArquivoEmVezDeTruncar() throws Exception {
-        Path alvo = ExpirationDaemonState.statePath(tmp);
+    void writeReplacesTheFileInsteadOfTruncating() throws Exception {
+        Path target = ExpirationDaemonState.statePath(tmp);
         ExpirationDaemonState.write(tmp, new ExpirationDaemonState(1, NOW, tmp.toString(), null));
-        String antes = identidadeDoArquivo(alvo);
+        String before = fileIdentity(target);
         ExpirationDaemonState.write(tmp, new ExpirationDaemonState(2, NOW, tmp.toString(), null));
-        String depois = identidadeDoArquivo(alvo);
+        String later = fileIdentity(target);
 
-        Assumptions.assumeFalse(antes.isEmpty(), "este SO não expõe a identidade do arquivo");
-        assertNotEquals(antes, depois,
-                "a escrita tem que ser atômica: um arquivo novo substitui o antigo, "
-                        + "senão quem lê no meio da escrita vê o registro truncado");
-        assertFalse(Files.exists(alvo.resolveSibling(alvo.getFileName() + ".tmp")),
-                "o arquivo temporário tem que sumir depois da troca");
+        Assumptions.assumeFalse(before.isEmpty(), "this OS does not expose the file identity");
+        assertNotEquals(before, later,
+                "the write has to be atomic: a new file replaces the old one, "
+                        + "otherwise a reader in the middle of the write sees a truncated record");
+        assertFalse(Files.exists(target.resolveSibling(target.getFileName() + ".tmp")),
+                "the temporary file has to disappear after the swap");
     }
 
-    // Identidade do arquivo: dois arquivos com a mesma identidade são o mesmo.
-    private static String identidadeDoArquivo(Path arquivo) throws IOException {
-        Object chave = Files.readAttributes(arquivo, BasicFileAttributes.class).fileKey();
-        if (chave != null) {
-            return chave.toString();
+    // File identity: two files with the same identity are the same file.
+    private static String fileIdentity(Path file) throws IOException {
+        Object key = Files.readAttributes(file, BasicFileAttributes.class).fileKey();
+        if (key != null) {
+            return key.toString();
         }
         try {
-            return Files.getAttribute(arquivo, "unix:ino").toString();
+            return Files.getAttribute(file, "unix:ino").toString();
         } catch (UnsupportedOperationException | IOException e) {
             return "";
         }
     }
 
-    // POR QUE: o SO recicla PID, e "o PID existe" mente: o daemon stop mandaria
-    // um SIGTERM num processo que não é o SiteLock.
+    // WHY: the OS recycles PIDs, and "the PID exists" lies: daemon stop would
+    // send a SIGTERM to a process that is not SiteLock.
     @Test
-    void umPidRecicladoNaoPassaPorDaemonVivo() {
-        ExpirationDaemonState reciclado = new ExpirationDaemonState(
+    void aRecycledPidDoesNotPassAsALivingDaemon() {
+        ExpirationDaemonState recycled = new ExpirationDaemonState(
                 ProcessHandle.current().pid(), NOW, "/x", null, NOW);
 
-        assertFalse(ExpirationDaemonState.isAlive(reciclado),
-                "o PID existe, mas não é o processo que o registro descreve");
+        assertFalse(ExpirationDaemonState.isAlive(recycled),
+                "the PID exists, but it is not the process the record describes");
     }
 
     @Test
-    void oProcessoQueGravouORegistroEstaVivo() {
-        Instant inicio = ProcessHandle.current().info().startInstant().orElseThrow();
+    void theProcessThatWroteTheRecordIsAlive() {
+        Instant start = ProcessHandle.current().info().startInstant().orElseThrow();
         ExpirationDaemonState state = new ExpirationDaemonState(
-                ProcessHandle.current().pid(), inicio, "/x", null, inicio);
+                ProcessHandle.current().pid(), start, "/x", null, start);
 
         assertTrue(ExpirationDaemonState.isAlive(state),
-                "o processo que escreveu o registro tem que ser reconhecido como vivo");
+                "the process that wrote the record has to be recognized as alive");
     }
 
     @Test
-    void registroAntigoSemOInstanteContinuaFuncionando() throws Exception {
-        // Um daemon.json escrito por uma versão antiga não tem o instante de
-        // início: sem ele, sobra a checagem do PID.
+    void anOldRecordWithoutTheInstantKeepsWorking() throws Exception {
+        // A daemon.json written by an old version has no start
+        // instant: without it, only the PID check remains.
         Files.writeString(ExpirationDaemonState.statePath(tmp),
                 "{\"pid\":" + ProcessHandle.current().pid()
                         + ",\"startedAt\":\"2026-10-15T12:00:00Z\",\"stateDir\":\"/x\"}",
@@ -150,76 +150,77 @@ class ExpirationDaemonStateTest {
 
         ExpirationDaemonState state = ExpirationDaemonState.read(tmp).orElseThrow();
 
-        assertNull(state.getProcessStartedAt(), "o registro antigo não tem o campo novo");
+        assertNull(state.getProcessStartedAt(), "the old record does not have the new field");
         assertTrue(ExpirationDaemonState.isAlive(state),
-                "um registro antigo tem que continuar funcionando: só a checagem do PID");
+                "an old record has to keep working: only the PID check");
     }
 
     @Test
-    void aEscritaGravaOInstanteDeInicioDoProcesso() throws Exception {
+    void writeRecordsTheProcessStartInstant() throws Exception {
         ExpirationDaemonState state = new ExpirationDaemonState(
                 ProcessHandle.current().pid(), NOW, tmp.toString(), null);
 
         ExpirationDaemonState.write(tmp, state);
 
-        ExpirationDaemonState lido = ExpirationDaemonState.read(tmp).orElseThrow();
+        ExpirationDaemonState readBack = ExpirationDaemonState.read(tmp).orElseThrow();
         assertEquals(ProcessHandle.current().info().startInstant().orElseThrow(),
-                lido.getProcessStartedAt(),
-                "o registro tem que guardar o instante de início do PROCESSO");
-        assertEquals(lido.getProcessStartedAt(), lido.getStartedAt(),
-                "o 'Subiu em:' tem que mostrar o instante de início do processo");
+                readBack.getProcessStartedAt(),
+                "the record has to store the start instant of the PROCESS");
+        assertEquals(readBack.getProcessStartedAt(), readBack.getStartedAt(),
+                "the 'Started at:' has to show the process start instant");
     }
 
-    // POR QUE: updateLastSweep é read-modify-write. Sem trava, ele lê o registro
-    // e outra escrita grava o PID novo nesse intervalo — o updateLastSweep
-    // devolve o registro velho por cima, e o PID do daemon some.
+    // WHY: updateLastSweep is a read-modify-write. Without the lock it reads the record
+    // and another write saves the new PID in that interval — updateLastSweep
+    // puts the old record back on top, and the daemon's PID disappears.
     @Test
-    void escritasConcorrentesNaoRevertemOPid() throws Exception {
+    void concurrentWritesDoNotRevertThePid() throws Exception {
         ExpirationDaemonState.write(tmp, new ExpirationDaemonState(1, NOW, tmp.toString(), null));
 
-        int voltas = 300;
-        CyclicBarrier largada = new CyclicBarrier(2);
+        int iterations = 300;
+        CyclicBarrier barrier = new CyclicBarrier(2);
         ExecutorService pool = Executors.newFixedThreadPool(2);
         try {
-            Future<?> quemGrava = pool.submit(() -> {
-                largada.await();
-                for (int i = 0; i < voltas; i++) {
+            Future<?> writer = pool.submit(() -> {
+                barrier.await();
+                for (int i = 0; i < iterations; i++) {
                     ExpirationDaemonState.write(tmp,
                             new ExpirationDaemonState(1000 + i, NOW, tmp.toString(), null));
                 }
                 return null;
             });
-            Future<?> quemAtualiza = pool.submit(() -> {
-                largada.await();
-                for (int i = 0; i < voltas; i++) {
+            Future<?> updater = pool.submit(() -> {
+                barrier.await();
+                for (int i = 0; i < iterations; i++) {
                     ExpirationDaemonState.updateLastSweep(tmp, NOW.plusSeconds(i));
                 }
                 return null;
             });
-            quemGrava.get(60, TimeUnit.SECONDS);
-            quemAtualiza.get(60, TimeUnit.SECONDS);
+            writer.get(60, TimeUnit.SECONDS);
+            updater.get(60, TimeUnit.SECONDS);
         } finally {
             pool.shutdownNow();
         }
 
         ExpirationDaemonState state = ExpirationDaemonState.read(tmp).orElseThrow();
-        assertEquals(1000 + voltas - 1, state.getPid(),
-                "o PID não pode voltar atrás: um updateLastSweep devolveu o registro antigo");
+        assertEquals(1000 + iterations - 1, state.getPid(),
+                "the PID cannot go backwards: an updateLastSweep returned the stale record");
     }
 
     @Test
-    void deleteRemovesTheStateFile() throws Exception {        ExpirationDaemonState.write(tmp, new ExpirationDaemonState(1, NOW, tmp.toString(), null));
+    void deleteRemovesTheStateFile() throws Exception {
+        ExpirationDaemonState.write(tmp, new ExpirationDaemonState(1, NOW, tmp.toString(), null));
         ExpirationDaemonState.delete(tmp);
         assertFalse(Files.exists(ExpirationDaemonState.statePath(tmp)));
     }
 
     @Test
     void isAliveFollowsThePid() {
-        ExpirationDaemonState vivo =
+        ExpirationDaemonState alive =
                 new ExpirationDaemonState(ProcessHandle.current().pid(), NOW, tmp.toString(), null);
-        assertTrue(ExpirationDaemonState.isAlive(vivo));
+        assertTrue(ExpirationDaemonState.isAlive(alive));
 
-        // PID 0 e um PID improvável não são processos vivos.
+        // PID 0 and an implausible PID are not live processes.
         assertFalse(ExpirationDaemonState.isAlive(new ExpirationDaemonState(0, NOW, "/x", null)));
         assertFalse(ExpirationDaemonState.isAlive(
                 new ExpirationDaemonState(Integer.MAX_VALUE + 7, NOW, "/x", null)));
@@ -228,26 +229,26 @@ class ExpirationDaemonStateTest {
 
     @Test
     void acquireIsExclusive() throws Exception {
-        ExpirationDaemonLock primeiro = ExpirationDaemonLock.acquire(tmp);
-        assertNotNull(primeiro);
+        ExpirationDaemonLock first = ExpirationDaemonLock.acquire(tmp);
+        assertNotNull(first);
 
-        IOException erro = assertThrows(IOException.class, () -> ExpirationDaemonLock.acquire(tmp));
-        assertTrue(erro.getMessage().contains("daemon de expiração rodando"), erro.getMessage());
-        assertTrue(erro.getMessage().contains("daemon stop"), "a mensagem tem que dizer o que fazer");
+        IOException error = assertThrows(IOException.class, () -> ExpirationDaemonLock.acquire(tmp));
+        assertTrue(error.getMessage().contains("expiration daemon is already running"), error.getMessage());
+        assertTrue(error.getMessage().contains("daemon stop"), "the message has to say what to do");
 
-        primeiro.close();
-        // Liberado: outro daemon pode pegar.
-        ExpirationDaemonLock segundo = ExpirationDaemonLock.acquire(tmp);
-        assertNotNull(segundo);
-        segundo.close();
+        first.close();
+        // Released: another daemon can take it.
+        ExpirationDaemonLock second = ExpirationDaemonLock.acquire(tmp);
+        assertNotNull(second);
+        second.close();
     }
 
     @Test
     void lockFileIsCreatedInTheStateDir() throws Exception {
-        Path estado = tmp.resolve("estado");
-        ExpirationDaemonLock lock = ExpirationDaemonLock.acquire(estado);
+        Path stateDir = tmp.resolve("state");
+        ExpirationDaemonLock lock = ExpirationDaemonLock.acquire(stateDir);
         try {
-            assertTrue(Files.exists(estado.resolve("daemon.lock")));
+            assertTrue(Files.exists(stateDir.resolve("daemon.lock")));
         } finally {
             lock.close();
         }
@@ -255,109 +256,109 @@ class ExpirationDaemonStateTest {
 
     @Test
     void chownToUserIfConfiguredFollowsTheProperty() throws Exception {
-        String usuarioAtual = System.getProperty("user.name", "");
-        Assumptions.assumeFalse(usuarioAtual.isBlank(), "o SO não disse quem é o usuário");
-        Assumptions.assumeFalse("root".equals(usuarioAtual),
-                "rodando como root, chown para si mesmo não prova nada");
+        String currentUser = System.getProperty("user.name", "");
+        Assumptions.assumeFalse(currentUser.isBlank(), "the OS did not say who the user is");
+        Assumptions.assumeFalse("root".equals(currentUser),
+                "running as root, chown to itself proves nothing");
 
-        Path arquivo = tmp.resolve("estado.json");
-        Files.writeString(arquivo, "{}", StandardCharsets.UTF_8);
+        Path file = tmp.resolve("state.json");
+        Files.writeString(file, "{}", StandardCharsets.UTF_8);
 
-        UserPrincipalLookupService lookup = arquivo.getFileSystem().getUserPrincipalLookupService();
-        Assumptions.assumeTrue(Files.getFileAttributeView(arquivo, PosixFileAttributeView.class) != null,
-                "sem POSIX não há grupo para verificar");
-        String grupoDoUsuario = nomeDoGrupoDoUsuario(usuarioAtual, lookup);
-        Assumptions.assumeTrue(grupoDoUsuario != null,
-                "o usuário não tem grupo com o mesmo nome: o chown não troca o grupo");
-        String grupoSecundario = grupoSecundarioDoUsuario(usuarioAtual, grupoDoUsuario);
-        Assumptions.assumeTrue(grupoSecundario != null,
-                "o usuário não tem grupo secundário: não há como distinguir o chown de um no-op");
+        UserPrincipalLookupService lookup = file.getFileSystem().getUserPrincipalLookupService();
+        Assumptions.assumeTrue(Files.getFileAttributeView(file, PosixFileAttributeView.class) != null,
+                "without POSIX there is no group to verify");
+        String userGroup = groupNameOfUser(currentUser, lookup);
+        Assumptions.assumeTrue(userGroup != null,
+                "the user has no group with the same name: chown does not change the group");
+        String secondaryGroup = secondaryGroupOfUser(currentUser, userGroup);
+        Assumptions.assumeTrue(secondaryGroup != null,
+                "the user has no secondary group: no way to tell chown from a no-op");
 
-        Assumptions.assumeTrue(trocaGrupo(arquivo, lookup, grupoSecundario),
-                "não deu para trocar o grupo do arquivo de teste");
-        assertEquals(grupoSecundario, nomeDoGrupo(arquivo),
-                "pré-condição: o arquivo tem que começar com o grupo trocado");
+        Assumptions.assumeTrue(changeGroup(file, lookup, secondaryGroup),
+                "could not change the group of the test file");
+        assertEquals(secondaryGroup, groupName(file),
+                "precondition: the file has to start with the changed group");
 
-        System.setProperty("sitelock.user", usuarioAtual);
-        SiteLockPaths.chownToUserIfConfigured(arquivo);
+        System.setProperty("sitelock.user", currentUser);
+        SiteLockPaths.chownToUserIfConfigured(file);
 
-        assertEquals(usuarioAtual, Files.getOwner(arquivo).getName(),
-                "com -Dsitelock.user o daemon devolve o arquivo ao dono mesmo sem SUDO_USER");
-        assertEquals(grupoDoUsuario, nomeDoGrupo(arquivo),
-                "o chown tem que devolver o grupo ao do usuário: com o chown virado em no-op "
-                        + "o arquivo fica com o grupo trocado");
+        assertEquals(currentUser, Files.getOwner(file).getName(),
+                "with -Dsitelock.user the daemon hands the file back to its owner even without SUDO_USER");
+        assertEquals(userGroup, groupName(file),
+                "chown has to return the group to the user's: with chown turned into a no-op "
+                        + "the file keeps the changed group");
     }
 
     @Test
     void chownToUserIfConfiguredWithoutPropertyDoesNothing() throws Exception {
-        String usuarioAtual = System.getProperty("user.name", "");
-        Assumptions.assumeFalse(usuarioAtual.isBlank(), "o SO não disse quem é o usuário");
+        String currentUser = System.getProperty("user.name", "");
+        Assumptions.assumeFalse(currentUser.isBlank(), "the OS did not say who the user is");
         String sudoUser = System.getenv("SUDO_USER");
         Assumptions.assumeTrue(sudoUser == null || sudoUser.isBlank()
                         || "root".equals(sudoUser.strip()),
-                "sob sudo o caminho sem property é outro: quem devolve a posse é o SUDO_USER");
+                "under sudo the path without the property is different: SUDO_USER hands ownership back");
 
-        Path arquivo = tmp.resolve("sem-property.json");
-        Files.writeString(arquivo, "{}", StandardCharsets.UTF_8);
+        Path file = tmp.resolve("no-property.json");
+        Files.writeString(file, "{}", StandardCharsets.UTF_8);
 
-        UserPrincipalLookupService lookup = arquivo.getFileSystem().getUserPrincipalLookupService();
-        Assumptions.assumeTrue(Files.getFileAttributeView(arquivo, PosixFileAttributeView.class) != null,
-                "sem POSIX não há grupo para verificar");
-        String grupoDoUsuario = nomeDoGrupoDoUsuario(usuarioAtual, lookup);
-        Assumptions.assumeTrue(grupoDoUsuario != null,
-                "o usuário não tem grupo com o mesmo nome: o chown não troca o grupo");
-        String grupoSecundario = grupoSecundarioDoUsuario(usuarioAtual, grupoDoUsuario);
-        Assumptions.assumeTrue(grupoSecundario != null,
-                "o usuário não tem grupo secundário: não há como distinguir o chown de um no-op");
-        Assumptions.assumeTrue(trocaGrupo(arquivo, lookup, grupoSecundario),
-                "não deu para trocar o grupo do arquivo de teste");
+        UserPrincipalLookupService lookup = file.getFileSystem().getUserPrincipalLookupService();
+        Assumptions.assumeTrue(Files.getFileAttributeView(file, PosixFileAttributeView.class) != null,
+                "without POSIX there is no group to verify");
+        String userGroup = groupNameOfUser(currentUser, lookup);
+        Assumptions.assumeTrue(userGroup != null,
+                "the user has no group with the same name: chown does not change the group");
+        String secondaryGroup = secondaryGroupOfUser(currentUser, userGroup);
+        Assumptions.assumeTrue(secondaryGroup != null,
+                "the user has no secondary group: no way to tell chown from a no-op");
+        Assumptions.assumeTrue(changeGroup(file, lookup, secondaryGroup),
+                "could not change the group of the test file");
 
         System.clearProperty("sitelock.user");
-        SiteLockPaths.chownToUserIfConfigured(arquivo);
+        SiteLockPaths.chownToUserIfConfigured(file);
 
-        assertEquals(grupoSecundario, nomeDoGrupo(arquivo),
-                "sem a property o chown não pode rodar: o grupo tem que continuar como estava");
-        assertEquals(usuarioAtual, Files.getOwner(arquivo).getName(),
-                "sem a property, o comportamento é o de sempre: só SUDO_USER devolve a posse");
+        assertEquals(secondaryGroup, groupName(file),
+                "without the property chown cannot run: the group has to stay as it was");
+        assertEquals(currentUser, Files.getOwner(file).getName(),
+                "without the property, the behavior is the usual one: only SUDO_USER hands ownership back");
     }
 
-    // POR QUE: a property vive na JVM do surefire (uma por módulo). Se ficar de
-    // pé depois de uma falha, todo save seguinte passa pelo caminho do chown — e
-    // a ordem de execução dos testes passa a importar.
+    // WHY: the property lives in the surefire JVM (one per module). If it stays set
+    // after a failure, every following save goes through the chown path — and test
+    // execution order starts to matter.
     @AfterEach
-    void limpaAPropertyDoUsuario() {
+    void clearUserProperty() {
         System.clearProperty("sitelock.user");
     }
 
-    // ATENÇÃO: nem todo sistema tem grupo com o mesmo nome do usuário (no macOS
-    // o grupo principal se chama "staff"). Sem esse grupo o chown não troca o
-    // grupo, e o teste não teria o que verificar.
-    private static String nomeDoGrupoDoUsuario(String usuario, UserPrincipalLookupService lookup) {
+    // WARNING: not every system has a group with the same name as the user (on macOS
+    // the primary group is called "staff"). Without that group chown does not change the
+    // group, and the test would have nothing to verify.
+    private static String groupNameOfUser(String user, UserPrincipalLookupService lookup) {
         try {
-            GroupPrincipal grupo = lookup.lookupPrincipalByGroupName(usuario);
-            return grupo.getName();
+            GroupPrincipal group = lookup.lookupPrincipalByGroupName(user);
+            return group.getName();
         } catch (IOException | IllegalArgumentException e) {
             return null;
         }
     }
 
-    // POR QUE: sem um grupo diferente, não dá para trocar o grupo do arquivo — e
-    // o grupo é a única diferença observável entre "o chown rodou" e "o chown foi
-    // um no-op".
-    private static String grupoSecundarioDoUsuario(String usuario, String grupoDoChown) {
-        Path arquivoDeGrupos = Path.of("/etc/group");
-        if (!Files.isReadable(arquivoDeGrupos)) {
+    // WHY: without a different group there is no way to change the file's group — and
+    // the group is the only observable difference between "chown ran" and "chown was
+    // a no-op".
+    private static String secondaryGroupOfUser(String user, String chownGroup) {
+        Path groupFile = Path.of("/etc/group");
+        if (!Files.isReadable(groupFile)) {
             return null;
         }
         try {
-            for (String linha : Files.readAllLines(arquivoDeGrupos, StandardCharsets.UTF_8)) {
-                String[] partes = linha.split(":");
-                if (partes.length < 4 || partes[0].equals(grupoDoChown)) {
+            for (String line : Files.readAllLines(groupFile, StandardCharsets.UTF_8)) {
+                String[] parts = line.split(":");
+                if (parts.length < 4 || parts[0].equals(chownGroup)) {
                     continue;
                 }
-                for (String membro : partes[3].split(",")) {
-                    if (usuario.equals(membro.strip())) {
-                        return partes[0];
+                for (String member : parts[3].split(",")) {
+                    if (user.equals(member.strip())) {
+                        return parts[0];
                     }
                 }
             }
@@ -367,20 +368,20 @@ class ExpirationDaemonStateTest {
         return null;
     }
 
-    // Troca o grupo do arquivo (o dono pode mudar para um grupo seu).
-    private static boolean trocaGrupo(Path arquivo, UserPrincipalLookupService lookup, String grupo) {
+    // Changes the file's group (the owner may move it to a group they belong to).
+    private static boolean changeGroup(Path file, UserPrincipalLookupService lookup, String group) {
         try {
             PosixFileAttributeView posix =
-                    Files.getFileAttributeView(arquivo, PosixFileAttributeView.class);
-            posix.setGroup(lookup.lookupPrincipalByGroupName(grupo));
+                    Files.getFileAttributeView(file, PosixFileAttributeView.class);
+            posix.setGroup(lookup.lookupPrincipalByGroupName(group));
             return true;
         } catch (IOException | IllegalArgumentException | UnsupportedOperationException e) {
             return false;
         }
     }
 
-    // O grupo do arquivo, pelo nome.
-    private static String nomeDoGrupo(Path arquivo) throws IOException {
-        return Files.readAttributes(arquivo, PosixFileAttributes.class).group().getName();
+    // The file's group, by name.
+    private static String groupName(Path file) throws IOException {
+        return Files.readAttributes(file, PosixFileAttributes.class).group().getName();
     }
 }

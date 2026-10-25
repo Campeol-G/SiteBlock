@@ -13,37 +13,37 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 /**
- * O {@code createdAt} de um bloqueio.
+ * The {@code createdAt} of a block.
  *
- * <p>Ele responde "desde quando este bloqueio existe", e é o que o
- * {@code ProfileMerge} preserva quando um prazo é elevado. Um arquivo escrito
- * à mão — ou por uma versão antiga — pode não ter o campo; nesse caso o
- * instante é <b>desconhecido</b>, e inventar "agora" muda a semântica sem
- * nenhum erro visível: a data exibida mente.
+ * <p>It answers "when was this block created", and it is what
+ * {@code ProfileMerge} preserves when a deadline is raised. A file written
+ * by hand — or by an old version — may not have the field; in that case the
+ * instant is <b>unknown</b>, and inventing "now" changes the semantics with no
+ * visible error: the displayed date lies.
  */
 class BlockEntryTest {
 
     private static final Instant NOW = Instant.parse("2026-10-15T12:00:00Z");
 
     @Test
-    void entradaSemCreatedAtFicaComCreatedAtNulo() {
-        BlockEntry entrada = new BlockEntry("tiktok.com", null, null);
+    void entryWithoutCreatedAtKeepsCreatedAtNull() {
+        BlockEntry entry = new BlockEntry("tiktok.com", null, null);
 
-        assertNull(entrada.getCreatedAt(),
-                "sem o campo no arquivo não há instante a inventar");
+        assertNull(entry.getCreatedAt(),
+                "with no field in the file there is no instant to invent");
     }
 
     @Test
-    void jsonSemCreatedAtNaoGeraCreatedAt() throws Exception {
-        BlockEntry entrada = BlockStore.defaultMapper()
+    void jsonWithoutCreatedAtDoesNotGenerateCreatedAt() throws Exception {
+        BlockEntry entry = BlockStore.defaultMapper()
                 .readValue("{\"domain\": \"tiktok.com\", \"expiresAt\": null}", BlockEntry.class);
 
-        assertNull(entrada.getCreatedAt(),
-                "um blocks.json sem o campo não pode ganhar a data de leitura");
+        assertNull(entry.getCreatedAt(),
+                "a blocks.json without the field cannot gain the read date");
     }
 
     @Test
-    void roundTripPreservaCreatedAtNulo(@TempDir Path tmp) throws Exception {
+    void roundTripPreservesNullCreatedAt(@TempDir Path tmp) throws Exception {
         Path stateFile = tmp.resolve("blocks.json");
         BlockStore store = new BlockStore(stateFile);
         Map<String, BlockEntry> blocks = new TreeMap<>();
@@ -53,37 +53,37 @@ class BlockEntryTest {
         Map<String, BlockEntry> loaded = store.load();
 
         assertNull(loaded.get("tiktok.com").getCreatedAt(),
-                "o estado não pode manufacturear o instante que o arquivo não tem");
+                "the state cannot invent the instant the file does not have");
     }
 
     @Test
-    void prazoElevadoNaoFabricaCreatedAt() {
-        Map<String, BlockEntry> estado = new TreeMap<>();
-        estado.put("tiktok.com", new BlockEntry("tiktok.com", null, NOW.plusSeconds(1800)));
-        Map<String, ProfileEntry> entradas = new TreeMap<>();
-        entradas.put("tiktok.com", new ProfileEntry(8 * 3600_000L));
-        Profile perfil = new Profile(NOW, NOW, entradas);
+    void raisedDeadlineDoesNotFabricateCreatedAt() {
+        Map<String, BlockEntry> state = new TreeMap<>();
+        state.put("tiktok.com", new BlockEntry("tiktok.com", null, NOW.plusSeconds(1800)));
+        Map<String, ProfileEntry> entries = new TreeMap<>();
+        entries.put("tiktok.com", new ProfileEntry(8 * 3600_000L));
+        Profile profile = new Profile(NOW, NOW, entries);
 
-        Map<String, ProfileMerge.Decision> out = ProfileMerge.merge(estado, perfil, NOW);
+        Map<String, ProfileMerge.Decision> out = ProfileMerge.merge(state, profile, NOW);
 
         assertEquals(ProfileMerge.Action.RAISED, out.get("tiktok.com").action());
         assertNull(out.get("tiktok.com").entry().getCreatedAt(),
-                "elevar o prazo não pode inventar a origem do bloqueio");
+                "raising the deadline must not invent the block's origin");
     }
 
     @Test
-    void mantidoContinuaSendoAMesmaInstancia() {
-        Map<String, BlockEntry> estado = new TreeMap<>();
-        estado.put("tiktok.com", new BlockEntry("tiktok.com", null, NOW.plusSeconds(3600)));
-        BlockEntry original = estado.get("tiktok.com");
-        Map<String, ProfileEntry> entradas = new TreeMap<>();
-        entradas.put("tiktok.com", new ProfileEntry(30 * 60_000L));
-        Profile perfil = new Profile(NOW, NOW, entradas);
+    void keptEntryRemainsTheSameInstance() {
+        Map<String, BlockEntry> state = new TreeMap<>();
+        state.put("tiktok.com", new BlockEntry("tiktok.com", null, NOW.plusSeconds(3600)));
+        BlockEntry original = state.get("tiktok.com");
+        Map<String, ProfileEntry> entries = new TreeMap<>();
+        entries.put("tiktok.com", new ProfileEntry(30 * 60_000L));
+        Profile profile = new Profile(NOW, NOW, entries);
 
-        Map<String, ProfileMerge.Decision> out = ProfileMerge.merge(estado, perfil, NOW);
+        Map<String, ProfileMerge.Decision> out = ProfileMerge.merge(state, profile, NOW);
 
         assertEquals(ProfileMerge.Action.KEPT, out.get("tiktok.com").action());
         assertSame(original, out.get("tiktok.com").entry(),
-                "um KEPT devolve a mesma instância: o prazo não pode ser reescrito");
+                "a KEPT decision returns the same instance: the deadline cannot be rewritten");
     }
 }

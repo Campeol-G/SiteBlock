@@ -12,14 +12,14 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.Callable;
 
-/** siteblock create profile <nome> — cria um perfil vazio. */
-@Command(name = "create", description = "Cria um perfil vazio.", mixinStandardHelpOptions = true)
+/** siteblock create profile <name> — creates an empty profile. */
+@Command(name = "create", description = "Creates an empty profile.", mixinStandardHelpOptions = true)
 public class CreateProfileCommand implements Callable<Integer> {
 
-    @Parameters(index = "0", paramLabel = "<sub>", description = "Sempre 'profile'.")
+    @Parameters(index = "0", paramLabel = "<sub>", description = "Always 'profile'.")
     String sub;
 
-    @Parameters(index = "1", paramLabel = "<nome>", description = "Nome do perfil.")
+    @Parameters(index = "1", paramLabel = "<name>", description = "Profile name.")
     String name;
 
     @picocli.CommandLine.Option(names = "--state-file", hidden = true) String stateFileOverride;
@@ -38,20 +38,20 @@ public class CreateProfileCommand implements Callable<Integer> {
         try {
             valid = ProfileNames.require(name);
         } catch (IllegalArgumentException e) {
-            System.err.println("Erro: " + e.getMessage());
+            System.err.println("Error: " + e.getMessage());
             return 1;
         }
         if (!"profile".equals(sub)) {
-            System.err.println("Uso: siteblock create profile <nome>");
+            System.err.println("Usage: siteblock create profile <name>");
             return 2;
         }
         ProfileStore store = new ProfileStore(CliSupport.resolveProfilesFile(stateFileOverride));
-        boolean[] jaExiste = {false};
+        boolean[] alreadyExists = {false};
         try {
             store.inTransaction(tx -> {
                 Map<String, Profile> profiles = tx.load();
                 if (profiles.containsKey(valid)) {
-                    jaExiste[0] = true;
+                    alreadyExists[0] = true;
                 } else {
                     profiles.put(valid, new Profile(Instant.now(CliSupport.clock()), Instant.now(CliSupport.clock()), new TreeMap<>()));
                     tx.save(profiles);
@@ -59,14 +59,14 @@ public class CreateProfileCommand implements Callable<Integer> {
                 return null;
             });
         } catch (IOException e) {
-            System.err.println("Erro ao criar perfil: " + e.getMessage());
+            System.err.println("Error creating profile: " + e.getMessage());
             return 1;
         }
-        if (jaExiste[0]) {
-            System.out.println("Perfil '" + valid + "' já existe.");
+        if (alreadyExists[0]) {
+            System.out.println("Profile '" + valid + "' already exists.");
             return 0;
         }
-        System.out.println("Perfil '" + valid + "' criado (vazio).");
+        System.out.println("Profile '" + valid + "' created (empty).");
         return 0;
     }
 }

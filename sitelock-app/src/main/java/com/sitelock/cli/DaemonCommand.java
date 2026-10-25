@@ -6,14 +6,14 @@ import picocli.CommandLine.Command;
 import java.util.concurrent.Callable;
 
 /**
- * siteblock daemon ... — o daemon de expiração.
+ * siteblock daemon ... — the expiration daemon.
  *
- * <p>É o que faz um bloqueio temporário vencer sozinho, sem ninguém abrir o
- * terminal. Ele só remove; bloquear continua sendo coisa do {@code block} e do
+ * <p>It is what makes a temporary block expire on its own, without anyone opening the
+ * terminal. It only removes; blocking stays the job of {@code block} and of
  * {@code profile apply}.
  */
 @Command(name = "daemon",
-        description = "Daemon que libera sozinho os bloqueios cujo prazo vence.",
+        description = "Daemon that releases blocks on its own when their deadline expires.",
         mixinStandardHelpOptions = true,
         subcommands = {
                 DaemonStartCommand.class,

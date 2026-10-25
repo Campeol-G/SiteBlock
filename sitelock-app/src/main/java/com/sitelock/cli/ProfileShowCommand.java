@@ -14,13 +14,13 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.Callable;
 
-/** siteblock profile show <nome> — o detalhe de um perfil, com as durações. */
+/** siteblock profile show <name> — profile details with durations. */
 @Command(name = "show",
-        description = "Mostra o conteudo de um perfil.",
+        description = "Shows the contents of a profile.",
         mixinStandardHelpOptions = true)
 public class ProfileShowCommand implements Callable<Integer> {
 
-    @Parameters(index = "0", paramLabel = "<nome>", description = "Nome do perfil.")
+    @Parameters(index = "0", paramLabel = "<name>", description = "Profile name.")
     String name;
 
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
@@ -39,7 +39,7 @@ public class ProfileShowCommand implements Callable<Integer> {
         try {
             valid = ProfileNames.require(name);
         } catch (IllegalArgumentException e) {
-            System.err.println("Erro: " + e.getMessage());
+            System.err.println("Error: " + e.getMessage());
             return 1;
         }
 
@@ -47,20 +47,20 @@ public class ProfileShowCommand implements Callable<Integer> {
         try {
             profile = new ProfileStore(CliSupport.resolveProfilesFile(stateFileOverride)).load().get(valid);
         } catch (IOException e) {
-            System.err.println("Erro ao ler perfis: " + e.getMessage());
+            System.err.println("Error reading profiles: " + e.getMessage());
             return 1;
         }
         if (profile == null) {
-            System.err.println("Perfil '" + valid + "' não existe.");
+            System.err.println("Profile '" + valid + "' does not exist.");
             return 1;
         }
 
-        System.out.println("Perfil '" + valid + "' (" + profile.size() + " domínio(s)):");
+        System.out.println("Profile '" + valid + "' (" + profile.size() + " domain(s)):");
         for (Map.Entry<String, ProfileEntry> e : profile.getEntries().entrySet()) {
             Long millis = e.getValue() == null ? null : e.getValue().getDurationMillis();
-            String duracao = millis == null ? "permanente"
+            String duration = millis == null ? "permanent"
                     : DurationParser.formatRemaining(Duration.ofMillis(millis));
-            System.out.println("  " + e.getKey() + " — " + duracao);
+            System.out.println("  " + e.getKey() + " — " + duration);
         }
         return 0;
     }

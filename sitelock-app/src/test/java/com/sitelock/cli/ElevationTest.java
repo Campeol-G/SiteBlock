@@ -9,13 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * O comando de elevação no vocabulário de cada SO.
+ * The elevation command in each OS's vocabulary.
  *
- * <p>No Unix, sudo com o caminho real do binário: o {@code ~/.local/bin}
- * costuma ficar fora do {@code secure_path} do sudo. No Windows, sudo não
- * existe — quem eleva é o terminal, aberto como Administrador.
+ * <p>On Unix, sudo with the real binary path: {@code ~/.local/bin} is often
+ * outside sudo's {@code secure_path}. On Windows there is no sudo — the
+ * terminal elevates when opened as Administrator.
  */
-class ElevacaoTest {
+class ElevationTest {
 
     private String savedBin;
     private String savedOsName;
@@ -37,17 +37,17 @@ class ElevacaoTest {
     }
 
     @Test
-    void noWindowsOComandoDeElevacaoNaoMandaSudo() {
+    void onWindowsElevationCommandDoesNotUseSudo() {
         System.setProperty("os.name", "Windows 11");
-        String comando = CliSupport.elevatedCommand("daemon enable");
+        String command = CliSupport.elevatedCommand("daemon enable");
 
-        assertFalse(comando.contains("sudo"), comando);
-        assertTrue(comando.contains("Administrador"), comando);
-        assertTrue(comando.contains("siteblock daemon enable"), comando);
+        assertFalse(command.contains("sudo"), command);
+        assertTrue(command.contains("Administrator"), command);
+        assertTrue(command.contains("siteblock daemon enable"), command);
     }
 
     @Test
-    void noUnixOComandoDeElevacaoUsaSudoComOCaminhoReal() {
+    void onUnixElevationCommandUsesSudoWithRealPath() {
         System.setProperty("os.name", "Linux");
         System.setProperty("siteblock.bin", "/home/chico/.local/bin/siteblock");
 

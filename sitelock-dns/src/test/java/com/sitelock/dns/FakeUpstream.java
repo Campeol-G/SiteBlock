@@ -14,68 +14,68 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
 
-// Upstream falso: um socket UDP local que responde como se fosse o DNS público.
-// Existe para que os testes nunca dependam da internet: o endereço é loopback,
-// a porta é efêmera. O modo de resposta reproduz os defeitos do transporte.
+// Fake upstream: a local UDP socket that responds as if it were the public DNS.
+// It exists so tests never depend on the internet: the address is loopback and
+// the port is ephemeral. The response mode reproduces transport defects.
 final class FakeUpstream implements AutoCloseable {
 
-    // Como o upstream falso responde à consulta.
-    enum Modo {
-        // Resposta normal: ecoa o ID e devolve uma answer.
+    // How the fake upstream responds to the query.
+    enum Mode {
+        // Normal response: echoes the ID and returns an answer.
         NORMAL,
-        // Responde com outro ID (resposta de outra transação).
-        ID_ERRADO,
-        // Responde com QR=0 (não é resposta).
-        SEM_QR,
-        // Não responde nada (upstream mudo).
-        SILENCIO,
-        // Responde sem section answer (NXDOMAIN).
-        SEM_ANSWER
+        // Responds with another ID (a response from another transaction).
+        WRONG_ID,
+        // Responds with QR=0 (not a response).
+        NO_QR,
+        // Responds with nothing (silent upstream).
+        SILENCE,
+        // Responds without an answer section (NXDOMAIN).
+        NO_ANSWER
     }
 
     private final DatagramSocket socket;
-    private final List<byte[]> recebidas = Collections.synchronizedList(new ArrayList<>());
-    private final List<Integer> portasDeOrigem = Collections.synchronizedList(new ArrayList<>());
-    private volatile Modo modo = Modo.NORMAL;
-    private volatile Function<byte[], byte[]> respostaCustom;
-    private volatile boolean fechado;
+    private final List<byte[]> received = Collections.synchronizedList(new ArrayList<>());
+    private final List<Integer> sourcePorts = Collections.synchronizedList(new ArrayList<>());
+    private volatile Mode mode = Mode.NORMAL;
+    private volatile Function<byte[], byte[]> customResponse;
+    private volatile boolean closed;
 
     FakeUpstream() throws SocketException {
         socket = new DatagramSocket(0, InetAddress.getLoopbackAddress());
         socket.setSoTimeout(100);
     }
 
-    int porta() {
+    int port() {
         return socket.getLocalPort();
     }
 
-    InetAddress endereco() {
+    InetAddress address() {
         return socket.getLocalAddress();
     }
 
-    List<byte[]> consultasRecebidas() {
-        synchronized (recebidas) {
-            return List.copyOf(recebidas);
+    List<byte[]> receivedQueries() {
+        synchronized (received) {
+            return List.copyOf(received);
         }
     }
 
-    // Portas de origem das consultas recebidas — ou seja, quantos sockets
-    // diferentes o servidor abriu para falar com o upstream.
-    Set<Integer> portasDeOrigem() {
-        synchronized (portasDeOrigem) {
-            return new LinkedHashSet<>(portasDeOrigem);
+    // Source ports of the received queries — that is, how many different sockets
+    // the server opened to talk to the upstream.
+    Set<Integer> sourcePorts() {
+        synchronized (sourcePorts) {
+            return new LinkedHashSet<>(sourcePorts);
         }
     }
 
-    void modo(Modo novo) {
-        this.modo = novo;
+    void mode(Mode newMode) {
+        this.mode = newMode;
     }
 
-    // Resposta sob medida: o lambda recebe a consulta recebida e devolve a
-    // resposta (ex.: uma cadeia de CNAMEs montada à mão). Tem precedência sobre
-    // o Modo: o modo só vale enquanto não há resposta customizada.
-    void respondeCom(Function<byte[], byte[]> resposta) {
-        this.respostaCustom = resposta;
+    // Custom response: the lambda receives the received query and returns the
+    // response (e.g. a hand-built CNAME chain). It takes precedence over Mode:
+    // the mode only applies while there is no custom response.
+    void respondWith(Function<byte[], byte[]> response) {
+        this.customResponse = response;
     }
 
     void start() {
@@ -86,7 +86,7 @@ final class FakeUpstream implements AutoCloseable {
 
     private void loop() {
         byte[] buf = new byte[4096];
-        while (!fechado) {
+        while (!closed) {
             DatagramPacket p = new DatagramPacket(buf, buf.length);
             try {
                 socket.receive(p);
@@ -95,56 +95,56 @@ final class FakeUpstream implements AutoCloseable {
             } catch (IOException e) {
                 return;
             }
-            byte[] consulta = Arrays.copyOf(p.getData(), p.getLength());
-            recebidas.add(consulta);
-            portasDeOrigem.add(p.getPort());
-            Modo m = modo;
-            if (m == Modo.SILENCIO) {
+            byte[] query = Arrays.copyOf(p.getData(), p.getLength());
+            received.add(query);
+            sourcePorts.add(p.getPort());
+            Mode m = mode;
+            if (m == Mode.SILENCE) {
                 continue;
             }
-            Function<byte[], byte[]> custom = respostaCustom;
-            byte[] resposta = custom != null ? custom.apply(consulta) : responder(consulta, m);
-            if (resposta == null) {
+            Function<byte[], byte[]> custom = customResponse;
+            byte[] response = custom != null ? custom.apply(query) : respond(query, m);
+            if (response == null) {
                 continue;
             }
             try {
-                socket.send(new DatagramPacket(resposta, resposta.length,
+                socket.send(new DatagramPacket(response, response.length,
                         p.getAddress(), p.getPort()));
             } catch (IOException ignored) {
-                // upstream falso: erro de envio não interessa
+                // fake upstream: send errors do not matter
             }
         }
     }
 
-    // Resposta com uma answer de verdade (para provar que o dado real vazou).
-    private static byte[] responder(byte[] consulta, Modo modo) {
-        int id = DnsWire.u16(consulta, 0);
-        if (modo == Modo.ID_ERRADO) {
+    // Response with a real answer (to prove that real data leaked).
+    private static byte[] respond(byte[] query, Mode mode) {
+        int id = DnsWire.u16(query, 0);
+        if (mode == Mode.WRONG_ID) {
             id = (id + 1) & 0xFFFF;
         }
-        int fimPergunta = DnsWire.fimDaPergunta(consulta);
-        byte[] pergunta = Arrays.copyOfRange(consulta, 12, fimPergunta);
-        int qtype = DnsWire.u16(consulta, fimPergunta - 4);
-        byte[] rdata = rdataPara(qtype);
+        int questionEnd = DnsWire.questionEnd(query);
+        byte[] question = Arrays.copyOfRange(query, 12, questionEnd);
+        int qtype = DnsWire.u16(query, questionEnd - 4);
+        byte[] rdata = rdataFor(qtype);
 
-        if (modo == Modo.SEM_ANSWER) {
-            // NXDOMAIN: a pergunta é ecoada, mas a section answer vem vazia.
-            byte[] out = new byte[12 + pergunta.length];
+        if (mode == Mode.NO_ANSWER) {
+            // NXDOMAIN: the question is echoed, but the answer section is empty.
+            byte[] out = new byte[12 + question.length];
             DnsWire.put16(out, 0, id);
             DnsWire.put16(out, 2, 0x8183); // QR=1, RD, RA, RCODE=3 (NXDOMAIN)
             DnsWire.put16(out, 4, 1);  // QDCOUNT
             DnsWire.put16(out, 6, 0);  // ANCOUNT
-            System.arraycopy(pergunta, 0, out, 12, pergunta.length);
+            System.arraycopy(question, 0, out, 12, question.length);
             return out;
         }
 
-        byte[] out = new byte[12 + pergunta.length + 12 + rdata.length];
+        byte[] out = new byte[12 + question.length + 12 + rdata.length];
         DnsWire.put16(out, 0, id);
-        DnsWire.put16(out, 2, modo == Modo.SEM_QR ? 0x0000 : 0x8180); // QR=1, RD, RA
+        DnsWire.put16(out, 2, mode == Mode.NO_QR ? 0x0000 : 0x8180); // QR=1, RD, RA
         DnsWire.put16(out, 4, 1);  // QDCOUNT
         DnsWire.put16(out, 6, 1);  // ANCOUNT
-        System.arraycopy(pergunta, 0, out, 12, pergunta.length);
-        int off = 12 + pergunta.length;
+        System.arraycopy(question, 0, out, 12, question.length);
+        int off = 12 + question.length;
         out[off++] = (byte) 0xC0;
         out[off++] = 0x0C;
         DnsWire.put16(out, off, qtype);
@@ -155,19 +155,19 @@ final class FakeUpstream implements AutoCloseable {
         return out;
     }
 
-    private static byte[] rdataPara(int qtype) {
+    private static byte[] rdataFor(int qtype) {
         if (qtype == DnsQuery.TYPE_A) {
             return new byte[]{(byte) 93, (byte) 184, (byte) 216, (byte) 34};
         }
         if (qtype == DnsQuery.TYPE_AAAA) {
             return new byte[16];
         }
-        return "resposta-real-do-upstream".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        return "real-upstream-response".getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 
     @Override
     public void close() {
-        fechado = true;
+        closed = true;
         socket.close();
     }
 }

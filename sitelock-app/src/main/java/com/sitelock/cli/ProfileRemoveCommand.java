@@ -24,30 +24,31 @@ import java.util.TreeMap;
 import java.util.concurrent.Callable;
 
 /**
- * siteblock profile &lt;nome&gt; remove &lt;dominio...&gt;.
+ * siteblock profile &lt;name&gt; remove &lt;domain...&gt;.
  *
- * <p>Tira domínios da receita de um perfil que já existe; como o {@code add}, não toca no
- * hosts. Avisa quando o domínio continua bloqueado, porque remover da receita não é soltar.
+ * <p>Removes domains from the recipe of an existing profile; like {@code add}, it does not touch
+ * the hosts file. It warns when a domain stays blocked, because removing it from the recipe is not
+ * releasing it.
  */
 @Command(name = "remove",
-        description = "Tira dominios de um perfil existente.",
+        description = "Removes domains from an existing profile.",
         mixinStandardHelpOptions = true)
 public class ProfileRemoveCommand implements Callable<Integer> {
 
     @ParentCommand
     ProfileCommand parent;
 
-    @Parameters(index = "0..*", paramLabel = "<dominio>",
-            description = "Um ou mais dominios. Ex.: tiktok.com vm.tiktok.com",
+    @Parameters(index = "0..*", paramLabel = "<domain>",
+            description = "One or more domains. E.g. tiktok.com vm.tiktok.com",
             arity = "1..*")
     List<String> domainsRaw = new ArrayList<>();
 
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
 
-    // Relógio injetado pelo teste; null = o do sistema.
+    // Clock injected by the test; null = use the system clock.
     Clock clockOverride;
 
-    // Store injetado pelo teste; null = usa o do stateDir.
+    // Store injected by the test; null = use the one from the state directory.
     ProfileStore storeOverride;
 
     public ProfileRemoveCommand() {
@@ -55,8 +56,8 @@ public class ProfileRemoveCommand implements Callable<Integer> {
 
     @Override
     public Integer call() {
-        final String nome = nomeDoPerfil();
-        if (nome == null) {
+        final String profileName = profileName();
+        if (profileName == null) {
             return 1;
         }
 
@@ -65,14 +66,14 @@ public class ProfileRemoveCommand implements Callable<Integer> {
             try {
                 DomainUtils.NormalizationResult r = DomainUtils.normalize(raw);
                 if (r.normalized()) {
-                    System.out.println("Aviso: entrada normalizada de '" + r.original()
-                            + "' para '" + r.domain() + "'.");
+                    System.out.println("Warning: normalized input from '" + r.original()
+                            + "' to '" + r.domain() + "'.");
                 }
                 if (!domains.contains(r.domain())) {
                     domains.add(r.domain());
                 }
             } catch (IllegalArgumentException e) {
-                System.err.println("Erro: " + e.getMessage());
+                System.err.println("Error: " + e.getMessage());
                 return 1;
             }
         }
@@ -80,115 +81,115 @@ public class ProfileRemoveCommand implements Callable<Integer> {
         ProfileStore store = storeOverride != null ? storeOverride
                 : new ProfileStore(CliSupport.resolveProfilesFile(stateFileOverride));
 
-        List<String> removidos = new ArrayList<>();
-        List<String> ausentes = new ArrayList<>();
-        boolean[] naoExiste = {false};
-        boolean[] nadaARemover = {false};
-        // A leitura e a gravação da receita dentro de uma transação: dois
-        // `profile remove` simultâneos não podem se perder.
+        List<String> removed = new ArrayList<>();
+        List<String> absent = new ArrayList<>();
+        boolean[] missing = {false};
+        boolean[] nothingToRemove = {false};
+        // Read and record the recipe inside one transaction: two simultaneous
+        // `profile remove` calls cannot be allowed to lose each other's changes.
         try {
             store.inTransaction(tx -> {
                 Map<String, Profile> profiles = tx.load();
-                Profile profile = profiles.get(nome);
+                Profile profile = profiles.get(profileName);
                 if (profile == null) {
-                    naoExiste[0] = true;
+                    missing[0] = true;
                     return null;
                 }
                 Map<String, ProfileEntry> entries = new TreeMap<>(profile.getEntries());
                 for (String domain : domains) {
                     if (entries.remove(domain) != null) {
-                        removidos.add(domain);
+                        removed.add(domain);
                     } else {
-                        ausentes.add(domain);
+                        absent.add(domain);
                     }
                 }
-                if (removidos.isEmpty()) {
-                    nadaARemover[0] = true;
+                if (removed.isEmpty()) {
+                    nothingToRemove[0] = true;
                     return null;
                 }
-                profiles.put(nome, new Profile(profile.getCreatedAt(), Instant.now(clock()), entries));
+                profiles.put(profileName, new Profile(profile.getCreatedAt(), Instant.now(clock()), entries));
                 tx.save(profiles);
                 return null;
             });
         } catch (IOException e) {
-            System.err.println("Erro ao salvar o perfil: " + e.getMessage());
+            System.err.println("Error saving the profile: " + e.getMessage());
             return 1;
         }
-        if (naoExiste[0]) {
-            System.err.println("Perfil '" + nome + "' não existe.");
+        if (missing[0]) {
+            System.err.println("Profile '" + profileName + "' does not exist.");
             return 1;
         }
-        if (nadaARemover[0]) {
-            System.err.println("Nenhum dos domínios está no perfil '" + nome + "'. Nada foi alterado.");
+        if (nothingToRemove[0]) {
+            System.err.println("None of the domains are in profile '" + profileName + "'. Nothing was changed.");
             return 1;
         }
 
-        System.out.println("Perfil '" + nome + "': " + removidos.size() + " domínio(s) removido(s).");
-        for (String domain : removidos) {
+        System.out.println("Profile '" + profileName + "': " + removed.size() + " domain(s) removed.");
+        for (String domain : removed) {
             System.out.println("  - " + domain);
         }
-        for (String domain : ausentes) {
-            System.out.println("  (não estava no perfil: " + domain + ")");
+        for (String domain : absent) {
+            System.out.println("  (not in the profile: " + domain + ")");
         }
 
-        // POR QUE: o aviso aponta o "unblock" individual — o "profile unblock" só
-        // trabalha sobre os domínios do perfil, e este já não está mais lá. Sem o
-        // aviso, quem assume que remover = soltar fica com o site bloqueado.
-        avisarSeContinuaBloqueado(removidos);
+        // WHY: the warning points to the individual "unblock" — "profile unblock" only
+        // works on the domains still in the profile, and this one is no longer there. Without
+        // the warning, whoever assumes removing means releasing keeps the site blocked.
+        warnIfStillBlocked(removed);
         return 0;
     }
 
-    // POR QUE: a leitura do estado é separada da escrita do perfil — falhar aqui só
-    // impede o aviso, não a remoção, e desfazer a receita nova por causa de um estado
-    // ilegível seria trocar um problema pequeno por um maior.
-    private void avisarSeContinuaBloqueado(List<String> removidos) {
-        final Map<String, BlockEntry> estado;
+    // WHY: reading the state is separate from writing the profile — a failure here only
+    // prevents the warning, not the removal, and undoing the new recipe because of an
+    // unreadable state would trade a small problem for a bigger one.
+    private void warnIfStillBlocked(List<String> removed) {
+        final Map<String, BlockEntry> state;
         try {
-            estado = new BlockStore(CliSupport.resolveStateFile(stateFileOverride)).load();
+            state = new BlockStore(CliSupport.resolveStateFile(stateFileOverride)).load();
         } catch (Exception e) {
-            System.out.println("Aviso: não consegui ler o estado para conferir o que continua "
-                    + "bloqueado (" + e.getMessage() + ").");
+            System.out.println("Warning: could not read the state to check what is still "
+                    + "blocked (" + e.getMessage() + ").");
             return;
         }
         Instant now = Instant.now(clock());
-        List<String> continuam = new ArrayList<>();
-        for (String domain : removidos) {
-            BlockEntry entry = estado.get(domain);
+        List<String> stillBlocked = new ArrayList<>();
+        for (String domain : removed) {
+            BlockEntry entry = state.get(domain);
             if (entry != null && !entry.isExpired(now)) {
-                continuam.add(domain);
-                System.out.println("AVISO: " + domain + " continua bloqueado ("
-                        + descricaoDoPrazo(entry, now) + ").");
+                stillBlocked.add(domain);
+                System.out.println("WARNING: " + domain + " stays blocked ("
+                        + describeDeadline(entry, now) + ").");
             }
         }
-        if (!continuam.isEmpty()) {
-            System.out.println("       Tirar da receita não solta o bloqueio. Para liberar: "
-                    + CliSupport.elevatedCommand("unblock " + String.join(" ", continuam) + " --force"));
+        if (!stillBlocked.isEmpty()) {
+            System.out.println("         Removing it from the recipe does not lift the block. To release it: "
+                    + CliSupport.elevatedCommand("unblock " + String.join(" ", stillBlocked) + " --force"));
         }
     }
 
-    private static String descricaoDoPrazo(BlockEntry entry, Instant now) {
+    private static String describeDeadline(BlockEntry entry, Instant now) {
         if (entry.getExpiresAt() == null) {
-            return "permanente";
+            return "permanent";
         }
-        Duration restante = Duration.between(now, entry.getExpiresAt());
-        return "restam " + DurationParser.formatRemaining(restante);
+        Duration remaining = Duration.between(now, entry.getExpiresAt());
+        return DurationParser.formatRemaining(remaining) + " left";
     }
 
-    // O relógio do comando: o injetado pelo teste, ou o da CLI.
+    // The command's clock: the one injected by the test, or the CLI's.
     private Clock clock() {
         return clockOverride != null ? clockOverride : CliSupport.clock();
     }
 
-    private String nomeDoPerfil() {
+    private String profileName() {
         if (parent == null || parent.name == null || parent.name.isBlank()) {
-            System.err.println("Erro: informe o nome do perfil. "
-                    + "Uso: siteblock profile <nome> remove <dominio>");
+            System.err.println("Error: provide the profile name. "
+                    + "Usage: siteblock profile <name> remove <domain>");
             return null;
         }
         try {
             return ProfileNames.require(parent.name);
         } catch (IllegalArgumentException e) {
-            System.err.println("Erro: " + e.getMessage());
+            System.err.println("Error: " + e.getMessage());
             return null;
         }
     }

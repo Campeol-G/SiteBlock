@@ -6,15 +6,15 @@ import java.util.Locale;
 import java.util.function.Supplier;
 
 /**
- * Implementação padrão de {@link HostsFileLocator}.
+ * Default implementation of {@link HostsFileLocator}.
  *
  * <ul>
  *   <li>Linux/macOS: {@code /etc/hosts}.</li>
  *   <li>Windows: {@code %SystemRoot%\System32\drivers\etc\hosts}.
- *       A letra do disco <b>não</b> é assumida como fixa: usa a variável de
- *       ambiente {@code SystemRoot} (ex.: {@code C:\Windows}). Se a variável
- *       estiver ausente/vazia (JVMs antigas, ambiente mínimo), cai para
- *       {@code C:\Windows} e isso fica documentado no README como limitação.</li>
+ *       The drive letter is <b>not</b> assumed to be fixed: it uses the
+ *       environment variable {@code SystemRoot} (e.g. {@code C:\Windows}). If the variable
+ *       is missing/empty (old JVMs, minimal environment), it falls back to
+ *       {@code C:\Windows}, and that is documented in the README as a limitation.</li>
  * </ul>
  */
 public final class DefaultHostsFileLocator implements HostsFileLocator {
@@ -24,23 +24,23 @@ public final class DefaultHostsFileLocator implements HostsFileLocator {
     private final OsType osType;
     private final Supplier<String> systemRootProvider;
 
-    /** Usa o SO real e {@code System.getenv("SystemRoot")}. */
+    /** Uses the real OS and {@code System.getenv("SystemRoot")}. */
     public DefaultHostsFileLocator() {
         this(OsType.detect(), () -> System.getenv("SystemRoot"));
     }
 
-    /** Injeta o SO (para testes); SystemRoot vem do ambiente real. */
+    /** Injects the OS (for tests); SystemRoot comes from the real environment. */
     public DefaultHostsFileLocator(OsType osType) {
         this(osType, () -> System.getenv("SystemRoot"));
     }
 
-    /** Injeta o valor de {@code os.name} (para testes). */
+    /** Injects the {@code os.name} value (for tests). */
     public DefaultHostsFileLocator(String osName) {
         this(OsType.detect(osName), () -> System.getenv("SystemRoot"));
     }
 
-    // Injeta SO + provedor de SystemRoot (para testes do fallback Windows
-    // sem depender do ambiente da máquina).
+    // Injects OS + SystemRoot provider (for Windows fallback tests
+    // without depending on the machine's environment).
     DefaultHostsFileLocator(OsType osType, Supplier<String> systemRootProvider) {
         this.osType = osType == null ? OsType.UNKNOWN : osType;
         this.systemRootProvider = systemRootProvider == null ? () -> null : systemRootProvider;
@@ -51,7 +51,7 @@ public final class DefaultHostsFileLocator implements HostsFileLocator {
         if (osType.isWindows()) {
             return windowsHostsPath(systemRootProvider.get());
         }
-        // Linux, macOS e UNKNOWN (conservador: padrão Unix).
+        // Linux, macOS and UNKNOWN (conservative: Unix default).
         return Paths.get("/etc/hosts");
     }
 
@@ -59,14 +59,14 @@ public final class DefaultHostsFileLocator implements HostsFileLocator {
         String root = systemRoot == null || systemRoot.isBlank()
                 ? FALLBACK_WINDOWS_ROOT
                 : systemRoot.strip();
-        // Remove barra final para evitar "C:\Windows\\System32...".
+        // Strip the trailing separator to avoid "C:\Windows\\System32...".
         while (root.endsWith("\\") || root.endsWith("/")) {
             root = root.substring(0, root.length() - 1);
         }
         return Paths.get(root, "System32", "drivers", "etc", "hosts");
     }
 
-    // Exposto para testes afirmarem o SO resolvido.
+    // Exposed so tests can assert the resolved OS.
     OsType getOsType() {
         return osType;
     }

@@ -21,9 +21,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * {@code sweepExpired()} é o caminho que o daemon exercita a cada minuto, então
- * é o caminho que precisa ser em lote: 40 domínios vencendo juntos não podem
- * custar 40 travadas do hosts, nem falhar deixando metade removida.
+ * {@code sweepExpired()} is the path the daemon exercises every minute, so
+ * it is the path that has to be batched: 40 domains expiring together cannot
+ * cost 40 hosts-file locks, nor fail leaving half removed.
  */
 class BlockServiceSweepTest {
 
@@ -32,7 +32,7 @@ class BlockServiceSweepTest {
 
     private static final Instant NOW = Instant.parse("2026-10-15T12:00:00Z");
 
-    // Blocker que registra o que recebeu, sem tocar em arquivo nenhum.
+    // Blocker that records what it received, without touching any file.
     private static final class RecordingBlocker implements SiteBlocker {
 
         final List<List<String>> unblockAllCalls = new ArrayList<>();
@@ -58,7 +58,7 @@ class BlockServiceSweepTest {
         public void unblockAll(List<String> domains) throws IOException {
             unblockAllCalls.add(List.copyOf(domains));
             if (failOnUnblockAll) {
-                throw new IOException("hosts somente leitura");
+                throw new IOException("hosts file is read-only");
             }
         }
     }
@@ -85,11 +85,11 @@ class BlockServiceSweepTest {
         store.save(state);
     }
 
-    // Map.of não aceita valor nulo, e "permanente" é justamente null.
-    private static Map<String, Instant> deadlines(Object... pares) {
+    // Map.of does not accept a null value, and "permanent" is exactly null.
+    private static Map<String, Instant> deadlines(Object... pairs) {
         Map<String, Instant> m = new TreeMap<>();
-        for (int i = 0; i < pares.length; i += 2) {
-            m.put((String) pares[i], (Instant) pares[i + 1]);
+        for (int i = 0; i < pairs.length; i += 2) {
+            m.put((String) pairs[i], (Instant) pairs[i + 1]);
         }
         return m;
     }
@@ -110,16 +110,16 @@ class BlockServiceSweepTest {
                 "tiktok.com", NOW.minusSeconds(3600),
                 "youtube.com", NOW.minusSeconds(60),
                 "discord.com", NOW.minusSeconds(1),
-                "permanente.com", null));
+                "permanent.com", null));
 
         RecordingBlocker blocker = new RecordingBlocker();
         BlockService.SweepResult result = service(h, blocker).sweepExpired();
 
-        assertEquals(1, blocker.unblockAllCalls.size(), "um sweep, uma chamada em lote");
+        assertEquals(1, blocker.unblockAllCalls.size(), "one sweep, one batch call");
         assertEquals(3, blocker.unblockAllCalls.get(0).size());
-        assertEquals(0, blocker.unblockCalls, "o caminho por domínio não pode mais ser usado");
+        assertEquals(0, blocker.unblockCalls, "the per-domain path can no longer be used");
         assertEquals(List.of("discord.com", "tiktok.com", "youtube.com"), result.removed());
-        assertEquals(deadlines("permanente.com", null), onDisk());
+        assertEquals(deadlines("permanent.com", null), onDisk());
     }
 
     @Test
@@ -136,10 +136,10 @@ class BlockServiceSweepTest {
 
     @Test
     void sweepIsSkippedWhenHostsNotWritable() throws Exception {
-        // Hosts inexistente com pai inexistente: isHostsWritable() cai no diretório
-        // pai, e um diretório inexistente não é gravável. É o jeito portátil de
-        // simular negação — chmod não significa nada no Windows, que roda a CI.
-        Path h = tmp.resolve("sem-pai/hosts");
+        // Missing hosts file with a missing parent: isHostsWritable() falls back to the parent
+        // directory, and a missing directory is not writable. That is the portable way to
+        // simulate denial — chmod means nothing on Windows, which runs CI.
+        Path h = tmp.resolve("missing-parent/hosts");
         BlockStore store = store();
         seed(store, deadlines("tiktok.com", NOW.minusSeconds(60)));
 
@@ -149,7 +149,7 @@ class BlockServiceSweepTest {
         assertTrue(result.skippedDueToPermission());
         assertTrue(result.removed().isEmpty());
         assertTrue(blocker.unblockAllCalls.isEmpty());
-        assertTrue(onDisk().containsKey("tiktok.com"), "sem escrita no hosts, o estado fica como está");
+        assertTrue(onDisk().containsKey("tiktok.com"), "without write access to the hosts file, the state stays as it is");
     }
 
     @Test
@@ -166,7 +166,7 @@ class BlockServiceSweepTest {
         BlockService service = service(h, blocker);
         assertThrows(IOException.class, service::sweepExpired);
 
-        assertEquals(2, onDisk().size(), "falha no lote não pode remover nada do estado");
+        assertEquals(2, onDisk().size(), "a batch failure must not remove anything from the state");
         assertFalse(blocker.unblockAllCalls.isEmpty());
     }
 }

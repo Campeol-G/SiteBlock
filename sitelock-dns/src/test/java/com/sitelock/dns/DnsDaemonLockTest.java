@@ -11,9 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Dois {@code dns start} simultâneos não podem subir dois daemons: a trava é
- * exclusiva enquanto o primeiro lê o estado e sobe o filho, e volta a valer
- * assim que ele termina.
+ * Two simultaneous {@code dns start} runs must not bring up two daemons: the lock
+ * is exclusive while the first reads state and starts the child, and it applies
+ * again as soon as that finishes.
  */
 class DnsDaemonLockTest {
 
@@ -21,25 +21,25 @@ class DnsDaemonLockTest {
     Path tmp;
 
     @Test
-    void segundaAquisicaoFalhaEnquantoAPrimeiraEstaRetida() throws Exception {
-        try (DnsDaemonLock primeira = DnsDaemonLock.tryAcquire(tmp).orElseThrow()) {
-            Optional<DnsDaemonLock> segunda = DnsDaemonLock.tryAcquire(tmp);
+    void secondAcquisitionFailsWhileFirstIsHeld() throws Exception {
+        try (DnsDaemonLock first = DnsDaemonLock.tryAcquire(tmp).orElseThrow()) {
+            Optional<DnsDaemonLock> second = DnsDaemonLock.tryAcquire(tmp);
 
-            assertTrue(segunda.isEmpty(),
-                    "o segundo dns start tem que ser recusado sem esperar");
+            assertTrue(second.isEmpty(),
+                    "the second dns start must be refused without waiting");
         }
     }
 
     @Test
-    void travaEhLiberadaAoFechar() throws Exception {
+    void lockIsReleasedOnClose() throws Exception {
         try (DnsDaemonLock ignored = DnsDaemonLock.tryAcquire(tmp).orElseThrow()) {
-            // só valida a aquisição
+            // only verifies the acquisition
         }
 
-        try (DnsDaemonLock segunda = DnsDaemonLock.tryAcquire(tmp).orElseThrow()) {
+        try (DnsDaemonLock second = DnsDaemonLock.tryAcquire(tmp).orElseThrow()) {
             assertTrue(Files.exists(DnsDaemonLock.lockPath(tmp)));
         }
         assertFalse(Files.exists(tmp.resolve("dns-server.json")),
-                "a trava não pode mexer no estado do daemon");
+                "the lock must not touch the daemon state");
     }
 }

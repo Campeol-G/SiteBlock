@@ -18,18 +18,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Os comandos que escrevem estado têm que fazer isso <b>dentro</b> de uma
- * transação, com a trava do estado retida do começo ao fim.
+ * Commands that write state must do so <b>inside</b> a transaction, with the
+ * state lock held from start to finish.
  *
- * <p>Por fora dela, o {@code load} e o {@code save} de um mesmo comando ficam
- * em janelas separadas: um {@code block} feito em outro terminal nesse intervalo
- * é apagado do JSON — e o domínio continua no {@code /etc/hosts}, sem registro
- * em lugar nenhum. O sweep varre o JSON, então nunca limpa.
+ * <p>Outside of it, the {@code load} and {@code save} of the same command sit in
+ * separate windows: a {@code block} made in another terminal during that interval
+ * is erased from the JSON — and the domain stays in {@code /etc/hosts} with no
+ * record anywhere. The sweep walks the JSON, so it never cleans it up.
  *
- * <p>O teste é determinístico: o espião pergunta à trava do arquivo de estado
- * se ela está retida no momento em que o comando escreve no hosts.
+ * <p>The test is deterministic: the spy asks the state file's lock whether it is
+ * held at the moment the command writes to the hosts file.
  */
-class TransacaoEstadoTest {
+class TransactionStateTest {
 
     @TempDir
     Path tmp;
@@ -48,18 +48,17 @@ class TransacaoEstadoTest {
         return tmp.resolve("state/blocks.json").toString();
     }
 
-    // ATENÇÃO: na mesma JVM, um tryLock sobre um arquivo já travado por ela
-    // estoura OverlappingFileLockException — é assim que se descobre que a
-    // transação está com a trava.
-    private static boolean travaDoEstadoEstaRetida(String stateFile) {
+    // WARNING: in the same JVM, a tryLock on a file already locked by it throws
+    // OverlappingFileLockException — that is how we learn the transaction holds the lock.
+    private static boolean stateLockIsHeld(String stateFile) {
         Path lock = Path.of(stateFile).resolveSibling("blocks.json.lock");
         try (FileChannel channel = FileChannel.open(lock, StandardOpenOption.WRITE)) {
-            FileLock peguei = channel.tryLock();
-            if (peguei == null) {
-                // Outra JVM tem a trava: também conta como retida.
+            FileLock acquired = channel.tryLock();
+            if (acquired == null) {
+                // Another JVM holds the lock: that also counts as held.
                 return true;
             }
-            peguei.release();
+            acquired.release();
             return false;
         } catch (OverlappingFileLockException e) {
             return true;
@@ -69,17 +68,17 @@ class TransacaoEstadoTest {
     }
 
     @Test
-    void applyMantemATravaDoEstadoRetidaEnquantoEscreveNoHosts() throws Exception {
+    void applyKeepsTheStateLockHeldWhileWritingToHosts() throws Exception {
         assertEquals(0, new BlockCommand(List.of("tiktok.com"), "4h",
                 hosts().toString(), state()).call());
-        assertEquals(0, new ProfileSaveCommand("trabalho", false,
+        assertEquals(0, new ProfileSaveCommand("work", false,
                 hosts().toString(), state()).call());
-        // O estado agora é mais fraco que a receita: o apply tem o que mudar.
+        // The state is now weaker than the recipe: apply has something to change.
         assertEquals(0, new BlockCommand(List.of("tiktok.com"), "30m",
                 hosts().toString(), state()).call());
 
-        boolean[] retida = {false};
-        SiteBlocker espiao = new SiteBlocker() {
+        boolean[] held = {false};
+        SiteBlocker spy = new SiteBlocker() {
             @Override
             public void block(String domain) {
             }
@@ -90,7 +89,7 @@ class TransacaoEstadoTest {
 
             @Override
             public void blockAll(List<String> domains) {
-                retida[0] = travaDoEstadoEstaRetida(state());
+                held[0] = stateLockIsHeld(state());
             }
 
             @Override
@@ -98,10 +97,10 @@ class TransacaoEstadoTest {
             }
         };
 
-        int exit = new ProfileApplyCommand("trabalho", hosts().toString(), state(), espiao).call();
+        int exit = new ProfileApplyCommand("work", hosts().toString(), state(), spy).call();
 
         assertEquals(0, exit);
-        assertTrue(retida[0],
-                "a escrita no hosts tem que acontecer dentro da transação, com a trava retida");
+        assertTrue(held[0],
+                "the hosts write must happen inside the transaction, with the lock held");
     }
 }

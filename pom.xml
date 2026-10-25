@@ -9,7 +9,7 @@
   <version>1.0.0</version>
   <packaging>pom</packaging>
   <name>SiteLock (parent)</name>
-  <description>SiteLock: bloqueio local via /etc/hosts + servidor DNS para a rede local.</description>
+  <description>SiteLock: local blocking via /etc/hosts + DNS server for the local network.</description>
 
   <modules>
     <module>sitelock-core</module>
@@ -19,10 +19,10 @@
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <!-- Timestamp fixo do build: sem ele o jar carrega a hora da máquina e dois
-         builds da mesma revisão saem com bytes diferentes. -->
+    <!-- Fixed build timestamp: without it the jar carries the machine time and two
+         builds of the same revision come out with different bytes. -->
     <project.build.outputTimestamp>2026-01-01T00:00:00Z</project.build.outputTimestamp>
-    <!-- Java 26: alvo oficial do projeto (linguagem e bytecode). -->
+    <!-- Java 26: the project's official target (language and bytecode). -->
     <maven.compiler.release>26</maven.compiler.release>
     <picocli.version>4.7.6</picocli.version>
     <jackson.version>2.18.2</jackson.version>
@@ -72,17 +72,17 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-compiler-plugin</artifactId>
           <version>3.13.0</version>
-          <!-- POR QUE: sem <configuration> aqui, o alvo vem de
-               ${maven.compiler.release}. Com <release> fixado no plugin, a
-               property morria e trocar a property nao mudava nada. -->
+          <!-- WHY: without <configuration> here, the target comes from
+               ${maven.compiler.release}. With <release> pinned in the plugin,
+               the property was ignored, so changing it did nothing. -->
         </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-surefire-plugin</artifactId>
           <version>3.5.2</version>
         </plugin>
-        <!-- Versoes fixadas: sem elas cada maquina usa o plugin que veio com o
-             Maven instalado e o mesmo codigo produz jars diferentes. -->
+        <!-- Pinned versions: without them, each machine uses whatever plugin
+             came with its installed Maven, and the same code produces different jars. -->
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-resources-plugin</artifactId>
@@ -93,9 +93,9 @@
           <artifactId>maven-jar-plugin</artifactId>
           <version>3.5.0</version>
           <configuration>
-            <!-- POR QUE: sem isto, num build sem 'clean' o jar plugin nao recria o
-                 jar (ele e mais novo que as classes) e o shade sombreia o fat-jar
-                 anterior: o 'original-' deixa de ser o jar thin. -->
+            <!-- WHY: without this, in a build without 'clean' the jar plugin does
+                 not recreate the jar (it is newer than the classes) and shade
+                 shadows the previous fat-jar: the 'original-' is no longer the thin jar. -->
             <forceCreation>true</forceCreation>
           </configuration>
         </plugin>
@@ -113,15 +113,15 @@
     </pluginManagement>
 
     <plugins>
-      <!-- Falta de JDK ou de Maven vira mensagem clara, em vez de
-           "release version 26 not supported" no meio da compilacao. -->
+      <!-- A missing JDK or Maven becomes a clear message instead of
+           "release version 26 not supported" in the middle of compilation. -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-enforcer-plugin</artifactId>
         <version>3.6.3</version>
         <executions>
           <execution>
-            <id>exige-java-26-e-maven-3.8</id>
+            <id>requires-java-26-and-maven-3.8</id>
             <goals>
               <goal>enforce</goal>
             </goals>
@@ -129,11 +129,11 @@
               <rules>
                 <requireJavaVersion>
                   <version>[26,)</version>
-                  <message>Este projeto exige Java 26 ou mais novo (a CI usa Temurin 26).</message>
+                  <message>This project requires Java 26 or newer (CI uses Temurin 26).</message>
                 </requireJavaVersion>
                 <requireMavenVersion>
                   <version>[3.8,)</version>
-                  <message>Este projeto exige Maven 3.8 ou mais novo. Use o ./mvnw que vem no repositorio.</message>
+                  <message>This project requires Maven 3.8 or newer. Use the ./mvnw that ships with the repository.</message>
                 </requireMavenVersion>
               </rules>
             </configuration>
@@ -141,23 +141,23 @@
         </executions>
       </plugin>
 
-      <!-- Relatorio de cobertura. Sem gate: um limite quebraria o build por
-           motivo alheio a quem esta mexendo no codigo. -->
+      <!-- Coverage report. No gate: a threshold would break the build for
+           reasons unrelated to whoever is changing the code. -->
       <plugin>
         <groupId>org.jacoco</groupId>
         <artifactId>jacoco-maven-plugin</artifactId>
         <version>0.8.15</version>
         <executions>
           <execution>
-            <id>prepara-agente</id>
+            <id>prepare-agent</id>
             <goals>
               <goal>prepare-agent</goal>
             </goals>
           </execution>
           <execution>
-            <!-- prepare-package: roda depois do 'test' (suíte) e antes do
-                 'package', para o relatorio existir num build so de package. -->
-            <id>relatorio</id>
+            <!-- prepare-package: runs after 'test' (suite) and before
+                 'package', so the report also exists in a package-only build. -->
+            <id>report</id>
             <phase>prepare-package</phase>
             <goals>
               <goal>report</goal>

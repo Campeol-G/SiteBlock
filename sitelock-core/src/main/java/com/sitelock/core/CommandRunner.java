@@ -4,11 +4,11 @@ import java.io.IOException;
 import java.util.List;
 
 /**
- * Executa um comando do sistema e devolve o exit code.
+ * Runs a system command and returns the exit code.
  *
- * <p>Existe como interface própria para que {@link DnsCacheFlusher} e
- * {@link AutostartInstaller} possam ser testados sem nenhum binário real no
- * PATH — e para que a escolha de executor seja uma, não duas.
+ * <p>It exists as its own interface so that {@link DnsCacheFlusher} and
+ * {@link AutostartInstaller} can be tested without any real binary on the
+ * PATH — and so there is a single executor contract, not two.
  */
 @FunctionalInterface
 public interface CommandRunner {

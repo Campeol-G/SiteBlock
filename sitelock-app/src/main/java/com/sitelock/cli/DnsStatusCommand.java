@@ -18,12 +18,12 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 
 /**
- * siteblock dns status — mostra se o servidor está rodando (pid, porta, upstream,
- * tempo restante do --for), o IP local para configurar nos dispositivos e quantos
- * domínios estão bloqueados.
+ * siteblock dns status — shows whether the server is running (pid, port, upstream,
+ * time left on --for), the local IP to configure on devices, and how many
+ * domains are blocked.
  */
 @Command(name = "status",
-        description = "Mostra o estado do servidor DNS local.",
+        description = "Shows the state of the local DNS server.",
         mixinStandardHelpOptions = true)
 public class DnsStatusCommand implements Callable<Integer> {
 
@@ -49,45 +49,45 @@ public class DnsStatusCommand implements Callable<Integer> {
             if (existing.isPresent() && DnsDaemonState.isAlive(existing.get())) {
                 running = true;
                 DnsDaemonState s = existing.get();
-                System.out.println("Servidor DNS: RODANDO (pid " + s.getPid()
-                        + ", porta " + s.getPort() + ", upstream " + s.getUpstream() + ").");
+                System.out.println("DNS server: RUNNING (pid " + s.getPid()
+                        + ", port " + s.getPort() + ", upstream " + s.getUpstream() + ").");
                 if (s.getStartedAt() != null) {
-                    System.out.println("  Iniciado em: " + s.getStartedAt());
+                    System.out.println("  Started at: " + s.getStartedAt());
                 }
                 if (s.getExpiresAt() != null) {
                     Instant now = Instant.now(Clock.systemUTC());
                     if (now.isBefore(s.getExpiresAt())) {
-                        System.out.println("  Desliga sozinho em: "
+                        System.out.println("  Shuts down automatically in: "
                                 + DurationParser.formatRemaining(
                                         Duration.between(now, s.getExpiresAt())));
                     } else {
-                        System.out.println("  Prazo do --for esgotado (desligamento iminente).");
+                        System.out.println("  The --for deadline has passed (shutdown imminent).");
                     }
                 } else {
-                    System.out.println("  Sem expiração (roda até 'dns stop').");
+                    System.out.println("  No expiration (runs until 'dns stop').");
                 }
             } else {
                 if (existing.isPresent()) {
                     DnsDaemonState.delete(stateDir);
                 }
-                System.out.println("Servidor DNS: PARADO.");
+                System.out.println("DNS server: STOPPED.");
             }
         } catch (Exception e) {
-            System.err.println("Erro ao ler estado do daemon: " + e.getMessage());
+            System.err.println("Error reading the daemon state: " + e.getMessage());
             return 1;
         }
 
         if (running) {
-            System.out.println("IP local para configurar nos dispositivos: "
+            System.out.println("Local IP to configure on devices: "
                     + String.join(", ", NetworkUtils.localIPv4Addresses()));
         }
         try {
             Map<String, BlockEntry> state = new BlockStore(stateFile).load();
             Instant now = Instant.now(Clock.systemUTC());
             long active = state.values().stream().filter(e -> !e.isExpired(now)).count();
-            System.out.println("Domínios bloqueados ativos: " + active + ".");
+            System.out.println("Active blocked domains: " + active + ".");
         } catch (Exception e) {
-            System.out.println("Domínios bloqueados: ilegível (" + e.getMessage() + ").");
+            System.out.println("Blocked domains: unreadable (" + e.getMessage() + ").");
         }
         return 0;
     }

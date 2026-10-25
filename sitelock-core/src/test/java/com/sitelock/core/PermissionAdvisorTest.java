@@ -9,8 +9,8 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Cobre os três ramos de SO de forma simulada (injetando {@code os.name}),
- * sem depender de rodar de fato no SO em questão.
+ * Covers the three OS branches in a simulated way (injecting {@code os.name}),
+ * without depending on actually running on the OS in question.
  */
 class PermissionAdvisorTest {
 
@@ -20,7 +20,7 @@ class PermissionAdvisorTest {
         Path hosts = Path.of("/etc/hosts");
         String hint = new PermissionAdvisor(osName)
                 .elevationHint(hosts, "block tiktok.com");
-        assertTrue(hint.toLowerCase().contains("sudo"), "esperava 'sudo': " + hint);
+        assertTrue(hint.toLowerCase().contains("sudo"), "expected 'sudo': " + hint);
         assertTrue(hint.contains(hosts.toString()), hint);
     }
 
@@ -29,7 +29,7 @@ class PermissionAdvisorTest {
     void macHintsSudo(String osName) {
         String hint = new PermissionAdvisor(osName)
                 .elevationHint(Path.of("/etc/hosts"), "block tiktok.com");
-        assertTrue(hint.toLowerCase().contains("sudo"), "esperava 'sudo': " + hint);
+        assertTrue(hint.toLowerCase().contains("sudo"), "expected 'sudo': " + hint);
     }
 
     @ParameterizedTest
@@ -37,9 +37,9 @@ class PermissionAdvisorTest {
     void windowsHintsRunAsAdministrator(String osName) {
         Path winHosts = Path.of("C:\\Windows", "System32", "drivers", "etc", "hosts");
         String hint = new PermissionAdvisor(osName).elevationHint(winHosts, "block tiktok.com");
-        assertTrue(hint.contains("Administrador"), "esperava 'Administrador': " + hint);
-        assertTrue(hint.contains("Executar como administrador"), hint);
-        assertFalse(hint.toLowerCase().contains("sudo"), "Windows não deve sugerir sudo: " + hint);
+        assertTrue(hint.contains("Administrator"), "expected 'Administrator': " + hint);
+        assertTrue(hint.contains("Run as administrator"), hint);
+        assertFalse(hint.toLowerCase().contains("sudo"), "Windows should not suggest sudo: " + hint);
     }
 
     @Test
@@ -52,14 +52,14 @@ class PermissionAdvisorTest {
         assertTrue(mac.contains("sudo"), mac);
 
         String win = new PermissionAdvisor("Windows 11").privilegedPortHint(53, "dns start");
-        assertTrue(win.contains("Administrador"), win);
+        assertTrue(win.contains("Administrator"), win);
         assertFalse(win.toLowerCase().contains("sudo"), win);
     }
 
     @Test
     void dnsFlushWarningIsStable() {
         String w = PermissionAdvisor.dnsFlushFailureWarning();
-        assertTrue(w.contains("bloqueio salvo"), w);
-        assertTrue(w.contains("reiniciar o navegador"), w);
+        assertTrue(w.contains("block saved"), w);
+        assertTrue(w.contains("restarting your browser"), w);
     }
 }

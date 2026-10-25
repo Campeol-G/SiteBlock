@@ -5,72 +5,72 @@ import java.time.Instant;
 import java.util.Map;
 
 /**
- * Quanto o daemon de expiração dorme entre uma varredura e outra.
+ * How long the expiration daemon sleeps between sweeps.
  *
- * <p>Três regras brigam entre si, e o desenho é o equilíbrio delas:
+ * <p>Three rules fight each other, and the design is the balance between them:
  *
  * <ul>
- *   <li><b>Piso de 1s</b> — um prazo que vence em 500ms não pode virar
- *       sono de 500ms: o SO arredonda para baixo e o daemon acordaria antes.
- *       Também nunca gera sono zero ou negativo.</li>
- *   <li><b>Teto ({@code --interval}, 60s)</b> — é o que faz um bloqueio criado
- *       em outro terminal ser notado em no máximo um minuto, sem precisar de
- *       watcher de arquivo.</li>
- *   <li><b>Intervalo ocioso</b> — sem nenhum temporário ativo, dormir 1s é
- *       reler o disco a cada segundo a noite inteira para não descobrir nada.</li>
+ *   <li><b>Floor of 1s</b> — a deadline that expires in 500ms can never become
+ *       a 500ms sleep: the OS rounds down and the daemon would wake up early.
+ *       It also never produces a zero or negative sleep.</li>
+ *   <li><b>Ceiling ({@code --interval}, 60s)</b> — this is what ensures a block
+ *       created in another terminal is noticed within one minute at most, without
+ *       a file watcher.</li>
+ *   <li><b>Idle interval</b> — with no active temporary block, sleeping 1s means
+ *       re-reading the disk every second all night long just to find nothing.</li>
  * </ul>
  *
- * <p>Puro: sem I/O e sem {@code Clock}. O instante de referência entra no
- * método.
+ * <p>Pure: no I/O and no {@code Clock}. The reference instant goes into the
+ * method.
  */
 public final class SweeperSchedule {
 
-    /** Piso do sono: nunca menos que isto, para não girar embouçado. */
+    /** Sleep floor: never less than this, to avoid spinning. */
     public static final Duration MIN_SLEEP = Duration.ofSeconds(1);
 
     private SweeperSchedule() {
     }
 
     /**
-     * @param state       bloqueio atual (não é modificado)
-     * @param now         instante de referência
-     * @param maxInterval teto do sono ({@code --interval})
-     * @param idleInterval sono quando não há temporário ativo
-     * @return quanto dormir antes da próxima varredura
+     * @param state       current block state (not modified)
+     * @param now         reference instant
+     * @param maxInterval sleep ceiling ({@code --interval})
+     * @param idleInterval sleep when there is no active temporary block
+     * @return how long to sleep before the next sweep
      */
     public static Duration nextSleep(Map<String, BlockEntry> state, Instant now,
             Duration maxInterval, Duration idleInterval) {
-        Instant proxima = proximaExpiracaoAtiva(state, now);
-        if (proxima == null) {
+        Instant next = nextActiveExpiry(state, now);
+        if (next == null) {
             return idleInterval;
         }
-        Duration restante = Duration.between(now, proxima);
-        if (restante.compareTo(MIN_SLEEP) < 0) {
+        Duration remaining = Duration.between(now, next);
+        if (remaining.compareTo(MIN_SLEEP) < 0) {
             return MIN_SLEEP;
         }
-        if (restante.compareTo(maxInterval) > 0) {
+        if (remaining.compareTo(maxInterval) > 0) {
             return maxInterval;
         }
-        return restante;
+        return remaining;
     }
 
-    // O menor expiresAt ainda no futuro.
-    // POR QUE: vencidas são ignoradas de propósito — o sweepExpired() roda antes do
-    // sono, então uma que sobrou é porque o hosts não pôde ser escrito; sem o
-    // filtro ela puxaria o sono para o piso de 1s.
-    static Instant proximaExpiracaoAtiva(Map<String, BlockEntry> state, Instant now) {
+    // The earliest expiresAt still in the future.
+    // WHY: expired ones are ignored on purpose — sweepExpired() runs before the
+    // sleep, so one that is left means the hosts file could not be written; without the
+    // filter it would pull the sleep down to the 1s floor.
+    static Instant nextActiveExpiry(Map<String, BlockEntry> state, Instant now) {
         if (state == null || state.isEmpty()) {
             return null;
         }
-        Instant melhor = null;
+        Instant best = null;
         for (BlockEntry entry : state.values()) {
             if (entry == null || entry.getExpiresAt() == null || entry.isExpired(now)) {
                 continue;
             }
-            if (melhor == null || entry.getExpiresAt().isBefore(melhor)) {
-                melhor = entry.getExpiresAt();
+            if (best == null || entry.getExpiresAt().isBefore(best)) {
+                best = entry.getExpiresAt();
             }
         }
-        return melhor;
+        return best;
     }
 }

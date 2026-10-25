@@ -20,27 +20,28 @@ import java.util.TreeMap;
 import java.util.concurrent.Callable;
 
 /**
- * siteblock profile save <nome> [--force].
+ * Saves the active blocks as a named profile; the CLI form is
+ * {@code siteblock save profile <name> [--force]}.
  *
- * <p>Guarda o que está bloqueado <b>agora</b> como uma receita reutilizável: vai para o arquivo
- * o prazo restante de cada domínio, nunca o {@code expiresAt} original. Sem {@code --force},
- * não sobrescreve: perder a receita sem querer é o pior erro possível aqui.
+ * <p>Saves what is blocked <b>now</b> as a reusable recipe: it writes into the file
+ * the remaining deadline of each domain, never the original {@code expiresAt}. Without {@code --force},
+ * it does not overwrite: losing a recipe by accident is the worst possible error here.
  */
 @Command(name = "save",
-        description = "Salva os bloqueios ativos como um perfil nomeado.",
+        description = "Saves the active blocks as a named profile.",
         mixinStandardHelpOptions = true)
 public class ProfileSaveCommand implements Callable<Integer> {
 
-    @Parameters(index = "0", paramLabel = "<nome>", description = "Nome do perfil.")
+    @Parameters(index = "0", paramLabel = "<name>", description = "Profile name.")
     String name;
 
-    @Option(names = "--force", description = "Sobrescreve um perfil que já existe.")
+    @Option(names = "--force", description = "Overwrites an existing profile.")
     boolean force;
 
     @Option(names = "--hosts-file", hidden = true) String hostsFileOverride;
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
 
-    // Store injetado pelo teste; null = usa o do stateDir.
+    // Store injected by the test; null = use the one from the state directory.
     ProfileStore storeOverride;
 
     public ProfileSaveCommand() {
@@ -59,7 +60,7 @@ public class ProfileSaveCommand implements Callable<Integer> {
         try {
             valid = ProfileNames.require(name);
         } catch (IllegalArgumentException e) {
-            System.err.println("Erro: " + e.getMessage());
+            System.err.println("Error: " + e.getMessage());
             return 1;
         }
 
@@ -71,45 +72,45 @@ public class ProfileSaveCommand implements Callable<Integer> {
         try {
             state = service.sweepExpired().state();
         } catch (CorruptedStateException e) {
-            System.err.println("Erro: estado corrompido (" + e.getMessage() + ").");
-            System.err.println("Nada foi alterado.");
+            System.err.println("Error: corrupted state (" + e.getMessage() + ").");
+            System.err.println("Nothing was changed.");
             return 1;
         } catch (IOException e) {
-            System.err.println("Erro ao ler o estado: " + e.getMessage());
+            System.err.println("Error reading the state: " + e.getMessage());
             return 1;
         }
 
         Instant now = Instant.now(service.getClock());
 
-        // O sweep não garante "só o que está ativo agora": quando o hosts não está gravável
-        // ele devolve o estado intacto (skippedDueToPermission) e os expirados continuam no
-        // mapa. Filtrar aqui evita gravar um domínio vencido como se fosse receita viva.
+        // The sweep does not guarantee "only what is active now": when the hosts file is not
+        // writable it returns the state untouched (skippedDueToPermission) and expired entries
+        // stay in the map. Filtering here avoids storing an expired domain as if it were a live recipe.
         Map<String, ProfileEntry> entries = new TreeMap<>();
         for (BlockEntry e : state.values()) {
             if (e == null || e.getDomain() == null || e.isExpired(now)) {
                 continue;
             }
-            // POR QUE: o prazo restante, e não o expiresAt original — um perfil é receita,
-            // não histórico: guardar o instante transformaria um perfil de 6 meses em "já vencido".
+            // WHY: the remaining deadline, not the original expiresAt — a profile is a recipe,
+            // and not history: storing the instant would turn a 6-month profile into "already expired".
             Long millis = e.getExpiresAt() == null ? null
                     : Duration.between(now, e.getExpiresAt()).toMillis();
             entries.put(e.getDomain(), new ProfileEntry(millis));
         }
 
         if (entries.isEmpty()) {
-            System.err.println("Nada está bloqueado agora — um perfil vazio não faria nada.");
+            System.err.println("Nothing is blocked now — an empty profile would do nothing.");
             return 1;
         }
 
-        // A leitura e a gravação das receitas dentro de uma transação: dois
-        // `profile save` simultâneos não podem se perder, e um perfil escrito
-        // por outro terminal no meio do caminho tem que continuar lá.
-        boolean[] jaExiste = {false};
+        // Read and record the recipes inside one transaction: two simultaneous
+        // `save profile` calls cannot lose each other's changes, and a profile written
+        // by another terminal along the way has to stay there.
+        boolean[] alreadyExists = {false};
         try {
             store.inTransaction(tx -> {
                 Map<String, Profile> profiles = tx.load();
                 if (profiles.containsKey(valid) && !force) {
-                    jaExiste[0] = true;
+                    alreadyExists[0] = true;
                     return null;
                 }
                 Instant createdAt = profiles.containsKey(valid)
@@ -119,15 +120,15 @@ public class ProfileSaveCommand implements Callable<Integer> {
                 return null;
             });
         } catch (IOException e) {
-            System.err.println("Erro ao salvar o perfil: " + e.getMessage());
+            System.err.println("Error saving the profile: " + e.getMessage());
             return 1;
         }
-        if (jaExiste[0]) {
-            System.err.println("Já existe um perfil '" + valid + "'. Use --force para sobrescrever.");
+        if (alreadyExists[0]) {
+            System.err.println("Profile already exists '" + valid + "'. Use --force to overwrite.");
             return 1;
         }
 
-        System.out.println("Perfil '" + valid + "' salvo com " + entries.size() + " domínio(s).");
+        System.out.println("Profile '" + valid + "' saved with " + entries.size() + " domain(s).");
         return 0;
     }
 }

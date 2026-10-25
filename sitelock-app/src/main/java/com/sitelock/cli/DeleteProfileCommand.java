@@ -9,19 +9,19 @@ import picocli.CommandLine.Parameters;
 import java.io.IOException;
 import java.util.concurrent.Callable;
 
-/** siteblock delete profile <nome> — apaga um perfil (confirma SIM). */
-@Command(name = "delete", description = "Apaga um perfil salvo.", mixinStandardHelpOptions = true)
+/** siteblock delete profile <name> — deletes a profile (confirms with YES). */
+@Command(name = "delete", description = "Deletes a saved profile.", mixinStandardHelpOptions = true)
 public class DeleteProfileCommand implements Callable<Integer> {
 
-    @Parameters(index = "0", paramLabel = "<sub>", description = "Sempre 'profile'.")
+    @Parameters(index = "0", paramLabel = "<sub>", description = "Always 'profile'.")
     String sub;
 
-    @Parameters(index = "1", paramLabel = "<nome>", description = "Nome do perfil.")
+    @Parameters(index = "1", paramLabel = "<name>", description = "Profile name.")
     String name;
 
     @picocli.CommandLine.Option(names = "--state-file", hidden = true) String stateFileOverride;
 
-    // Resposta injetada pelo teste; null = lê do stdin.
+    // Answer injected by the test; null = read from stdin.
     String answer;
 
     public DeleteProfileCommand() {}
@@ -33,14 +33,14 @@ public class DeleteProfileCommand implements Callable<Integer> {
     @Override
     public Integer call() {
         if (!"profile".equals(sub)) {
-            System.err.println("Uso: siteblock delete profile <nome>");
+            System.err.println("Usage: siteblock delete profile <name>");
             return 2;
         }
         final String valid;
         try {
             valid = ProfileNames.require(name);
         } catch (IllegalArgumentException e) {
-            System.err.println("Erro: " + e.getMessage());
+            System.err.println("Error: " + e.getMessage());
             return 2;
         }
         ProfileStore store = new ProfileStore(CliSupport.resolveProfilesFile(stateFileOverride));
@@ -48,28 +48,28 @@ public class DeleteProfileCommand implements Callable<Integer> {
         try {
             profile = store.load().get(valid);
         } catch (IOException e) {
-            System.err.println("Erro ao ler perfis: " + e.getMessage());
+            System.err.println("Error reading profiles: " + e.getMessage());
             return 1;
         }
         if (profile == null) {
-            System.err.println("Perfil '" + valid + "' não existe.");
+            System.err.println("Profile '" + valid + "' does not exist.");
             return 1;
         }
-        System.out.println("Apagar o perfil '" + valid + "' (" + profile.size() + " domínio(s))?");
-        System.out.print("Para confirmar, digite SIM e pressione Enter: ");
+        System.out.println("Delete profile '" + valid + "' (" + profile.size() + " domain(s))?");
+        System.out.print("To confirm, type YES and press Enter: ");
         System.out.flush();
-        String resposta = answer != null ? answer : CliSupport.readLine();
-        if (resposta == null || !resposta.trim().equalsIgnoreCase("SIM")) {
-            System.out.println("Apagamento CANCELADO. O perfil continua existindo.");
+        String reply = answer != null ? answer : CliSupport.readLine();
+        if (reply == null || !reply.trim().equalsIgnoreCase("YES")) {
+            System.out.println("Deletion CANCELLED. The profile still exists.");
             return 3;
         }
         try {
             store.delete(valid);
         } catch (IOException e) {
-            System.err.println("Erro ao apagar o perfil: " + e.getMessage());
+            System.err.println("Error deleting the profile: " + e.getMessage());
             return 1;
         }
-        System.out.println("Perfil '" + valid + "' apagado.");
+        System.out.println("Profile '" + valid + "' deleted.");
         return 0;
     }
 }

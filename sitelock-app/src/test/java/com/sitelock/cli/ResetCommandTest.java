@@ -18,11 +18,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * siteblock reset — apaga o estado, não toca no hosts.
+ * siteblock reset — deletes the state, does not touch the hosts file.
  *
- * <p>O reset é o caminho de recuperação do estado corrompido, então ele tem que
- * funcionar justamente quando o arquivo está quebrado — e tem que recusar
- * quando ninguém pediu para apagar.
+ * <p>reset is the recovery path for corrupted state, so it must work precisely
+ * when the file is broken — and it must refuse when nobody asked to delete.
  */
 class ResetCommandTest {
 
@@ -40,19 +39,19 @@ class ResetCommandTest {
     }
 
     private String state() {
-        return tmp.resolve("estado/blocks.json").toString();
+        return tmp.resolve("state/blocks.json").toString();
     }
 
-    private Map<String, BlockEntry> estado() throws Exception {
+    private Map<String, BlockEntry> stateEntries() throws Exception {
         return new BlockStore(Path.of(state())).load();
     }
 
-    private record Resultado(int exit, String texto) {
+    private record Result(int exit, String text) {
     }
 
-    private Resultado rodar(Comando cmd) throws Exception {
-        PrintStream outOriginal = System.out;
-        PrintStream errOriginal = System.err;
+    private Result runCommand(Command cmd) throws Exception {
+        PrintStream originalOut = System.out;
+        PrintStream originalErr = System.err;
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         PrintStream fake = new PrintStream(buffer, true, StandardCharsets.UTF_8);
         System.setOut(fake);
@@ -63,90 +62,90 @@ class ResetCommandTest {
         } catch (Exception e) {
             throw new AssertionError(e);
         } finally {
-            System.setOut(outOriginal);
-            System.setErr(errOriginal);
+            System.setOut(originalOut);
+            System.setErr(originalErr);
         }
-        return new Resultado(exit, buffer.toString(StandardCharsets.UTF_8));
+        return new Result(exit, buffer.toString(StandardCharsets.UTF_8));
     }
 
     @FunctionalInterface
-    private interface Comando {
+    private interface Command {
         int run() throws Exception;
     }
 
     @Test
-    void resetComYesApagaOEstado() throws Exception {
+    void resetWithYesDeletesTheState() throws Exception {
         assertEquals(0, new BlockCommand(List.of("tiktok.com"), null,
                 hosts().toString(), state()).call());
-        assertTrue(estado().containsKey("tiktok.com"), "pré-condição: o estado tem o domínio");
+        assertTrue(stateEntries().containsKey("tiktok.com"), "precondition: the state has the domain");
 
-        Resultado r = rodar(() -> new ResetCommand(true, state()).call());
+        Result r = runCommand(() -> new ResetCommand(true, state()).call());
 
-        assertEquals(0, r.exit(), r.texto());
-        assertFalse(estado().containsKey("tiktok.com"),
-                "o reset tem que apagar o estado: " + estado());
-        assertTrue(estado().isEmpty(), "o estado recriado tem que estar vazio: " + estado());
+        assertEquals(0, r.exit(), r.text());
+        assertFalse(stateEntries().containsKey("tiktok.com"),
+                "reset must delete the state: " + stateEntries());
+        assertTrue(stateEntries().isEmpty(), "the recreated state must be empty: " + stateEntries());
     }
 
     @Test
-    void resetNaoTocaNoHosts() throws Exception {
+    void resetDoesNotTouchHosts() throws Exception {
         assertEquals(0, new BlockCommand(List.of("tiktok.com"), null,
                 hosts().toString(), state()).call());
-        String antes = Files.readString(hosts(), StandardCharsets.UTF_8);
+        String before = Files.readString(hosts(), StandardCharsets.UTF_8);
 
-        Resultado r = rodar(() -> new ResetCommand(true, state()).call());
+        Result r = runCommand(() -> new ResetCommand(true, state()).call());
 
-        assertEquals(0, r.exit(), r.texto());
-        assertEquals(antes, Files.readString(hosts(), StandardCharsets.UTF_8),
-                "o reset só mexe no estado — o hosts continua com o bloqueio");
-        assertTrue(r.texto().toLowerCase().contains("hosts"),
-                "a saída tem que lembrar que o hosts não foi alterado: " + r.texto());
+        assertEquals(0, r.exit(), r.text());
+        assertEquals(before, Files.readString(hosts(), StandardCharsets.UTF_8),
+                "reset only changes the state — the hosts file keeps the block");
+        assertTrue(r.text().toLowerCase().contains("hosts"),
+                "the output must remind that the hosts file was not changed: " + r.text());
     }
 
     @Test
-    void resetSemYesRecusaEApagaNada() throws Exception {
+    void resetWithoutYesRefusesAndDeletesNothing() throws Exception {
         assertEquals(0, new BlockCommand(List.of("tiktok.com"), null,
                 hosts().toString(), state()).call());
-        String antes = Files.readString(Path.of(state()), StandardCharsets.UTF_8);
+        String before = Files.readString(Path.of(state()), StandardCharsets.UTF_8);
 
-        Resultado r = rodar(() -> new ResetCommand(false, state()).call());
+        Result r = runCommand(() -> new ResetCommand(false, state()).call());
 
-        assertEquals(2, r.exit(), r.texto());
-        assertEquals(antes, Files.readString(Path.of(state()), StandardCharsets.UTF_8),
-                "sem --yes nada pode ser apagado");
-        assertTrue(r.texto().contains("--yes"),
-                "a recusa tem que dizer como confirmar: " + r.texto());
+        assertEquals(2, r.exit(), r.text());
+        assertEquals(before, Files.readString(Path.of(state()), StandardCharsets.UTF_8),
+                "without --yes nothing may be deleted");
+        assertTrue(r.text().contains("--yes"),
+                "the refusal must say how to confirm: " + r.text());
     }
 
     /**
-     * O reset é o conserto do estado corrompido: é para isso que ele existe.
+     * reset is the repair for corrupted state: that is what it exists for.
      */
     @Test
-    void resetRecriaUmEstadoCorrompido() throws Exception {
+    void resetRecreatesACorruptedState() throws Exception {
         Files.createDirectories(Path.of(state()).getParent());
-        Files.writeString(Path.of(state()), "{ isto não é json", StandardCharsets.UTF_8);
+        Files.writeString(Path.of(state()), "{ this is not json", StandardCharsets.UTF_8);
 
-        Resultado r = rodar(() -> new ResetCommand(true, state()).call());
+        Result r = runCommand(() -> new ResetCommand(true, state()).call());
 
-        assertEquals(0, r.exit(), r.texto());
-        assertTrue(estado().isEmpty(), "o estado recriado tem que estar vazio: " + estado());
+        assertEquals(0, r.exit(), r.text());
+        assertTrue(stateEntries().isEmpty(), "the recreated state must be empty: " + stateEntries());
     }
 
-    // POR QUE: o caminho do pai é um arquivo comum, e nenhum sistema deixa
-    // criar o diretório do estado por baixo dele.
+    // WHY: the parent path is a regular file, and no system allows creating the
+    // state directory underneath it.
     /**
-     * Quando o estado não pode ser gravado, o reset tem que dizer que falhou.
+     * When the state cannot be written, reset must say that it failed.
      */
     @Test
-    void resetFalhaComMensagemQuandoOEstadoNaoPodeSerGravado() throws Exception {
-        Path arquivo = tmp.resolve("nao-e-diretorio");
-        Files.writeString(arquivo, "sou um arquivo", StandardCharsets.UTF_8);
-        String stateImpossivel = arquivo.resolve("estado/blocks.json").toString();
+    void resetFailsWithAMessageWhenTheStateCannotBeWritten() throws Exception {
+        Path file = tmp.resolve("not-a-directory");
+        Files.writeString(file, "I am a file", StandardCharsets.UTF_8);
+        String impossibleState = file.resolve("state/blocks.json").toString();
 
-        Resultado r = rodar(() -> new ResetCommand(true, stateImpossivel).call());
+        Result r = runCommand(() -> new ResetCommand(true, impossibleState).call());
 
-        assertEquals(1, r.exit(), r.texto());
-        assertTrue(r.texto().toLowerCase().contains("erro"),
-                "a falha tem que ser dita: " + r.texto());
+        assertEquals(1, r.exit(), r.text());
+        assertTrue(r.text().toLowerCase().contains("error"),
+                "the failure must be reported: " + r.text());
     }
 }

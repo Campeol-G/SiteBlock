@@ -44,8 +44,8 @@ class DomainUtilsTest {
 
     @Test
     void acceptsPunycodeAndHyphens() {
-        assertEquals("xn--exemplo-9ta.com", DomainUtils.normalize("xn--exemplo-9ta.com").domain());
-        assertEquals("meu-site.com.br", DomainUtils.normalize("meu-site.com.br").domain());
+        assertEquals("xn--example-9ta.com", DomainUtils.normalize("xn--example-9ta.com").domain());
+        assertEquals("my-site.com.br", DomainUtils.normalize("my-site.com.br").domain());
     }
 
     @ParameterizedTest
@@ -53,17 +53,17 @@ class DomainUtilsTest {
     void acceptsWwwPrefixedTldDomains(String input) {
         DomainUtils.NormalizationResult r = DomainUtils.normalize(input);
         assertEquals(input, r.domain(),
-                "'" + input + "' é domínio legítimo: não pode ser rejeitado como inválido");
-        assertTrue(DomainUtils.isValid(r.domain()), "'" + r.domain() + "' tem que ser um domínio válido");
+                "'" + input + "' is a legitimate domain: it cannot be rejected as invalid");
+        assertTrue(DomainUtils.isValid(r.domain()), "'" + r.domain() + "' has to be a valid domain");
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"", "   ", "tik tok.com", "https://", "www", ".com",
-            "com", "localhost", "192.168.0.1", "exemplo.c", "exemplo.123",
+            "com", "localhost", "192.168.0.1", "example.c", "example.123",
             "-bad.com", "bad-.com", "a..b.com", "site_cool.com"})
     void rejectsInvalid(String input) {
         assertThrows(IllegalArgumentException.class, () -> DomainUtils.normalize(input),
-                "deveria rejeitar: '" + input + "'");
+                "should reject: '" + input + "'");
     }
 
     @Test

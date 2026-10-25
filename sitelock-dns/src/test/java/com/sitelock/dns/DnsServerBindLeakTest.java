@@ -15,8 +15,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Se o bind TCP falhar, o UDP já aberto não pode ficar escutando nem segurando
- * a porta: o próximo start diria "porta em uso" sem haver servidor atendendo.
+ * If the TCP bind fails, the UDP socket that is already open must not keep
+ * listening or holding the port: the next start would say "port in use" with no
+ * server actually serving.
  */
 class DnsServerBindLeakTest {
 
@@ -24,19 +25,19 @@ class DnsServerBindLeakTest {
     Path tmp;
 
     @Test
-    void falhaNoBindTcpFechaOSocketUdp() throws Exception {
-        int porta = DnsTestSupport.portaLivre();
-        Path estado = DnsTestSupport.arquivoDeBloqueios(tmp, "bloqueado.com");
+    void tcpBindFailureClosesTheUdpSocket() throws Exception {
+        int port = DnsTestSupport.freePort();
+        Path state = DnsTestSupport.blocksFile(tmp, "blocked.com");
 
-        try (ServerSocket ocupandoTcp = new ServerSocket(porta)) {
-            DnsServer server = new DnsServer(porta, InetAddress.getLoopbackAddress(), 500,
-                    new BlockStore(estado), Clock.systemUTC(), List.of());
+        try (ServerSocket tcpOccupier = new ServerSocket(port)) {
+            DnsServer server = new DnsServer(port, InetAddress.getLoopbackAddress(), 500,
+                    new BlockStore(state), Clock.systemUTC(), List.of());
 
             assertThrows(DnsServerException.class, server::serveForever);
 
-            try (DatagramSocket udp = new DatagramSocket(porta)) {
+            try (DatagramSocket udp = new DatagramSocket(port)) {
                 assertTrue(udp.isBound(),
-                        "o UDP do servidor que falhou tinha que ter sido fechado");
+                        "the failed server's UDP socket should have been closed");
             }
         }
     }

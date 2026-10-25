@@ -9,23 +9,23 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
- * Comando de desinstalação: restaura hosts, remove .sitelock, remove repo e binário.
- * POR QUE: o usuário pediu padronizar como `siteblock uninstall`; ao invés de
- * duplicar a lógica em Java, delega ao script existente (uninstall.sh / .bat)
- * que já trata hosts, prefs, DNS, repo e binário de forma segura.
+ * Uninstall command: restores hosts, removes .sitelock, removes repo and binary.
+ * WHY: the user asked to standardize it as `siteblock uninstall`; instead of
+ * duplicating the logic in Java, it delegates to the existing script (uninstall.sh / .bat)
+ * which already handles hosts, prefs, DNS, repo and binary safely.
  */
-@Command(name = "uninstall", description = "Desinstala o SiteBlock (hosts, prefs, repo, binário).")
+@Command(name = "uninstall", description = "Uninstalls SiteBlock (hosts, prefs, repo, binary).")
 public class UninstallCommand implements Runnable {
 
-  @CommandLine.Option(names = {"-y", "--yes"}, description = "Confirma sem perguntar.")
+  @CommandLine.Option(names = {"-y", "--yes"}, description = "Confirms without asking.")
   boolean yes;
 
   @Override
   public void run() {
-    // Localiza o script relativo ao jar (se executado de dentro do repo ou via install)
+    // Locates the script relative to the jar (when run from inside the repo or via install)
     Path script = locateScript();
     if (script == null) {
-      System.err.println("uninstall: script uninstall.sh / uninstall.bat nao encontrado.");
+      System.err.println("uninstall: script uninstall.sh / uninstall.bat not found.");
       System.exit(1);
       return;
     }
@@ -48,13 +48,13 @@ public class UninstallCommand implements Runnable {
       int exit = p.waitFor();
       System.exit(exit);
     } catch (Exception e) {
-      System.err.println("uninstall: falha ao executar script: " + e.getMessage());
+      System.err.println("uninstall: failed to run script: " + e.getMessage());
       System.exit(2);
     }
   }
 
   private Path locateScript() {
-    // Primeiro: proximo ao jar (se o jar for copiado para outro lugar com o script)
+    // First: next to the jar (if the jar was copied elsewhere together with the script)
     try {
       File jarDir = new File(getClass().getProtectionDomain().getCodeSource().getLocation().toURI()).getParentFile();
       if (jarDir != null) {
@@ -65,14 +65,14 @@ public class UninstallCommand implements Runnable {
       }
     } catch (Exception ignored) {}
 
-    // Segundo: diretorio de trabalho atual (usuario rodan do repo)
+    // Second: current working directory (user running from the repo)
     Path cwd = Paths.get("").toAbsolutePath();
     Path sh = cwd.resolve("uninstall.sh");
     if (sh.toFile().exists()) return sh;
     Path bat = cwd.resolve("uninstall.bat");
     if (bat.toFile().exists()) return bat;
 
-    // Terceiro: busca na home (se usuario copiou para algum lugar conhecido)
+    // Third: search the home directory (if the user copied it somewhere known)
     Path home = Paths.get(System.getProperty("user.home"));
     Path shHome = home.resolve("SiteBlock/uninstall.sh");
     if (shHome.toFile().exists()) return shHome;

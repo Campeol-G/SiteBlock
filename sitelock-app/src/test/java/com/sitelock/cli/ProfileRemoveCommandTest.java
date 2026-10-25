@@ -18,15 +18,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * siteblock profile &lt;nome&gt; remove &lt;dominio...&gt;.
+ * siteblock profile &lt;name&gt; remove &lt;domain...&gt;.
  *
- * <p>Tirar um domínio da receita não é soltar o bloqueio: o hosts continua
- * com a linha, e o comando tem que avisar isso — é o que fecha a conta entre o
- * que a pessoa pediu e o que a máquina está fazendo.
+ * <p>Taking a domain out of the recipe is not releasing the block: the hosts file
+ * still has the line, and the command must warn about that — it is what closes
+ * the gap between what the person asked and what the machine is doing.
  *
- * <p>Os testes rodam pela CLI de verdade: o nome do perfil é posicional do
- * comando {@code profile}, e um teste que chamasse o comando direto passaria
- * com o parsing quebrado.
+ * <p>The tests run through the real CLI: the profile name is a positional of the
+ * {@code profile} command, and a test that called the command directly would
+ * pass with the parsing broken.
  */
 class ProfileRemoveCommandTest {
 
@@ -44,43 +44,43 @@ class ProfileRemoveCommandTest {
     }
 
     private String state() {
-        return tmp.resolve("estado/blocks.json").toString();
+        return tmp.resolve("state/blocks.json").toString();
     }
 
     private Path profilesFile() {
-        return tmp.resolve("estado/profiles.json");
+        return tmp.resolve("state/profiles.json");
     }
 
-    // Roda a CLI de verdade, com o --state-file apontando para o temporário.
+    // Runs the real CLI, with --state-file pointing at the temporary directory.
     private int run(String... args) {
-        List<String> todos = new ArrayList<>(List.of(args));
-        todos.add("--state-file");
-        todos.add(state());
-        return new CommandLine(new SiteLockApplication()).execute(todos.toArray(new String[0]));
+        List<String> all = new ArrayList<>(List.of(args));
+        all.add("--state-file");
+        all.add(state());
+        return new CommandLine(new SiteLockApplication()).execute(all.toArray(new String[0]));
     }
 
-    // Bloqueia e salva um perfil com os domínios dados.
-    private void prepararPerfil(String nome, String... dominios) throws Exception {
+    // Blocks and saves a profile with the given domains.
+    private void prepareProfile(String name, String... domains) throws Exception {
         List<String> args = new ArrayList<>();
         args.add("block");
-        args.addAll(List.of(dominios));
+        args.addAll(List.of(domains));
         args.add("--hosts-file");
         args.add(hosts().toString());
         assertEquals(0, run(args.toArray(new String[0])));
-        assertEquals(0, run("profile", "save", nome));
+        assertEquals(0, run("save", "profile", name));
     }
 
-    private String perfil() throws Exception {
+    private String profile() throws Exception {
         return Files.readString(profilesFile(), StandardCharsets.UTF_8);
     }
 
-    // Exit code + stdout/stderr de um comando.
-    private record Resultado(int exit, String texto) {
+    // Exit code + stdout/stderr of a command.
+    private record Result(int exit, String text) {
     }
 
-    private Resultado rodar(Comando cmd) throws Exception {
-        PrintStream outOriginal = System.out;
-        PrintStream errOriginal = System.err;
+    private Result runCommand(Command cmd) throws Exception {
+        PrintStream originalOut = System.out;
+        PrintStream originalErr = System.err;
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         PrintStream fake = new PrintStream(buffer, true, StandardCharsets.UTF_8);
         System.setOut(fake);
@@ -91,116 +91,116 @@ class ProfileRemoveCommandTest {
         } catch (Exception e) {
             throw new AssertionError(e);
         } finally {
-            System.setOut(outOriginal);
-            System.setErr(errOriginal);
+            System.setOut(originalOut);
+            System.setErr(originalErr);
         }
-        return new Resultado(exit, buffer.toString(StandardCharsets.UTF_8));
+        return new Result(exit, buffer.toString(StandardCharsets.UTF_8));
     }
 
     @FunctionalInterface
-    private interface Comando {
+    private interface Command {
         int run() throws Exception;
     }
 
     @Test
-    void removeTiraODominioDaReceita() throws Exception {
-        prepararPerfil("trabalho", "tiktok.com", "youtube.com");
+    void removeTakesTheDomainOutOfTheRecipe() throws Exception {
+        prepareProfile("work", "tiktok.com", "youtube.com");
 
-        assertEquals(0, run("profile", "trabalho", "remove", "youtube.com"));
+        assertEquals(0, run("profile", "work", "remove", "youtube.com"));
 
-        String json = perfil();
-        assertFalse(json.contains("youtube.com"), "o domínio tem que sair da receita: " + json);
-        assertTrue(json.contains("tiktok.com"), "o resto da receita tem que continuar: " + json);
+        String json = profile();
+        assertFalse(json.contains("youtube.com"), "the domain must leave the recipe: " + json);
+        assertTrue(json.contains("tiktok.com"), "the rest of the recipe must remain: " + json);
     }
 
     @Test
-    void removeNaoTocaNoHosts() throws Exception {
-        prepararPerfil("trabalho", "tiktok.com");
-        String antes = Files.readString(hosts(), StandardCharsets.UTF_8);
+    void removeDoesNotTouchHosts() throws Exception {
+        prepareProfile("work", "tiktok.com");
+        String before = Files.readString(hosts(), StandardCharsets.UTF_8);
 
-        assertEquals(0, run("profile", "trabalho", "remove", "tiktok.com"));
+        assertEquals(0, run("profile", "work", "remove", "tiktok.com"));
 
-        assertEquals(antes, Files.readString(hosts(), StandardCharsets.UTF_8),
-                "tirar da receita não solta o bloqueio: o hosts não pode mudar");
+        assertEquals(before, Files.readString(hosts(), StandardCharsets.UTF_8),
+                "removing from the recipe does not release the block: the hosts file must not change");
     }
 
     @Test
-    void removeAvisaQueODominioContinuaBloqueado() throws Exception {
-        prepararPerfil("trabalho", "tiktok.com");
+    void removeWarnsThatTheDomainStaysBlocked() throws Exception {
+        prepareProfile("work", "tiktok.com");
 
-        Resultado r = rodar(() -> run("profile", "trabalho", "remove", "tiktok.com"));
+        Result r = runCommand(() -> run("profile", "work", "remove", "tiktok.com"));
 
-        assertEquals(0, r.exit(), r.texto());
-        assertTrue(r.texto().contains("tiktok.com"), r.texto());
-        assertTrue(r.texto().toLowerCase().contains("continua bloqueado"),
-                "tem que avisar que o bloqueio continua: " + r.texto());
-        assertTrue(r.texto().toLowerCase().contains("unblock"),
-                "tem que dizer o comando que ainda solta: " + r.texto());
+        assertEquals(0, r.exit(), r.text());
+        assertTrue(r.text().contains("tiktok.com"), r.text());
+        assertTrue(r.text().toLowerCase().contains("stays blocked"),
+                "it must warn that the block remains: " + r.text());
+        assertTrue(r.text().toLowerCase().contains("unblock"),
+                "it must name the command that still releases it: " + r.text());
     }
 
     @Test
-    void removeFalhaQuandoODominioNaoEstaNaReceita() throws Exception {
-        prepararPerfil("trabalho", "tiktok.com");
-        String antes = perfil();
+    void removeFailsWhenTheDomainIsNotInTheRecipe() throws Exception {
+        prepareProfile("work", "tiktok.com");
+        String before = profile();
 
-        Resultado r = rodar(() -> run("profile", "trabalho", "remove", "youtube.com"));
+        Result r = runCommand(() -> run("profile", "work", "remove", "youtube.com"));
 
-        assertEquals(1, r.exit(), r.texto());
-        assertTrue(r.texto().toLowerCase().contains("nada foi alterado"),
-                "a recusa tem que dizer que nada mudou: " + r.texto());
-        assertEquals(antes, perfil(), "um domínio que não está na receita não pode mudar nada");
+        assertEquals(1, r.exit(), r.text());
+        assertTrue(r.text().toLowerCase().contains("nothing was changed"),
+                "the refusal must say that nothing changed: " + r.text());
+        assertEquals(before, profile(), "a domain that is not in the recipe must not change anything");
     }
 
     @Test
-    void removeFalhaQuandoOPerfilNaoExiste() throws Exception {
-        Resultado r = rodar(() -> run("profile", "nao-existe", "remove", "tiktok.com"));
+    void removeFailsWhenTheProfileDoesNotExist() throws Exception {
+        Result r = runCommand(() -> run("profile", "missing", "remove", "tiktok.com"));
 
-        assertEquals(1, r.exit(), r.texto());
-        assertTrue(r.texto().toLowerCase().contains("não existe"),
-                "a recusa tem que dizer que o perfil não existe: " + r.texto());
+        assertEquals(1, r.exit(), r.text());
+        assertTrue(r.text().toLowerCase().contains("does not exist"),
+                "the refusal must say that the profile does not exist: " + r.text());
         assertFalse(Files.exists(profilesFile()),
-                "não pode criar receita no caminho de um perfil que não existe");
+                "it must not create a recipe while handling a profile that does not exist");
     }
 
     @Test
-    void removeFalhaComNomeDePerfilInvalido() throws Exception {
-        Resultado r = rodar(() -> run("profile", "../evil", "remove", "tiktok.com"));
+    void removeFailsWithAnInvalidProfileName() throws Exception {
+        Result r = runCommand(() -> run("profile", "../evil", "remove", "tiktok.com"));
 
-        assertEquals(1, r.exit(), r.texto());
-        assertTrue(r.texto().toLowerCase().contains("inválido"),
-                "a recusa tem que dizer que o nome é inválido: " + r.texto());
+        assertEquals(1, r.exit(), r.text());
+        assertTrue(r.text().toLowerCase().contains("invalid"),
+                "the refusal must say that the name is invalid: " + r.text());
     }
 
     @Test
-    void removeFalhaComDominioInvalido() throws Exception {
-        prepararPerfil("trabalho", "tiktok.com");
-        String antes = perfil();
+    void removeFailsWithAnInvalidDomain() throws Exception {
+        prepareProfile("work", "tiktok.com");
+        String before = profile();
 
-        Resultado r = rodar(() -> run("profile", "trabalho", "remove", "nao e um dominio"));
+        Result r = runCommand(() -> run("profile", "work", "remove", "not a domain"));
 
-        assertEquals(1, r.exit(), r.texto());
-        assertTrue(r.texto().toLowerCase().contains("erro"),
-                "a recusa tem que dizer que o domínio é inválido: " + r.texto());
-        assertEquals(antes, perfil(), "um domínio inválido não pode mudar nada");
+        assertEquals(1, r.exit(), r.text());
+        assertTrue(r.text().toLowerCase().contains("error"),
+                "the refusal must say that the domain is invalid: " + r.text());
+        assertEquals(before, profile(), "an invalid domain must not change anything");
     }
 
-    // POR QUE: a leitura do estado existe só para o aviso do "continua bloqueado".
-    // Falhar nela impede o aviso, não a edição da receita — desfazer a remoção
-    // por causa de um arquivo quebrado seria trocar um problema pequeno por um maior.
+    // WHY: the state read exists only for the "stays blocked" warning. Failing it
+    // prevents the warning, not the recipe edit — undoing the removal because of a
+    // broken file would trade a small problem for a bigger one.
     /**
-     * O estado ilegível não pode impedir a remoção.
+     * An unreadable state must not prevent the removal.
      */
     @Test
-    void removeSobreviveAoEstadoIlegivel() throws Exception {
-        prepararPerfil("trabalho", "tiktok.com");
-        Files.writeString(Path.of(state()), "{ isto não é json", StandardCharsets.UTF_8);
+    void removeSurvivesAnUnreadableState() throws Exception {
+        prepareProfile("work", "tiktok.com");
+        Files.writeString(Path.of(state()), "{ this is not json", StandardCharsets.UTF_8);
 
-        Resultado r = rodar(() -> run("profile", "trabalho", "remove", "tiktok.com"));
+        Result r = runCommand(() -> run("profile", "work", "remove", "tiktok.com"));
 
-        assertEquals(0, r.exit(), r.texto());
-        assertFalse(perfil().contains("tiktok.com"),
-                "a remoção tem que acontecer mesmo com o estado quebrado: " + perfil());
-        assertTrue(r.texto().toLowerCase().contains("não consegui ler o estado"),
-                "a falha da leitura tem que ser dita: " + r.texto());
+        assertEquals(0, r.exit(), r.text());
+        assertFalse(profile().contains("tiktok.com"),
+                "the removal must happen even with a broken state: " + profile());
+        assertTrue(r.text().toLowerCase().contains("could not read the state"),
+                "the read failure must be reported: " + r.text());
     }
 }

@@ -11,73 +11,73 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 
 /**
- * O perfil é comparado por valor, como o {@link BlockEntry}.
+ * The profile is compared by value, like the {@link BlockEntry}.
  *
- * <p>O {@code ProfileStore} grava um delta sobre o que está no disco, e o delta
- * precisa saber o que mudou. Por identidade, só um {@code Profile} novo parecia
- * mudado — o que funciona por acidente, e não por desenho: qualquer caminho que
- * devolvesse um perfil equivalente (ou que alterasse um perfil no lugar)
- * escrevia um delta errado.
+ * <p>The {@code ProfileStore} writes a delta over what is on disk, and the delta
+ * needs to know what changed. By identity, only a new {@code Profile} looked
+ * changed — which works by accident, not by design: any path that
+ * returned an equivalent profile (or that changed a profile in place)
+ * wrote a wrong delta.
  */
 class ProfileEqualsTest {
 
-    private static final Instant CRIADO = Instant.parse("2026-10-15T12:00:00Z");
-    private static final Instant ATUALIZADO = Instant.parse("2026-10-15T18:30:00Z");
+    private static final Instant CREATED = Instant.parse("2026-10-15T12:00:00Z");
+    private static final Instant UPDATED = Instant.parse("2026-10-15T18:30:00Z");
 
-    private static Profile perfil(String... pares) {
-        Map<String, ProfileEntry> entradas = new TreeMap<>();
-        for (int i = 0; i < pares.length; i += 2) {
-            entradas.put(pares[i], new ProfileEntry(Long.valueOf(pares[i + 1])));
+    private static Profile profile(String... pairs) {
+        Map<String, ProfileEntry> entries = new TreeMap<>();
+        for (int i = 0; i < pairs.length; i += 2) {
+            entries.put(pairs[i], new ProfileEntry(Long.valueOf(pairs[i + 1])));
         }
-        return new Profile(CRIADO, ATUALIZADO, entradas);
+        return new Profile(CREATED, UPDATED, entries);
     }
 
     @Test
-    void doisPerfisComOMesmoConteudoSaoIguais() {
-        Profile a = perfil("tiktok.com", "3600000");
-        Profile b = perfil("tiktok.com", "3600000");
+    void twoProfilesWithTheSameContentAreEqual() {
+        Profile a = profile("tiktok.com", "3600000");
+        Profile b = profile("tiktok.com", "3600000");
 
-        assertNotSame(a, b, "o teste só vale se forem duas instâncias diferentes");
+        assertNotSame(a, b, "the test only counts if they are two different instances");
         assertEquals(a, b);
         assertEquals(a.hashCode(), b.hashCode());
     }
 
     @Test
-    void umPerfilComUmaEntradaAMaisNaoEIgual() {
-        Profile a = perfil("tiktok.com", "3600000");
-        Profile b = perfil("tiktok.com", "3600000", "youtube.com", "0");
+    void profileWithAnExtraEntryIsNotEqual() {
+        Profile a = profile("tiktok.com", "3600000");
+        Profile b = profile("tiktok.com", "3600000", "youtube.com", "0");
 
         assertNotEquals(a, b);
     }
 
     @Test
-    void umPerfilComOutraDuracaoNaoEIgual() {
-        Profile a = perfil("tiktok.com", "3600000");
-        Profile b = perfil("tiktok.com", "7200000");
+    void profileWithADifferentDurationIsNotEqual() {
+        Profile a = profile("tiktok.com", "3600000");
+        Profile b = profile("tiktok.com", "7200000");
 
         assertNotEquals(a, b);
     }
 
     @Test
-    void umPerfilAtualizadoDepoisNaoEIgual() {
-        Profile a = perfil("tiktok.com", "3600000");
-        Profile b = new Profile(CRIADO, ATUALIZADO.plusSeconds(60),
-                perfil("tiktok.com", "3600000").getEntries());
+    void profileUpdatedLaterIsNotEqual() {
+        Profile a = profile("tiktok.com", "3600000");
+        Profile b = new Profile(CREATED, UPDATED.plusSeconds(60),
+                profile("tiktok.com", "3600000").getEntries());
 
         assertNotEquals(a, b);
     }
 
     @Test
-    void umPerfilCriadoEmOutroMomentoNaoEIgual() {
-        Profile a = perfil("tiktok.com", "3600000");
-        Profile b = new Profile(CRIADO.minusSeconds(60), ATUALIZADO,
-                perfil("tiktok.com", "3600000").getEntries());
+    void profileCreatedAtAnotherMomentIsNotEqual() {
+        Profile a = profile("tiktok.com", "3600000");
+        Profile b = new Profile(CREATED.minusSeconds(60), UPDATED,
+                profile("tiktok.com", "3600000").getEntries());
 
         assertNotEquals(a, b);
     }
 
     @Test
-    void asEntradasDoPerfilSaoComparadasPorValor() {
+    void profileEntriesAreComparedByValue() {
         ProfileEntry a = new ProfileEntry(3600000L);
         ProfileEntry b = new ProfileEntry(3600000L);
 
@@ -87,7 +87,7 @@ class ProfileEqualsTest {
     }
 
     @Test
-    void permanenteNaoEIgualAComPrazo() {
+    void permanentIsNotEqualToTemporary() {
         assertNotEquals(new ProfileEntry(null), new ProfileEntry(0L));
         assertEquals(new ProfileEntry(null), new ProfileEntry(null));
     }

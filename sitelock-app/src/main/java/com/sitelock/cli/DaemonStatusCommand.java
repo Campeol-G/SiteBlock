@@ -16,22 +16,22 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 
 /**
- * siteblock daemon status — responde sem elevação.
+ * siteblock daemon status — answers without elevation.
  *
- * <p>Roda sem {@code sudo} de propósito: perguntar "o prazo vai ser cumprido?" não
- * pode exigir privilégio para ser respondida.
+ * <p>Runs without {@code sudo} on purpose: asking "will the deadline be enforced?" must
+ * not require privileges to be answered.
  */
 @Command(name = "status",
-        description = "Mostra se o daemon de expiracao esta rodando.",
+        description = "Shows whether the expiration daemon is running.",
         mixinStandardHelpOptions = true)
 public class DaemonStatusCommand implements Callable<Integer> {
 
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
 
-    // Raiz do sistema; null = "/" em produção. Injetado nos testes.
+    // System root; null = "/" in production. Injected in tests.
     Path systemRootOverride;
 
-    private static final DateTimeFormatter HORA = DateTimeFormatter.ofPattern("dd/MM HH:mm")
+    private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("dd/MM HH:mm")
             .withZone(ZoneId.systemDefault());
 
     public DaemonStatusCommand() {
@@ -51,64 +51,64 @@ public class DaemonStatusCommand implements Callable<Integer> {
         Path stateDir = CliSupport.stateDirFor(stateFileOverride);
         OsType os = OsType.detect();
         Path systemRoot = systemRootOverride != null ? systemRootOverride : Path.of("/");
-        Path jarInstalado = AutostartInstaller.installJarPath(os, systemRoot);
-        // ATENÇÃO: "autostart ligado?" é teste de existência do artefato, e não uma
-        // chamada ao agendador: este comando responde sem elevação.
+        Path installedJar = AutostartInstaller.installJarPath(os, systemRoot);
+        // NOTE: "autostart on?" is a test for the artifact's existence, not a call to
+        // the scheduler: this command answers without elevation.
         boolean autostart = AutostartInstaller.isEnabled(os, systemRoot);
-        boolean jarExiste = Files.exists(jarInstalado);
+        boolean jarExists = Files.exists(installedJar);
 
         Optional<ExpirationDaemonState> state;
         try {
-            // POR QUE: o daemon devolve a posse dos arquivos que escreve, para que
-            // este estado seja legível sem elevação.
+            // WHY: the daemon hands ownership of the files it writes back to the user, so
+            // this state is readable without elevation.
             state = ExpirationDaemonState.read(stateDir);
         } catch (IOException e) {
-            System.err.println("Erro ao ler o estado do daemon: " + e.getMessage());
+            System.err.println("Error reading the daemon state: " + e.getMessage());
             return 1;
         }
 
         if (state.isEmpty()) {
-            System.out.println("Daemon de expiração: não está rodando.");
-            System.out.println("Autostart: " + (autostart ? "instalado" : "não instalado"));
-            System.out.println("Estado lido de: " + stateDir);
+            System.out.println("Expiration daemon: not running.");
+            System.out.println("Autostart: " + (autostart ? "installed" : "not installed"));
+            System.out.println("State read from: " + stateDir);
             if (autostart) {
-                System.out.println("Jar do daemon: " + jarInstalado
-                        + (jarExiste ? "" : "  ← NÃO EXISTE"));
+                System.out.println("Daemon jar: " + installedJar
+                        + (jarExists ? "" : "  <- DOES NOT EXIST"));
             }
-            if (autostart && !jarExiste) {
-                // A causa provável: a unit aponta para um jar que sumiu. Sem
-                // esta linha, o sintoma é "o daemon não sobe" e a pessoa não
-                // tem por onde começar.
-                System.out.println("O jar do daemon não existe mais. Reinstale com: "
+            if (autostart && !jarExists) {
+                // The likely cause: the unit points at a jar that is gone. Without this
+                // line the symptom is "the daemon will not start" and the user has no
+                // way to find out why.
+                System.out.println("The daemon jar no longer exists. Reinstall with: "
                         + CliSupport.elevatedCommand("daemon enable"));
             }
-            System.out.println("Enquanto não houver daemon, um bloqueio com prazo só é liberado "
-                    + "quando você roda outro comando do siteblock.");
-            System.out.println("Para subir sozinho a cada boot: "
+            System.out.println("While there is no daemon, a block with a deadline is only released "
+                    + "when you run another siteblock command.");
+            System.out.println("To start it automatically on each boot: "
                     + CliSupport.elevatedCommand("daemon enable"));
             return 0;
         }
 
         ExpirationDaemonState s = state.get();
-        boolean vivo = ExpirationDaemonState.isAlive(s);
-        System.out.println("Daemon de expiração: " + (vivo ? "rodando" : "NÃO está rodando")
+        boolean alive = ExpirationDaemonState.isAlive(s);
+        System.out.println("Expiration daemon: " + (alive ? "running" : "NOT running")
                 + " (pid " + s.getPid() + ").");
-        System.out.println("Subiu em: " + (s.getStartedAt() == null ? "desconhecido"
-                : HORA.format(s.getStartedAt())));
-        System.out.println("Último sweep que liberou algo: " + (s.getLastSweepAt() == null
-                ? "nenhum desde que subiu" : HORA.format(s.getLastSweepAt())));
-        System.out.println("Estado lido de: " + s.getStateDir());
-        System.out.println("Autostart: " + (autostart ? "instalado" : "não instalado"));
+        System.out.println("Started at: " + (s.getStartedAt() == null ? "unknown"
+                : TIME_FORMAT.format(s.getStartedAt())));
+        System.out.println("Last sweep that released something: " + (s.getLastSweepAt() == null
+                ? "none since it started" : TIME_FORMAT.format(s.getLastSweepAt())));
+        System.out.println("State read from: " + s.getStateDir());
+        System.out.println("Autostart: " + (autostart ? "installed" : "not installed"));
         if (autostart) {
-            System.out.println("Jar do daemon: " + jarInstalado
-                    + (jarExiste ? "" : "  ← NÃO EXISTE"));
-            if (!jarExiste) {
-                System.out.println("O jar do daemon não existe mais — é por isso que ele não sobe. "
-                        + "Reinstale com: " + CliSupport.elevatedCommand("daemon enable"));
+            System.out.println("Daemon jar: " + installedJar
+                    + (jarExists ? "" : "  <- DOES NOT EXIST"));
+            if (!jarExists) {
+                System.out.println("The daemon jar does not exist — that is why it does not start. "
+                        + "Reinstall with: " + CliSupport.elevatedCommand("daemon enable"));
             }
         }
-        if (!vivo) {
-            System.out.println("O PID registrado não está mais vivo. Suba com: "
+        if (!alive) {
+            System.out.println("The recorded PID is no longer alive. Start it with: "
                     + CliSupport.elevatedCommand("daemon start"));
         }
         return 0;

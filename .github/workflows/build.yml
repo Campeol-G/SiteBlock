@@ -4,7 +4,7 @@ on:
   push:
   pull_request:
 
-# Push repetido cancela o build anterior: sem isso, a fila de jobs so cresce.
+# Repeated push cancels the previous build: without this, the job queue just grows.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -12,15 +12,15 @@ concurrency:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
-    # Sem teto, um daemon travado segura o job por 6 horas (tempo padrão).
+    # Without a ceiling, a stuck daemon holds the job for 6 hours (default time).
     timeout-minutes: 30
     strategy:
-      # macOS entrou na matriz porque o README promete suporte a ele: o caminho
-      # do LaunchDaemon/launchctl nunca era exercitado por build nenhum.
+      # macOS entered the matrix because the README promises support for it: the
+      # LaunchDaemon/launchctl path was never exercised by any build.
       fail-fast: false
       matrix:
-        # ATENÇÃO: 'shell' não aceita expressão. O build usa bash em todos os
-        # SOs (o runner Windows tem Git Bash) e chama o wrapper POSIX ./mvnw.
+        # NOTE: 'shell' does not accept expressions. The build uses bash on all
+        # OSes (the Windows runner has Git Bash) and calls the POSIX wrapper ./mvnw.
         include:
           - os: ubuntu-latest
             script: ./run.sh
@@ -35,14 +35,15 @@ jobs:
           distribution: temurin
           java-version: "26"
           cache: maven
-      # 'clean' é obrigatório: sem ele o shade re-sombreia o fat-jar anterior
-      # e o artefato final deixa de ser reproduzível.
-      - name: Build (gera o fat-jar distribuível)
+      # 'clean' is mandatory: without it shade shadows the previous fat-jar
+      # and the final artifact stops being reproducible.
+      - name: Build (produces the distributable fat-jar)
         shell: bash
         run: bash ./mvnw -B clean package
-      # Sem login o log do run não abre. A anotação aparece na página e diz
-      # qual teste quebrou, que é o que falta para diagnosticar a matriz.
-      - name: Anota falhas de teste
+      # Without logging in, the run log cannot be opened. The annotation appears
+      # on the page and says which test broke, which is exactly what you need to
+      # diagnose the matrix.
+      - name: Annotate test failures
         if: failure()
         shell: bash
         run: |
@@ -57,19 +58,20 @@ jobs:
               msg=${msg//'%'/'%25'}
               msg=${msg//$'\r'/}
               msg=${msg//$'\n'/'%0A'}
-              echo "::error title=Falha em ${report}::${msg}"
+              echo "::error title=Failure in ${report}::${msg}"
             fi
           done
           if [ "$total" -eq 0 ]; then
-            echo "::error title=Build falhou::Nenhum relatório do Surefire encontrado; a falha pode ser de compilação."
+            echo "::error title=Build failed::No Surefire report found; the failure may be a compilation error."
           fi
-      - name: Verifica o fat-jar
+      - name: Verify the fat-jar
         shell: bash
         run: |
           set -euo pipefail
 
-          # O passo ja roda no diretorio do workspace: nao depende de 'cd' com
-          # caminho do Windows, que o bash do Git for Windows nao entende igual.
+          # The step already runs in the workspace directory: no need for a 'cd'
+          # with a Windows path, which Git for Windows bash does not handle the
+          # same way.
           JAR=""
           for candidate in sitelock-app/target/siteblock-*.jar; do
             case "$candidate" in
@@ -79,15 +81,15 @@ jobs:
             break
           done
           if [ -z "$JAR" ] || [ ! -f "$JAR" ]; then
-            echo "::error::fat-jar nao encontrado em sitelock-app/target/siteblock-*.jar"
+            echo "::error::fat-jar not found at sitelock-app/target/siteblock-*.jar"
             exit 1
           fi
-          echo "Artefato: $JAR"
+          echo "Artifact: $JAR"
 
-          # O jar precisa responder: Main-Class ausente ou errado quebra 'java -jar'.
+          # The jar must respond: a missing or wrong Main-Class breaks 'java -jar'.
           java -jar "$JAR" --version
 
-          # O manifest precisa apontar o Main-Class.
+          # The manifest must point to the Main-Class.
           tmp="target/jar-check"
           rm -rf "$tmp"
           mkdir -p "$tmp"
@@ -96,14 +98,14 @@ jobs:
           grep -q '^Main-Class: com.sitelock.SiteLockApplication' "$tmp/META-INF/MANIFEST.MF"
           echo "Main-Class: OK"
 
-          # O shade tem que ter rodado: sem as dependencias dentro, nao e o fat-jar.
+          # Shade must have run: without the dependencies inside, it is not the fat-jar.
           (cd "$tmp" && jar tf app.jar > entries.txt)
           grep -q '^picocli/CommandLine.class$' "$tmp/entries.txt"
           grep -q '^com/sitelock/SiteLockApplication.class$' "$tmp/entries.txt"
-          echo "Conteudo do fat-jar: OK"
+          echo "fat-jar contents: OK"
 
-      # O script de execucao tambem e parte do que o usuario instala: um
-      # macOS < 12.3 nao tem 'readlink -f' e o script achava o jar errado.
-      - name: Smoke test do script de execução
+      # The launcher script is also part of what the user installs: on
+      # macOS < 12.3 there is no 'readlink -f', and the script found the wrong jar.
+      - name: Smoke test the launcher script
         shell: bash
         run: ${{ matrix.script }} --version

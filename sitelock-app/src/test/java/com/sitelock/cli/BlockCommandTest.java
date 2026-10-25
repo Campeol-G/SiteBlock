@@ -18,11 +18,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * O {@code block} que recusa.
+ * The {@code block} that refuses.
  *
- * <p>Sem escrita no hosts, o comando tem que parar antes de mexer em
- * qualquer coisa: o estado gravado e o hosts intocado são a diferença entre
- * "não bloqueou" e "bloqueou sem registro em lugar nenhum".
+ * <p>Without write access to the hosts file, the command must stop before touching
+ * anything: a saved state with an untouched hosts file is the difference between
+ * "did not block" and "blocked with no record anywhere".
  */
 class BlockCommandTest {
 
@@ -40,88 +40,87 @@ class BlockCommandTest {
     }
 
     private String state() {
-        return tmp.resolve("estado/blocks.json").toString();
+        return tmp.resolve("state/blocks.json").toString();
     }
 
-    private record Resultado(int exit, String texto) {
+    private record Result(int exit, String text) {
     }
 
-    private Resultado rodar(Comando cmd) throws Exception {
-        PrintStream outOriginal = System.out;
-        PrintStream errOriginal = System.err;
+    private Result run(Command command) throws Exception {
+        PrintStream originalOut = System.out;
+        PrintStream originalErr = System.err;
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         PrintStream fake = new PrintStream(buffer, true, StandardCharsets.UTF_8);
         System.setOut(fake);
         System.setErr(fake);
         int exit;
         try {
-            exit = cmd.run();
+            exit = command.run();
         } catch (Exception e) {
             throw new AssertionError(e);
         } finally {
-            System.setOut(outOriginal);
-            System.setErr(errOriginal);
+            System.setOut(originalOut);
+            System.setErr(originalErr);
         }
-        return new Resultado(exit, buffer.toString(StandardCharsets.UTF_8));
+        return new Result(exit, buffer.toString(StandardCharsets.UTF_8));
     }
 
     @FunctionalInterface
-    private interface Comando {
+    private interface Command {
         int run() throws Exception;
     }
 
-    // POR QUE: o estado é gravado antes do hosts. Se a recusa não vier antes da
-    // gravação, o JSON diz "bloqueado" e o hosts não tem a linha: o domínio fica
-    // preso sem registro, e o sweep (que varre o JSON) nunca limpa.
+    // WHY: the state is written before the hosts file. If the refusal does not come
+    // before the write, the JSON says "blocked" while the hosts file lacks the line: the
+    // domain is stuck with no record, and the sweep (which walks the JSON) never cleans it up.
     /**
-     * Sem escrita no hosts, o block recusa — e não deixa rastro.
+     * Without write access to the hosts file, block refuses — and leaves no trace.
      */
     @Test
-    void recusaComCodigo1QuandoOHostsNaoEhGravavel() throws Exception {
-        Path arquivoHosts = hosts();
-        String antes = Files.readString(arquivoHosts, StandardCharsets.UTF_8);
-        // File.setReadOnly() funciona nos três SOs: no Unix é o bit de escrita,
-        // no Windows o atributo de somente-leitura.
-        assertTrue(arquivoHosts.toFile().setReadOnly(),
-                "não deu para tirar a escrita do hosts de teste");
-        Assumptions.assumeFalse(Files.isWritable(arquivoHosts),
-                "neste ambiente o hosts continua gravável (root?): a recusa não valeria nada");
+    void refusesWithExitCode1WhenHostsIsNotWritable() throws Exception {
+        Path hostsFile = hosts();
+        String before = Files.readString(hostsFile, StandardCharsets.UTF_8);
+        // File.setReadOnly() works on all three OSes: the write bit on Unix, the
+        // read-only attribute on Windows.
+        assertTrue(hostsFile.toFile().setReadOnly(),
+                "could not remove write access from the test hosts file");
+        Assumptions.assumeFalse(Files.isWritable(hostsFile),
+                "in this environment the hosts file is still writable (root?): the refusal would prove nothing");
 
-        Resultado r = rodar(() -> new BlockCommand(List.of("tiktok.com"), "4h",
-                arquivoHosts.toString(), state()).call());
+        Result r = run(() -> new BlockCommand(List.of("tiktok.com"), "4h",
+                hostsFile.toString(), state()).call());
 
-        assertEquals(1, r.exit(), r.texto());
-        assertTrue(r.texto().toLowerCase().contains("sudo")
-                        || r.texto().toLowerCase().contains("administrador"),
-                "a recusa tem que dizer como elevar: " + r.texto());
-        assertEquals(antes, Files.readString(arquivoHosts, StandardCharsets.UTF_8),
-                "o hosts não pode ser tocado quando o comando recusa");
+        assertEquals(1, r.exit(), r.text());
+        assertTrue(r.text().toLowerCase().contains("sudo")
+                        || r.text().toLowerCase().contains("administrator"),
+                "the refusal must say how to elevate: " + r.text());
+        assertEquals(before, Files.readString(hostsFile, StandardCharsets.UTF_8),
+                "the hosts file must not be touched when the command refuses");
         assertFalse(Files.exists(Path.of(state())),
-                "o estado não pode ser criado quando o comando recusa");
+                "the state must not be created when the command refuses");
     }
 
-    // POR QUE: só dá para verificar nesta máquina — a dica de elevação segue
-    // o SO real, e simular o Windows não prova o texto que quem usa Windows
-    // lê.
+    // WHY: this can only be verified on this machine — the elevation hint follows
+    // the real OS, and simulating Windows does not prove the text a Windows user reads.
     /**
-     * No Windows a recusa fala em Administrador, não em sudo.
+     * On Windows the refusal mentions Administrator, not sudo.
      */
     @Test
     @EnabledOnOs(OS.WINDOWS)
-    void noWindowsARecusaFalaEmAdministradorENaoEmSudo() throws Exception {
-        Path arquivoHosts = hosts();
-        assertTrue(arquivoHosts.toFile().setReadOnly(),
-                "não deu para tirar a escrita do hosts de teste");
-        Assumptions.assumeFalse(Files.isWritable(arquivoHosts),
-                "neste ambiente o hosts continua gravável: a recusa não valeria nada");
+    void onWindowsRefusalMentionsAdministratorNotSudo() throws Exception {
+        Path hostsFile = hosts();
+        assertTrue(hostsFile.toFile().setReadOnly(),
+                "could not remove write access from the test hosts file");
+        Assumptions.assumeFalse(Files.isWritable(hostsFile),
+                "in this environment the hosts file is still writable: the refusal would prove nothing");
 
-        Resultado r = rodar(() -> new BlockCommand(List.of("tiktok.com"), "4h",
-                arquivoHosts.toString(), state()).call());
+        Result r = run(() -> new BlockCommand(List.of("tiktok.com"), "4h",
+                hostsFile.toString(), state()).call());
 
-        assertEquals(1, r.exit(), r.texto());
-        assertTrue(r.texto().toLowerCase().contains("administrador"),
-                "no Windows quem eleva é o terminal: " + r.texto());
-        assertFalse(r.texto().toLowerCase().contains("sudo"),
-                "no Windows não existe sudo: " + r.texto());
+        assertEquals(1, r.exit(), r.text());
+        assertTrue(r.text().toLowerCase().contains("administrator"),
+                "on Windows the terminal elevates: " + r.text());
+        assertFalse(r.text().toLowerCase().contains("sudo"),
+                "on Windows there is no sudo: " + r.text());
     }
 }

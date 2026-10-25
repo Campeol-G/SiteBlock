@@ -25,13 +25,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * O status conferindo o estado contra o hosts.
+ * status checking the state against the hosts file.
  *
- * <p>Há dois desfechos opostos quando os dois discordam. Estado sem linha no
- * hosts: o site está livre e o status afirma que está bloqueado. Linha no
- * hosts sem registro no estado: o site está preso para sempre, porque o
- * sweep varre o JSON e nunca o hosts — e a recuperação seria editar o
- * /etc/hosts à mão, que é o que este programa existe para dispensar.
+ * <p>There are two opposite outcomes when the two disagree. State without a line
+ * in the hosts file: the site is free and status claims it is blocked. A line in
+ * the hosts file without a record in the state: the site is stuck forever,
+ * because the sweep walks the JSON and never the hosts file — and recovery would
+ * mean editing /etc/hosts by hand, which is what this program exists to avoid.
  */
 class StatusCommandTest {
 
@@ -40,7 +40,7 @@ class StatusCommandTest {
 
     private Path hosts;
 
-    // O hosts de teste; criado uma vez só, para não apagar o bloco escrito.
+    // The test hosts file; created only once, so it does not erase the block written.
     private Path hosts() throws Exception {
         if (hosts == null) {
             hosts = tmp.resolve("hosts");
@@ -50,91 +50,91 @@ class StatusCommandTest {
     }
 
     private String state() {
-        return tmp.resolve("estado/blocks.json").toString();
+        return tmp.resolve("state/blocks.json").toString();
     }
 
-    // Grava um estado com um único domínio, sem passar pelo block.
-    private void gravarEstado(String dominio, Instant expiresAt) throws Exception {
-        Map<String, BlockEntry> estado = new TreeMap<>();
-        estado.put(dominio, new BlockEntry(dominio, Instant.now(), expiresAt));
-        Files.createDirectories(tmp.resolve("estado"));
-        new BlockStore(Path.of(state())).save(estado);
+    // Writes a state with a single domain, without going through block.
+    private void writeState(String domain, Instant expiresAt) throws Exception {
+        Map<String, BlockEntry> state = new TreeMap<>();
+        state.put(domain, new BlockEntry(domain, Instant.now(), expiresAt));
+        Files.createDirectories(tmp.resolve("state"));
+        new BlockStore(Path.of(state())).save(state);
     }
 
-    private Resultado rodar(Chamavel c) throws Exception {
-        PrintStream outOriginal = System.out;
-        PrintStream errOriginal = System.err;
+    private Result run(Callable c) throws Exception {
+        PrintStream originalOut = System.out;
+        PrintStream originalErr = System.err;
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         PrintStream fake = new PrintStream(buffer, true, StandardCharsets.UTF_8);
         System.setOut(fake);
         System.setErr(fake);
-        AtomicInteger codigo = new AtomicInteger(-1);
+        AtomicInteger code = new AtomicInteger(-1);
         try {
-            codigo.set(c.chamar());
+            code.set(c.call());
         } finally {
-            System.setOut(outOriginal);
-            System.setErr(errOriginal);
+            System.setOut(originalOut);
+            System.setErr(originalErr);
         }
-        return new Resultado(codigo.get(), buffer.toString(StandardCharsets.UTF_8));
+        return new Result(code.get(), buffer.toString(StandardCharsets.UTF_8));
     }
 
-    private record Resultado(int codigo, String texto) {
+    private record Result(int exit, String text) {
     }
 
     @FunctionalInterface
-    private interface Chamavel {
-        int chamar() throws Exception;
+    private interface Callable {
+        int call() throws Exception;
     }
 
     @Test
-    void estadoEmDiaComOHostsNaoSinalizaNada() throws Exception {
+    void stateMatchesHostsReportsNothing() throws Exception {
         assertEquals(0, new BlockCommand(List.of("tiktok.com"), null,
                 hosts().toString(), state()).call());
 
-        Resultado r = rodar(() -> new StatusCommand(hosts().toString(), state()).call());
+        Result r = run(() -> new StatusCommand(hosts().toString(), state()).call());
 
-        assertEquals(0, r.codigo());
-        assertFalse(r.texto().contains("Divergência"),
-                "estado e hosts em dia não têm divergência: " + r.texto());
+        assertEquals(0, r.exit());
+        assertFalse(r.text().contains("Divergence"),
+                "state and hosts in sync have no divergence: " + r.text());
     }
 
     @Test
-    void estadoSemLinhaNoHostsSinalizaSemEfeito() throws Exception {
-        gravarEstado("tiktok.com", null);
+    void stateWithoutHostsLineReportsIneffective() throws Exception {
+        writeState("tiktok.com", null);
 
-        Resultado r = rodar(() -> new StatusCommand(hosts().toString(), state()).call());
+        Result r = run(() -> new StatusCommand(hosts().toString(), state()).call());
 
-        assertEquals(0, r.codigo());
-        assertTrue(r.texto().contains("sem efeito"), r.texto());
-        assertTrue(r.texto().contains("tiktok.com"), r.texto());
-        assertTrue(r.texto().contains("Domínios bloqueados (1):"),
-                "a lista de bloqueados não muda: " + r.texto());
+        assertEquals(0, r.exit());
+        assertTrue(r.text().contains("ineffective"), r.text());
+        assertTrue(r.text().contains("tiktok.com"), r.text());
+        assertTrue(r.text().contains("Blocked domains (1):"),
+                "the blocked list does not change: " + r.text());
     }
 
     @Test
-    void linhaNoHostsSemRegistroSinalizaPresoSemRegistro() throws Exception {
+    void hostsLineWithoutRecordReportsStuckWithoutRecord() throws Exception {
         assertEquals(0, new BlockCommand(List.of("tiktok.com"), null,
                 hosts().toString(), state()).call());
-        // O registro se perde (state apagado, sobrescrito ou corrompido): o hosts
-        // continua com a linha e o site fica preso para sempre.
+        // The record is lost (state deleted, overwritten, or corrupted): the hosts
+        // file keeps the line and the site stays stuck forever.
         Files.delete(Path.of(state()));
 
-        Resultado r = rodar(() -> new StatusCommand(hosts().toString(), state()).call());
+        Result r = run(() -> new StatusCommand(hosts().toString(), state()).call());
 
-        assertEquals(0, r.codigo());
-        assertTrue(r.texto().contains("preso sem registro"), r.texto());
-        assertTrue(r.texto().contains("tiktok.com"), r.texto());
-        assertTrue(r.texto().contains("siteblock block tiktok.com"),
-                "a saída precisa dizer como resolver: " + r.texto());
-        assertTrue(r.texto().contains("siteblock unblock tiktok.com"), r.texto());
-        assertFalse(r.texto().contains("Domínios bloqueados"),
-                "o status não pode inventar bloqueio que não está no estado: " + r.texto());
+        assertEquals(0, r.exit());
+        assertTrue(r.text().contains("stuck without a record"), r.text());
+        assertTrue(r.text().contains("tiktok.com"), r.text());
+        assertTrue(r.text().contains("siteblock block tiktok.com"),
+                "the output must say how to fix it: " + r.text());
+        assertTrue(r.text().contains("siteblock unblock tiktok.com"), r.text());
+        assertFalse(r.text().contains("Blocked domains"),
+                "status must not invent a block that is not in the state: " + r.text());
     }
 
     @Test
-    void estadoComWwwNaoViraPresoSemRegistro() throws Exception {
-        // O bloqueio do www e do dominio é o mesmo: as linhas são as mesmas.
-        gravarEstado("www.tiktok.com", null);
+    void wwwStateDoesNotBecomeStuckWithoutRecord() throws Exception {
+        // Blocking www and the domain is the same thing: the lines are the same.
+        writeState("www.tiktok.com", null);
         Files.writeString(hosts(), """
                 127.0.0.1 localhost
                 # SITELOCK-START
@@ -145,33 +145,33 @@ class StatusCommandTest {
                 # SITELOCK-END
                 """, StandardCharsets.UTF_8);
 
-        Resultado r = rodar(() -> new StatusCommand(hosts().toString(), state()).call());
+        Result r = run(() -> new StatusCommand(hosts().toString(), state()).call());
 
-        assertFalse(r.texto().contains("preso sem registro"),
-                "o www e o dominio são o mesmo bloqueio: " + r.texto());
+        assertFalse(r.text().contains("stuck without a record"),
+                "www and the domain are the same block: " + r.text());
     }
 
-    // ATENÇÃO: o teste depende de permissão POSIX — no Windows o
-    // setPosixFilePermissions não existe, o arquivo continua legível e a
-    // asserção quebra. Sem @EnabledOnOs, a perna Windows da CI fica VERMELHA.
+    // WARNING: the test depends on POSIX permissions — on Windows
+    // setPosixFilePermissions does not exist, the file stays readable, and the
+    // assertion breaks. Without @EnabledOnOs, the Windows leg of CI turns RED.
     /**
-     * Sem permissão de leitura no hosts, o status avisa e não vira erro.
+     * Without read permission on the hosts file, status warns and does not become an error.
      */
     @Test
     @EnabledOnOs({OS.LINUX, OS.MAC})
-    void hostsSemLeituraNaoViraErro() throws Exception {
-        gravarEstado("tiktok.com", null);
-        Path hostsSemLeitura = tmp.resolve("hosts-sem-leitura");
-        Files.writeString(hostsSemLeitura, "127.0.0.1 localhost\n", StandardCharsets.UTF_8);
-        Files.setPosixFilePermissions(hostsSemLeitura, Set.of(PosixFilePermission.OWNER_WRITE));
+    void unreadableHostsDoesNotBecomeAnError() throws Exception {
+        writeState("tiktok.com", null);
+        Path unreadableHosts = tmp.resolve("unreadable-hosts");
+        Files.writeString(unreadableHosts, "127.0.0.1 localhost\n", StandardCharsets.UTF_8);
+        Files.setPosixFilePermissions(unreadableHosts, Set.of(PosixFilePermission.OWNER_WRITE));
 
-        Resultado r = rodar(() -> new StatusCommand(hostsSemLeitura.toString(), state()).call());
+        Result r = run(() -> new StatusCommand(unreadableHosts.toString(), state()).call());
 
-        assertEquals(0, r.codigo(), "ler o hosts pode falhar, mas o status não vira erro: " + r.texto());
-        assertTrue(r.texto().contains("não consegui ler"), r.texto());
-        assertFalse(r.texto().contains("Divergência"),
-                "sem conseguir ler o hosts não há o que afirmar: " + r.texto());
-        assertTrue(r.texto().contains("Domínios bloqueados (1):"),
-                "a lista de bloqueados continua: " + r.texto());
+        assertEquals(0, r.exit(), "reading the hosts file may fail, but status does not become an error: " + r.text());
+        assertTrue(r.text().contains("could not read"), r.text());
+        assertFalse(r.text().contains("Divergence"),
+                "without being able to read the hosts file there is nothing to assert: " + r.text());
+        assertTrue(r.text().contains("Blocked domains (1):"),
+                "the blocked list remains: " + r.text());
     }
 }

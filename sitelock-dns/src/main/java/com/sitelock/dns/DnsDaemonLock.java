@@ -11,11 +11,11 @@ import java.nio.file.StandardOpenOption;
 import java.util.Optional;
 
 /**
- * Trava curta do {@code dns start}: impede que dois processos leiam o estado
- * vazio, subam um daemon cada um e o último sobrescreva o registro do outro.
+ * Short-lived lock for {@code dns start}: it stops two processes from both reading
+ * empty state, starting a daemon each, and the last one overwriting the other's record.
  *
- * <p>O SO libera a trava quando o processo morre, então não há arquivo órfão
- * para limpar. O lock é de arquivo, não de PID.
+ * <p>The OS releases the lock when the process dies, so there is no orphan file to
+ * clean up. This is a file lock, not a PID lock.
  */
 public final class DnsDaemonLock implements AutoCloseable {
 
@@ -34,9 +34,9 @@ public final class DnsDaemonLock implements AutoCloseable {
     }
 
     /**
-     * Tenta a trava sem esperar.
+     * Tries to take the lock without waiting.
      *
-     * @return a trava, ou vazio se outro {@code dns start} já a tem
+     * @return the lock, or empty if another {@code dns start} already holds it
      */
     public static Optional<DnsDaemonLock> tryAcquire(Path stateDir) throws IOException {
         SiteLockPaths.createDirectories(stateDir);
@@ -48,7 +48,7 @@ public final class DnsDaemonLock implements AutoCloseable {
             try {
                 lock = channel.tryLock();
             } catch (OverlappingFileLockException e) {
-                lock = null; // outra thread/processo da mesma JVM
+                lock = null; // another thread or process in the same JVM holds it
             }
             if (lock == null) {
                 channel.close();

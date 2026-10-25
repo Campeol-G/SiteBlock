@@ -18,168 +18,169 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-// Alias por CNAME: o nome consultado é livre, mas aponta para um nome bloqueado.
-// O defeito: o upstream devolvia a cadeia de CNAMEs e o IP real do alvo na mesma
-// resposta, e o servidor repassava tudo — o cliente conectava no IP bloqueado.
+// CNAME aliases: the queried name is free but points at a blocked name.
+// The defect: the upstream returned the CNAME chain and the target's real IP in
+// the same response, and the server relayed it all — the client connected to the
+// blocked IP.
 class DnsAliasCnameTest {
 
-    // IP que o upstream entrega para o alvo bloqueado (não pode vazar).
-    private static final byte[] IP_REAL = {1, 2, 3, 4};
+    // IP the upstream hands out for the blocked target (it must not leak).
+    private static final byte[] REAL_IP = {1, 2, 3, 4};
 
     @TempDir
     Path tmp;
 
-    // Sobe o servidor apontado para o upstream falso, com os bloqueios dados.
-    private DnsServer subir(FakeUpstream upstream, String... bloqueados) throws Exception {
-        Path estado = DnsTestSupport.arquivoDeBloqueios(tmp, bloqueados);
-        return subir(upstream, new BlockStore(estado), bloqueados[0]);
+    // Starts the server pointed at the fake upstream, with the given blocks.
+    private DnsServer startServer(FakeUpstream upstream, String... blocked) throws Exception {
+        Path state = DnsTestSupport.blocksFile(tmp, blocked);
+        return startServer(upstream, new BlockStore(state), blocked[0]);
     }
 
-    // Sobe o servidor com um BlockStore próprio (para contar leituras).
-    private DnsServer subir(FakeUpstream upstream, BlockStore store, String bloqueado)
+    // Starts the server with its own BlockStore (to count reads).
+    private DnsServer startServer(FakeUpstream upstream, BlockStore store, String blocked)
             throws Exception {
-        int porta = DnsTestSupport.portaLivre();
-        DnsServer server = new DnsServer(porta, upstream.endereco(), upstream.porta(), 2000,
+        int port = DnsTestSupport.freePort();
+        DnsServer server = new DnsServer(port, upstream.address(), upstream.port(), 2000,
                 store, Clock.systemUTC(), List.of());
-        Thread t = new Thread(server::serveForever, "servidor-de-teste");
+        Thread t = new Thread(server::serveForever, "test-server");
         t.setDaemon(true);
         t.start();
-        DnsTestSupport.esperaEscuta(porta, bloqueado, 5000);
+        DnsTestSupport.awaitListening(port, blocked, 5000);
         return server;
     }
 
-    // Upstream que responde com a cadeia de aliases informada.
-    private static FakeUpstream upstreamComCadeia(String[] cadeia, int tipoFinal,
-                                                  byte[] rdataFinal) throws Exception {
+    // Upstream that answers with the given alias chain.
+    private static FakeUpstream upstreamWithChain(String[] chain, int finalType,
+                                                  byte[] finalRdata) throws Exception {
         FakeUpstream upstream = new FakeUpstream();
-        upstream.respondeCom(consulta ->
-                DnsWire.respostaEmCadeia(consulta, cadeia, tipoFinal, rdataFinal));
+        upstream.respondWith(query ->
+                DnsWire.chainedResponse(query, chain, finalType, finalRdata));
         upstream.start();
         return upstream;
     }
 
-    // true se o IP aparece em qualquer byte da resposta.
-    private static boolean contemIp(byte[] resposta, byte[] ip) {
-        for (int i = 0; i + ip.length <= resposta.length; i++) {
-            boolean igual = true;
+    // True if the IP appears in any byte of the response.
+    private static boolean containsIp(byte[] response, byte[] ip) {
+        for (int i = 0; i + ip.length <= response.length; i++) {
+            boolean equal = true;
             for (int j = 0; j < ip.length; j++) {
-                if (resposta[i + j] != ip[j]) {
-                    igual = false;
+                if (response[i + j] != ip[j]) {
+                    equal = false;
                     break;
                 }
             }
-            if (igual) {
+            if (equal) {
                 return true;
             }
         }
         return false;
     }
 
-    // O defeito original: "www.microsoft.com" livre, com CNAME para
-    // "www.microsoft.com-c-3.edgekey.net" bloqueado. O cliente recebia o IP real.
+    // The original defect: "www.microsoft.com" is free, with a CNAME to the blocked
+    // "www.microsoft.com-c-3.edgekey.net". The client received the real IP.
     @Test
-    void aliasDeNomeBloqueadoRecebeSinkhole() throws Exception {
-        FakeUpstream upstream = upstreamComCadeia(
-                new String[]{"alias.test", "alvo.test"}, DnsQuery.TYPE_A, IP_REAL);
-        DnsServer server = subir(upstream, "alvo.test");
+    void blockedAliasGetsSinkhole() throws Exception {
+        FakeUpstream upstream = upstreamWithChain(
+                new String[]{"alias.test", "target.test"}, DnsQuery.TYPE_A, REAL_IP);
+        DnsServer server = startServer(upstream, "target.test");
         try {
-            byte[] bruto = DnsTestSupport.consultar(server.getPort(),
+            byte[] raw = DnsTestSupport.query(server.getPort(),
                     DnsWire.query(0x1234, "alias.test", DnsQuery.TYPE_A), 3000);
-            assertNotNull(bruto, "o servidor não respondeu");
-            DnsWire.Resposta r = DnsWire.parse(bruto);
-            assertEquals(0, r.rcode(), "o alias bloqueado não pode dar SERVFAIL");
-            assertEquals(1, r.anCount(), "o alias bloqueado leva o sinkhole");
-            assertArrayEquals(new byte[]{0, 0, 0, 0}, r.primeiroRdata(),
-                    "sinkhole IPv4 é 0.0.0.0");
-            assertFalse(contemIp(bruto, IP_REAL),
-                    "o IP real do nome bloqueado não pode chegar ao cliente");
+            assertNotNull(raw, "the server did not respond");
+            DnsWire.Response r = DnsWire.parse(raw);
+            assertEquals(0, r.rcode(), "a blocked alias must not produce SERVFAIL");
+            assertEquals(1, r.anCount(), "a blocked alias gets the sinkhole");
+            assertArrayEquals(new byte[]{0, 0, 0, 0}, r.firstRdata(),
+                    "the IPv4 sinkhole is 0.0.0.0");
+            assertFalse(containsIp(raw, REAL_IP),
+                    "the blocked name's real IP must not reach the client");
         } finally {
             server.stop();
             upstream.close();
         }
     }
 
-    // O nome livre sem alias continua sendo encaminhado: a correção do alias não
-    // pode estragar o caminho normal.
+    // A free name without an alias is still forwarded: the alias fix must not
+    // break the normal path.
     @Test
-    void nomeLivreSemCnameContinuaSendoEncaminhado() throws Exception {
+    void freeNameWithoutCnameIsStillForwarded() throws Exception {
         FakeUpstream upstream = new FakeUpstream();
         upstream.start();
-        DnsServer server = subir(upstream, "alvo.test");
+        DnsServer server = startServer(upstream, "target.test");
         try {
-            byte[] bruto = DnsTestSupport.consultar(server.getPort(),
-                    DnsWire.query(0x2222, "livre.test", DnsQuery.TYPE_A), 3000);
-            assertNotNull(bruto, "o servidor não respondeu");
-            DnsWire.Resposta r = DnsWire.parse(bruto);
-            assertEquals(0x2222, r.id(), "a resposta precisa ecoar o ID do cliente");
+            byte[] raw = DnsTestSupport.query(server.getPort(),
+                    DnsWire.query(0x2222, "free.test", DnsQuery.TYPE_A), 3000);
+            assertNotNull(raw, "the server did not respond");
+            DnsWire.Response r = DnsWire.parse(raw);
+            assertEquals(0x2222, r.id(), "the response must echo the client ID");
             assertEquals(0, r.rcode());
-            assertEquals(1, r.anCount(), "a resposta do upstream tem que ser repassada");
+            assertEquals(1, r.anCount(), "the upstream response must be relayed");
             assertArrayEquals(new byte[]{(byte) 93, (byte) 184, (byte) 216, (byte) 34},
-                    r.primeiroRdata(), "a resposta do upstream tem que chegar intacta");
+                    r.firstRdata(), "the upstream response must arrive intact");
         } finally {
             server.stop();
             upstream.close();
         }
     }
 
-    // Cadeia com dois elos e o bloqueio no segundo elo: o IP real não pode vazar.
+    // Chain with two links and the block on the second link: the real IP must not leak.
     @Test
-    void cadeiaDeDoisElosComBloqueioNoSegundoEloRecebeSinkhole() throws Exception {
-        FakeUpstream upstream = upstreamComCadeia(
-                new String[]{"alias.test", "meio.test", "alvo.test"}, DnsQuery.TYPE_A, IP_REAL);
-        DnsServer server = subir(upstream, "alvo.test");
+    void twoLinkChainWithBlockOnSecondLinkGetsSinkhole() throws Exception {
+        FakeUpstream upstream = upstreamWithChain(
+                new String[]{"alias.test", "middle.test", "target.test"}, DnsQuery.TYPE_A, REAL_IP);
+        DnsServer server = startServer(upstream, "target.test");
         try {
-            byte[] bruto = DnsTestSupport.consultar(server.getPort(),
+            byte[] raw = DnsTestSupport.query(server.getPort(),
                     DnsWire.query(0x3456, "alias.test", DnsQuery.TYPE_A), 3000);
-            assertNotNull(bruto, "o servidor não respondeu");
-            DnsWire.Resposta r = DnsWire.parse(bruto);
+            assertNotNull(raw, "the server did not respond");
+            DnsWire.Response r = DnsWire.parse(raw);
             assertEquals(0, r.rcode());
-            assertEquals(1, r.anCount(), "a cadeia com elo bloqueado leva o sinkhole");
-            assertArrayEquals(new byte[]{0, 0, 0, 0}, r.primeiroRdata(),
-                    "sinkhole IPv4 é 0.0.0.0");
-            assertFalse(contemIp(bruto, IP_REAL),
-                    "o IP real do nome bloqueado não pode chegar ao cliente");
+            assertEquals(1, r.anCount(), "a chain with a blocked link gets the sinkhole");
+            assertArrayEquals(new byte[]{0, 0, 0, 0}, r.firstRdata(),
+                    "the IPv4 sinkhole is 0.0.0.0");
+            assertFalse(containsIp(raw, REAL_IP),
+                    "the blocked name's real IP must not reach the client");
         } finally {
             server.stop();
             upstream.close();
         }
     }
 
-    // Cadeia com dois elos, nenhum bloqueado: a resposta passa direto.
+    // Chain with two links, none blocked: the response passes through.
     @Test
-    void cadeiaDeDoisElosSemNenhumBloqueadoPassaDireto() throws Exception {
-        FakeUpstream upstream = upstreamComCadeia(
-                new String[]{"alias.test", "meio.test", "alvo.test"}, DnsQuery.TYPE_A, IP_REAL);
-        DnsServer server = subir(upstream, "outro.test");
+    void twoLinkChainWithNoBlockPassesThrough() throws Exception {
+        FakeUpstream upstream = upstreamWithChain(
+                new String[]{"alias.test", "middle.test", "target.test"}, DnsQuery.TYPE_A, REAL_IP);
+        DnsServer server = startServer(upstream, "other.test");
         try {
-            byte[] bruto = DnsTestSupport.consultar(server.getPort(),
+            byte[] raw = DnsTestSupport.query(server.getPort(),
                     DnsWire.query(0x4321, "alias.test", DnsQuery.TYPE_A), 3000);
-            assertNotNull(bruto, "o servidor não respondeu");
-            DnsWire.Resposta r = DnsWire.parse(bruto);
+            assertNotNull(raw, "the server did not respond");
+            DnsWire.Response r = DnsWire.parse(raw);
             assertEquals(0, r.rcode());
-            assertEquals(3, r.anCount(), "a cadeia inteira tem que ser repassada");
-            assertArrayEquals(IP_REAL, r.answers().get(2).rdata(),
-                    "o registro final tem que chegar intacto");
+            assertEquals(3, r.anCount(), "the whole chain must be relayed");
+            assertArrayEquals(REAL_IP, r.answers().get(2).rdata(),
+                    "the final record must arrive intact");
         } finally {
             server.stop();
             upstream.close();
         }
     }
 
-    // Resposta sem section answer (NXDOMAIN): nada a inspecionar, repassa.
+    // Response without an answer section (NXDOMAIN): nothing to inspect, relay it.
     @Test
-    void respostaSemSectionAnswerEhRepassada() throws Exception {
+    void responseWithoutAnswerSectionIsRelayed() throws Exception {
         FakeUpstream upstream = new FakeUpstream();
-        upstream.modo(FakeUpstream.Modo.SEM_ANSWER);
+        upstream.mode(FakeUpstream.Mode.NO_ANSWER);
         upstream.start();
-        DnsServer server = subir(upstream, "alvo.test");
+        DnsServer server = startServer(upstream, "target.test");
         try {
-            byte[] bruto = DnsTestSupport.consultar(server.getPort(),
-                    DnsWire.query(0x3333, "livre.test", DnsQuery.TYPE_A), 3000);
-            assertNotNull(bruto, "o servidor não respondeu");
-            DnsWire.Resposta r = DnsWire.parse(bruto);
-            assertEquals(0x3333, r.id(), "a resposta precisa ecoar o ID do cliente");
-            assertEquals(3, r.rcode(), "o NXDOMAIN do upstream tem que ser repassado");
+            byte[] raw = DnsTestSupport.query(server.getPort(),
+                    DnsWire.query(0x3333, "free.test", DnsQuery.TYPE_A), 3000);
+            assertNotNull(raw, "the server did not respond");
+            DnsWire.Response r = DnsWire.parse(raw);
+            assertEquals(0x3333, r.id(), "the response must echo the client ID");
+            assertEquals(3, r.rcode(), "the upstream NXDOMAIN must be relayed");
             assertEquals(0, r.anCount());
         } finally {
             server.stop();
@@ -187,133 +188,133 @@ class DnsAliasCnameTest {
         }
     }
 
-    // O bloqueio de verdade continua valendo: nome bloqueado não vai ao upstream.
+    // The actual block still applies: a blocked name never goes upstream.
     @Test
-    void upstreamNaoRecebeConsultaDeNomeBloqueado() throws Exception {
+    void upstreamDoesNotReceiveQueriesForBlockedNames() throws Exception {
         FakeUpstream upstream = new FakeUpstream();
         upstream.start();
-        DnsServer server = subir(upstream, "alvo.test");
+        DnsServer server = startServer(upstream, "target.test");
         try {
-            byte[] bruto = DnsTestSupport.consultar(server.getPort(),
-                    DnsWire.query(0x4444, "alvo.test", DnsQuery.TYPE_A), 3000);
-            assertNotNull(bruto, "o servidor não respondeu");
-            DnsWire.Resposta r = DnsWire.parse(bruto);
-            assertEquals(1, r.anCount(), "o nome bloqueado leva o sinkhole");
-            assertArrayEquals(new byte[]{0, 0, 0, 0}, r.primeiroRdata(),
-                    "sinkhole IPv4 é 0.0.0.0");
-            Thread.sleep(300); // dá tempo de o upstream receber, caso o servidor envie
-            assertTrue(upstream.consultasRecebidas().isEmpty(),
-                    "o nome bloqueado não pode ser consultado no upstream");
+            byte[] raw = DnsTestSupport.query(server.getPort(),
+                    DnsWire.query(0x4444, "target.test", DnsQuery.TYPE_A), 3000);
+            assertNotNull(raw, "the server did not respond");
+            DnsWire.Response r = DnsWire.parse(raw);
+            assertEquals(1, r.anCount(), "the blocked name gets the sinkhole");
+            assertArrayEquals(new byte[]{0, 0, 0, 0}, r.firstRdata(),
+                    "the IPv4 sinkhole is 0.0.0.0");
+            Thread.sleep(300); // give the upstream time to receive it, if the server sends it
+            assertTrue(upstream.receivedQueries().isEmpty(),
+                    "a blocked name must not be queried upstream");
         } finally {
             server.stop();
             upstream.close();
         }
     }
 
-    // O sinkhole do alias tem que respeitar o tipo pedido (AAAA → ::).
+    // The alias sinkhole must respect the requested type (AAAA → ::).
     @Test
-    void aliasBloqueadoComAaaaRecebeSinkholeIpv6() throws Exception {
-        FakeUpstream upstream = upstreamComCadeia(
-                new String[]{"alias.test", "alvo.test"}, DnsQuery.TYPE_AAAA, new byte[16]);
-        DnsServer server = subir(upstream, "alvo.test");
+    void blockedAliasWithAaaaGetsIpv6Sinkhole() throws Exception {
+        FakeUpstream upstream = upstreamWithChain(
+                new String[]{"alias.test", "target.test"}, DnsQuery.TYPE_AAAA, new byte[16]);
+        DnsServer server = startServer(upstream, "target.test");
         try {
-            byte[] bruto = DnsTestSupport.consultar(server.getPort(),
+            byte[] raw = DnsTestSupport.query(server.getPort(),
                     DnsWire.query(0x5555, "alias.test", DnsQuery.TYPE_AAAA), 3000);
-            assertNotNull(bruto, "o servidor não respondeu");
-            DnsWire.Resposta r = DnsWire.parse(bruto);
+            assertNotNull(raw, "the server did not respond");
+            DnsWire.Response r = DnsWire.parse(raw);
             assertEquals(0, r.rcode());
             assertEquals(1, r.anCount());
-            assertArrayEquals(new byte[16], r.primeiroRdata(), "sinkhole IPv6 é ::");
+            assertArrayEquals(new byte[16], r.firstRdata(), "the IPv6 sinkhole is ::");
         } finally {
             server.stop();
             upstream.close();
         }
     }
 
-    // Tipo ≠ A/AAAA no alias bloqueado: NODATA, como num nome bloqueado.
+    // Type other than A/AAAA on a blocked alias: NODATA, as for a blocked name.
     @Test
-    void aliasBloqueadoComTipoNaoAaaaRespondeNodata() throws Exception {
-        FakeUpstream upstream = upstreamComCadeia(
-                new String[]{"alias.test", "alvo.test"}, 0, new byte[0]);
-        DnsServer server = subir(upstream, "alvo.test");
+    void blockedAliasWithNonAaaaTypeAnswersNodata() throws Exception {
+        FakeUpstream upstream = upstreamWithChain(
+                new String[]{"alias.test", "target.test"}, 0, new byte[0]);
+        DnsServer server = startServer(upstream, "target.test");
         try {
-            byte[] bruto = DnsTestSupport.consultar(server.getPort(),
+            byte[] raw = DnsTestSupport.query(server.getPort(),
                     DnsWire.query(0x6666, "alias.test", 16 /*TXT*/), 3000);
-            assertNotNull(bruto, "o servidor não respondeu");
-            DnsWire.Resposta r = DnsWire.parse(bruto);
-            assertEquals(0, r.rcode(), "NODATA não é SERVFAIL");
-            assertEquals(0, r.anCount(), "NODATA: nenhum answer para tipo diferente de A/AAAA");
+            assertNotNull(raw, "the server did not respond");
+            DnsWire.Response r = DnsWire.parse(raw);
+            assertEquals(0, r.rcode(), "NODATA is not SERVFAIL");
+            assertEquals(0, r.anCount(), "NODATA: no answer for a type other than A/AAAA");
         } finally {
             server.stop();
             upstream.close();
         }
     }
 
-    // Subdomínio do nome bloqueado na cadeia: bloqueia igual (sufixo com ponto).
+    // Subdomain of the blocked name in the chain: block it too (dotted suffix).
     @Test
-    void aliasParaSubdominioDoBloqueadoRecebeSinkhole() throws Exception {
-        FakeUpstream upstream = upstreamComCadeia(
-                new String[]{"alias.test", "cdn.alvo.test"}, DnsQuery.TYPE_A, IP_REAL);
-        DnsServer server = subir(upstream, "alvo.test");
+    void aliasToSubdomainOfBlockedNameGetsSinkhole() throws Exception {
+        FakeUpstream upstream = upstreamWithChain(
+                new String[]{"alias.test", "cdn.target.test"}, DnsQuery.TYPE_A, REAL_IP);
+        DnsServer server = startServer(upstream, "target.test");
         try {
-            byte[] bruto = DnsTestSupport.consultar(server.getPort(),
+            byte[] raw = DnsTestSupport.query(server.getPort(),
                     DnsWire.query(0x7777, "alias.test", DnsQuery.TYPE_A), 3000);
-            assertNotNull(bruto, "o servidor não respondeu");
-            DnsWire.Resposta r = DnsWire.parse(bruto);
-            assertEquals(1, r.anCount(), "o subdomínio do bloqueado leva o sinkhole");
-            assertArrayEquals(new byte[]{0, 0, 0, 0}, r.primeiroRdata());
-            assertFalse(contemIp(bruto, IP_REAL),
-                    "o IP real do nome bloqueado não pode chegar ao cliente");
+            assertNotNull(raw, "the server did not respond");
+            DnsWire.Response r = DnsWire.parse(raw);
+            assertEquals(1, r.anCount(), "the subdomain of the blocked name gets the sinkhole");
+            assertArrayEquals(new byte[]{0, 0, 0, 0}, r.firstRdata());
+            assertFalse(containsIp(raw, REAL_IP),
+                    "the blocked name's real IP must not reach the client");
         } finally {
             server.stop();
             upstream.close();
         }
     }
 
-    // A checagem do alias não pode custar uma releitura do blocks.json: a
-    // consulta já leu a lista de bloqueios, e a cadeia é checada com ela.
+    // The alias check must not reread blocks.json: the query already read the
+    // blocklist, and the chain is checked against it.
     @Test
-    void checagemDoAliasNaoReleOBlocksJsonDeNovo() throws Exception {
-        FakeUpstream upstream = upstreamComCadeia(
-                new String[]{"alias.test", "alvo.test"}, DnsQuery.TYPE_A, IP_REAL);
-        Path estado = DnsTestSupport.arquivoDeBloqueios(tmp, "alvo.test");
-        ContadorDeLeituras store = new ContadorDeLeituras(estado);
-        DnsServer server = subir(upstream, store, "alvo.test");
+    void aliasCheckDoesNotRereadBlocksJson() throws Exception {
+        FakeUpstream upstream = upstreamWithChain(
+                new String[]{"alias.test", "target.test"}, DnsQuery.TYPE_A, REAL_IP);
+        Path state = DnsTestSupport.blocksFile(tmp, "target.test");
+        CountingBlockStore store = new CountingBlockStore(state);
+        DnsServer server = startServer(upstream, store, "target.test");
         try {
-            store.zerar();
-            byte[] bruto = DnsTestSupport.consultar(server.getPort(),
+            store.reset();
+            byte[] raw = DnsTestSupport.query(server.getPort(),
                     DnsWire.query(0x9999, "alias.test", DnsQuery.TYPE_A), 3000);
-            assertNotNull(bruto, "o servidor não respondeu");
-            assertEquals(1, store.leituras(),
-                    "o blocks.json pode ser lido uma vez por consulta — a checagem do alias "
-                            + "tem que usar a mesma lista");
+            assertNotNull(raw, "the server did not respond");
+            assertEquals(1, store.reads(),
+                    "blocks.json may be read once per query — the alias check must use "
+                            + "the same list");
         } finally {
             server.stop();
             upstream.close();
         }
     }
 
-    // BlockStore que conta as leituras do arquivo de estado.
-    private static final class ContadorDeLeituras extends BlockStore {
+    // BlockStore that counts reads of the state file.
+    private static final class CountingBlockStore extends BlockStore {
 
-        private final AtomicInteger leituras = new AtomicInteger();
+        private final AtomicInteger reads = new AtomicInteger();
 
-        ContadorDeLeituras(Path arquivo) {
-            super(arquivo);
+        CountingBlockStore(Path file) {
+            super(file);
         }
 
         @Override
         public Map<String, BlockEntry> load() throws IOException {
-            leituras.incrementAndGet();
+            reads.incrementAndGet();
             return super.load();
         }
 
-        int leituras() {
-            return leituras.get();
+        int reads() {
+            return reads.get();
         }
 
-        void zerar() {
-            leituras.set(0);
+        void reset() {
+            reads.set(0);
         }
     }
 }

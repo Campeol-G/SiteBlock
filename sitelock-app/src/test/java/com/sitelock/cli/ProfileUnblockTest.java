@@ -15,17 +15,17 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * profile unblock — duas camadas de resistência, e elas não são a mesma coisa.
+ * profile unblock — two layers of resistance, and they are not the same thing.
  *
- * <p>A externa é o {@code --force}: sem ele, qualquer domínio do perfil que
- * esteja ativo faz o comando recusar tudo. A interna é a confirmação digitada,
- * uma só, antes de tocar em qualquer domínio — 40 prompts de "SIM" são
- * exatamente o atrito que a feature existe para remover.
+ * <p>The outer one is {@code --force}: without it, any active domain in the
+ * profile makes the command refuse everything. The inner one is the typed
+ * confirmation, a single one, before touching any domain — 40 "YES" prompts are
+ * exactly the friction the feature exists to remove.
  *
- * <p>Os permanentes entram na confirmação porque um bloqueio permanente é o
- * compromisso mais forte que a pessoa assumiu, não o mais fraco. Soltá-lo
- * calado seria o caminho mais curto para descartar uma trava ilimitada sem
- * digitar uma tecla.
+ * <p>Permanent blocks enter the confirmation because a permanent block is the
+ * strongest commitment the person made, not the weakest. Releasing it silently
+ * would be the shortest path to discarding an unlimited lock without typing a
+ * key.
  */
 class ProfileUnblockTest {
 
@@ -33,6 +33,7 @@ class ProfileUnblockTest {
     Path tmp;
 
     private Path hosts;
+
     private Path hosts() throws Exception {
         if (hosts == null) {
             hosts = tmp.resolve("hosts");
@@ -45,16 +46,16 @@ class ProfileUnblockTest {
         return tmp.resolve("state/blocks.json").toString();
     }
 
-    private int block(String duracao, String... domains) throws Exception {
-        return new BlockCommand(List.of(domains), duracao, hosts().toString(), state()).call();
+    private int block(String duration, String... domains) throws Exception {
+        return new BlockCommand(List.of(domains), duration, hosts().toString(), state()).call();
     }
 
-    private int save(String nome) throws Exception {
-        return new ProfileSaveCommand(nome, false, hosts().toString(), state()).call();
+    private int save(String name) throws Exception {
+        return new ProfileSaveCommand(name, false, hosts().toString(), state()).call();
     }
 
-    private int unblock(String nome, boolean force, String answer) throws Exception {
-        return new ProfileUnblockCommand(nome, force, hosts().toString(), state(), answer).call();
+    private int unblock(String name, boolean force, String answer) throws Exception {
+        return new ProfileUnblockCommand(name, force, hosts().toString(), state(), answer).call();
     }
 
     private String blocks() throws Exception {
@@ -68,43 +69,43 @@ class ProfileUnblockTest {
     @Test
     void refusesWithoutForceWhenTemporaryIsActive() throws Exception {
         assertEquals(0, block("4h", "tiktok.com"));
-        assertEquals(0, save("trabalho"));
-        String antes = blocks();
+        assertEquals(0, save("work"));
+        String before = blocks();
 
-        assertEquals(3, unblock("trabalho", false, "SIM"));
-        assertEquals(antes, blocks());
+        assertEquals(3, unblock("work", false, "YES"));
+        assertEquals(before, blocks());
     }
 
     @Test
     void refusesWithoutForceWhenOnlyPermanentsAreBlocked() throws Exception {
         assertEquals(0, block(null, "tiktok.com", "youtube.com"));
-        assertEquals(0, save("permanentes"));
-        String antes = blocks();
+        assertEquals(0, save("permanent"));
+        String before = blocks();
 
-        assertEquals(3, unblock("permanentes", false, "SIM"));
+        assertEquals(3, unblock("permanent", false, "YES"));
 
-        assertEquals(antes, blocks(),
-                "sem --force, um perfil só de travas ilimitadas não sai — nem com SIM na mão");
+        assertEquals(before, blocks(),
+                "without --force, a profile of unlimited locks does not leave — not even with YES in hand");
     }
 
     @Test
     void wrongConfirmationUnblocksNothing() throws Exception {
         assertEquals(0, block("4h", "tiktok.com"));
-        assertEquals(0, save("trabalho"));
-        String antes = blocks();
+        assertEquals(0, save("work"));
+        String before = blocks();
 
-        assertEquals(3, unblock("trabalho", true, ""));
+        assertEquals(3, unblock("work", true, ""));
 
-        assertEquals(antes, blocks());
-        assertTrue(hostsContent().contains("tiktok.com"), "o hosts não pode ser tocado");
+        assertEquals(before, blocks());
+        assertTrue(hostsContent().contains("tiktok.com"), "the hosts file must not be touched");
     }
 
     @Test
     void confirmationUnblocksEveryDomain() throws Exception {
         assertEquals(0, block("4h", "tiktok.com", "youtube.com"));
-        assertEquals(0, save("trabalho"));
+        assertEquals(0, save("work"));
 
-        assertEquals(0, unblock("trabalho", true, "SIM"));
+        assertEquals(0, unblock("work", true, "YES"));
 
         assertFalse(blocks().contains("tiktok.com"), blocks());
         assertFalse(blocks().contains("youtube.com"), blocks());
@@ -114,85 +115,86 @@ class ProfileUnblockTest {
     @Test
     void permanentsAreListedInTheConfirmation() throws Exception {
         assertEquals(0, block(null, "tiktok.com"));
-        assertEquals(0, save("permanentes"));
+        assertEquals(0, save("permanent"));
 
-        String saida = capture(() -> unblock("permanentes", true, "SIM"));
+        String output = capture(() -> unblock("permanent", true, "YES"));
 
-        assertTrue(saida.contains("tiktok.com"), saida);
-        assertTrue(saida.contains("permanente"), saida);
+        assertTrue(output.contains("tiktok.com"), output);
+        assertTrue(output.contains("permanent"), output);
     }
 
     @Test
     void onlyOnePromptForManyDomains() throws Exception {
-        String[] muitos = new String[12];
-        for (int i = 0; i < muitos.length; i++) {
-            muitos[i] = "site" + i + ".com";
+        String[] many = new String[12];
+        for (int i = 0; i < many.length; i++) {
+            many[i] = "site" + i + ".com";
         }
-        assertEquals(0, block("4h", muitos));
-        assertEquals(0, save("enorme"));
+        assertEquals(0, block("4h", many));
+        assertEquals(0, save("huge"));
 
-        String saida = capture(() -> unblock("enorme", true, "SIM"));
+        String output = capture(() -> unblock("huge", true, "YES"));
 
-        assertEquals(1, count(saida, "digite SIM"), "uma pergunta só, não uma por domínio:\n" + saida);
+        assertEquals(1, count(output, "type YES"),
+                "one question, not one per domain:\n" + output);
     }
 
     @Test
     void expiredDomainsPassWithoutPrompt() throws Exception {
-        // Bloqueio temporário que já venceu: o sweep o remove no começo do
-        // comando, então ele nem aparece na confirmação.
+        // A temporary block that has already expired: the sweep removes it at the
+        // start of the command, so it does not even appear in the confirmation.
         assertEquals(0, block("4h", "tiktok.com"));
-        assertEquals(0, save("trabalho"));
-        envenenar("tiktok.com");
+        assertEquals(0, save("work"));
+        poisonExpiration("tiktok.com");
 
-        String saida = capture(() -> unblock("trabalho", true, "SIM"));
+        String output = capture(() -> unblock("work", true, "YES"));
 
-        assertFalse(saida.contains("tiktok.com"), "já expirado não entra na lista: " + saida);
+        assertFalse(output.contains("tiktok.com"), "an expired domain does not enter the list: " + output);
         assertFalse(blocks().contains("tiktok.com"));
     }
 
     @Test
     void emptyTargetListDoesNotAskAnything() throws Exception {
-        // Um perfil sem nada bloqueado não existe: o save recusa.
-        assertEquals(1, save("vazio"),
-                "sem bloqueio ativo não há o que salvar: o save tem que falhar");
+        // A profile with nothing blocked does not exist: save refuses.
+        assertEquals(1, save("empty"),
+                "with no active block there is nothing to save: save must fail");
         assertEquals(0, block(null, "tiktok.com"));
-        assertEquals(0, save("so-tiktok"));
+        assertEquals(0, save("only-tiktok"));
 
-        // O perfil só tem tiktok, que já foi solto: a lista fica vazia.
-        assertEquals(0, unblock("so-tiktok", true, "SIM"));
-        String saida = capture(() -> unblock("so-tiktok", false, null));
+        // The profile only has tiktok, which has already been released: the list is empty.
+        assertEquals(0, unblock("only-tiktok", true, "YES"));
+        String output = capture(() -> unblock("only-tiktok", false, null));
 
-        assertFalse(saida.contains("digite SIM"), "lista vazia não pergunta nada: " + saida);
-        assertTrue(saida.contains("Nada a fazer"),
-                "lista vazia tem que dizer que não há o que fazer: " + saida);
-        assertEquals(0, unblock("so-tiktok", false, null),
-                "e sem --force também, porque não há nada a perder");
+        assertFalse(output.contains("type YES"), "an empty list asks nothing: " + output);
+        assertTrue(output.contains("Nothing to do"),
+                "an empty list must say there is nothing to do: " + output);
+        assertEquals(0, unblock("only-tiktok", false, null),
+                "and without --force either, because there is nothing to lose");
     }
 
     @Test
     void refusesWhenHostsIsNotWritable() throws Exception {
-        // Sem esta trava o pior desfecho é silencioso: o estado é gravado, a
-        // escrita no hosts falha, e o domínio fica preso sem registro em lugar
-        // nenhum — todo comando passa a dizer "não está bloqueado".
+        // Without this gate the worst outcome is silent: the state is saved, the
+        // hosts write fails, and the domain stays stuck with no record anywhere —
+        // every command then says "not blocked".
         assertEquals(0, block(null, "tiktok.com"));
-        assertEquals(0, save("trabalho"));
-        String antes = blocks();
+        assertEquals(0, save("work"));
+        String before = blocks();
 
-        Path semGravacao = tmp.resolve("sem-pai/hosts");
-        int exit = new ProfileUnblockCommand("trabalho", true, semGravacao.toString(),
-                state(), "SIM").call();
+        Path unwritable = tmp.resolve("no-parent/hosts");
+        int exit = new ProfileUnblockCommand("work", true, unwritable.toString(),
+                state(), "YES").call();
 
         assertEquals(1, exit);
-        assertEquals(antes, blocks(), "o estado não pode ser apagado se o hosts não aceitou");
+        assertEquals(before, blocks(), "the state must not be deleted if the hosts file refused");
     }
 
     @Test
     void rollbackWhenUnblockAllFails() throws Exception {
         assertEquals(0, block("4h", "tiktok.com"));
-        assertEquals(0, save("trabalho"));
-        String antes = blocks();
+        assertEquals(0, save("work"));
+        String before = blocks();
 
-        com.sitelock.blocker.SiteBlocker falho = new com.sitelock.blocker.SiteBlocker() {
+        com.sitelock.blocker.SiteBlocker failingBlocker = new com.sitelock.blocker.SiteBlocker() {
             @Override
             public void block(String domain) {
             }
@@ -207,36 +209,36 @@ class ProfileUnblockTest {
 
             @Override
             public void unblockAll(List<String> domains) throws java.io.IOException {
-                throw new java.io.IOException("hosts somente leitura");
+                throw new java.io.IOException("hosts file is read-only");
             }
         };
 
-        int exit = new ProfileUnblockCommand("trabalho", true, hosts().toString(),
-                state(), "SIM", falho).call();
+        int exit = new ProfileUnblockCommand("work", true, hosts().toString(),
+                state(), "YES", failingBlocker).call();
 
         assertEquals(1, exit);
-        assertEquals(antes, blocks(),
-                "se o hosts não aceitou, o estado tem que voltar — senão o domínio fica preso");
+        assertEquals(before, blocks(),
+                "if the hosts file refused, the state must return — otherwise the domain stays stuck");
     }
 
     @Test
     void unknownProfileFails() throws Exception {
-        String saida = capture(() -> unblock("nao-existe", true, "SIM"));
+        String output = capture(() -> unblock("missing", true, "YES"));
 
-        assertEquals(1, unblock("nao-existe", true, "SIM"));
-        assertTrue(saida.contains("não existe"),
-                "a recusa tem que dizer que o perfil não existe: " + saida);
+        assertEquals(1, unblock("missing", true, "YES"));
+        assertTrue(output.contains("does not exist"),
+                "the refusal must say that the profile does not exist: " + output);
     }
 
-    // Troca o expiresAt do domínio por um instante já vencido.
-    private void envenenar(String domain) throws Exception {
+    // Replaces the domain's expiresAt with an instant that has already passed.
+    private void poisonExpiration(String domain) throws Exception {
         String json = blocks();
-        int chave = json.indexOf("\"" + domain + "\"");
-        int expira = json.indexOf("\"expiresAt\"", chave);
-        int doisPontos = json.indexOf(':', expira);
-        int fim = json.indexOf('\n', doisPontos);
-        json = json.substring(0, doisPontos) + ": \"2020-01-01T00:00:00Z\""
-                + json.substring(fim < 0 ? json.length() : fim);
+        int domainKey = json.indexOf("\"" + domain + "\"");
+        int expires = json.indexOf("\"expiresAt\"", domainKey);
+        int colon = json.indexOf(':', expires);
+        int end = json.indexOf('\n', colon);
+        json = json.substring(0, colon) + ": \"2020-01-01T00:00:00Z\""
+                + json.substring(end < 0 ? json.length() : end);
         Files.writeString(Path.of(state()), json, StandardCharsets.UTF_8);
     }
 
@@ -250,7 +252,7 @@ class ProfileUnblockTest {
         return n;
     }
 
-    // Captura stdout e stderr: as recusas do comando saem no stderr.
+    // Captures stdout and stderr: the command's refusals go to stderr.
     private static String capture(ThrowingRunnable r) throws Exception {
         PrintStream original = System.out;
         PrintStream originalErr = System.err;

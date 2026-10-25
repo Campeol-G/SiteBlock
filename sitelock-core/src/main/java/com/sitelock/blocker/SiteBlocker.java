@@ -3,23 +3,23 @@ package com.sitelock.blocker;
 import java.io.IOException;
 import java.util.List;
 
-/** Estratégia de bloqueio. Implementação atual: arquivo hosts do sistema. */
+/** Blocking strategy. Current implementation: system hosts file. */
 public interface SiteBlocker {
 
-    /** Bloqueia o domínio (o implementador cobre as variantes com/sem www). */
+    /** Blocks the domain (the implementer covers variants with/without www). */
     void block(String domain) throws IOException;
 
-    /** Remove o bloqueio do domínio. */
+    /** Removes the block for the domain. */
     void unblock(String domain) throws IOException;
 
-    // POR QUE: sem default de propósito — a interface tem uma única implementação,
-    // e forçar o compilador a achar os dois métodos é mais barato que caçar um
-    // UnsupportedOperationException em produção.
+    // WHY: no default on purpose — the interface has a single implementation,
+    // and forcing the compiler to find both methods is cheaper than hunting an
+    // UnsupportedOperationException in production.
     /**
-     * Bloqueia vários domínios de uma vez.
+     * Blocks several domains at once.
      */
     void blockAll(List<String> domains) throws IOException;
 
-    /** Remove o bloqueio de vários domínios de uma vez. */
+    /** Removes the block for several domains at once. */
     void unblockAll(List<String> domains) throws IOException;
 }

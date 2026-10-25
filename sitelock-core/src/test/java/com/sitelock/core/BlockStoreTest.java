@@ -15,7 +15,7 @@ import java.util.TreeMap;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Serialização do blocks.json. */
+/** Serialization of blocks.json. */
 class BlockStoreTest {
 
     @TempDir
@@ -46,7 +46,7 @@ class BlockStoreTest {
     @Test
     void corruptedJsonThrowsWithoutDeletingFile() throws Exception {
         Path stateFile = tmp.resolve("blocks.json");
-        Files.writeString(stateFile, "{ isto não é json !!!", StandardCharsets.UTF_8);
+        Files.writeString(stateFile, "{ this is not json !!!", StandardCharsets.UTF_8);
         BlockStore store = new BlockStore(stateFile);
 
         assertThrows(CorruptedStateException.class, store::load);
@@ -91,19 +91,19 @@ class BlockStoreTest {
 
         Path lock = stateFile.resolveSibling("blocks.json.lock");
         assertTrue(Files.exists(lock));
-        // ATENÇÃO: o lock em modo somente-leitura é comportamento POSIX. No
-        // Windows a permissão não existe e o teste passaria sem verificar nada.
+        // WARNING: read-only lock mode is POSIX behavior. On
+        // Windows the permission does not exist and the test would pass without verifying anything.
         Set<PosixFilePermission> readOnly = Set.of(
                 PosixFilePermission.OWNER_READ, PosixFilePermission.GROUP_READ,
                 PosixFilePermission.OTHERS_READ);
-        Assumptions.assumeTrue(suportaPosix(lock),
-                "o filesystem não suporta permissão POSIX");
+        Assumptions.assumeTrue(supportsPosix(lock),
+                "the filesystem does not support POSIX permissions");
         Files.setPosixFilePermissions(lock, readOnly);
         assertEquals(1, new BlockStore(stateFile).load().size());
     }
 
-    // true se o filesystem aceita permissão POSIX.
-    private static boolean suportaPosix(Path path) {
+    // true if the filesystem accepts POSIX permissions.
+    private static boolean supportsPosix(Path path) {
         try {
             Files.setPosixFilePermissions(path, Files.getPosixFilePermissions(path));
             return true;

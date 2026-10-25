@@ -7,46 +7,47 @@ import java.net.InetAddress;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-// O endereço que a CLI manda o usuário configurar no celular. Um link-local
-// (169.254/16 — hotspot, PPPoE) não é roteável: o celular apontado para ele não
-// resolve nada, e a CLI imprimia "configure o DNS manualmente para 169.254.210.73".
+// The address the CLI tells the user to configure on their phone. A link-local
+// address (169.254/16 — hotspot, PPPoE) is not routable: a phone pointed at it
+// resolves nothing, and the CLI used to print
+// "set DNS manually to 169.254.210.73".
 class NetworkUtilsTest {
 
-    private static InetAddress ip(String texto) throws Exception {
-        return InetAddress.getByName(texto);
+    private static InetAddress ip(String text) throws Exception {
+        return InetAddress.getByName(text);
     }
 
     @Test
-    void linkLocalNaoServeParaApontarDns() throws Exception {
-        assertFalse(NetworkUtils.serveParaApontarDns(ip("169.254.210.73")),
-                "link-local não é roteável");
-        assertFalse(NetworkUtils.serveParaApontarDns(ip("169.254.0.1")),
-                "link-local não é roteável");
-        assertFalse(NetworkUtils.serveParaApontarDns(ip("0.0.0.0")),
-                "any-local não é endereço de ninguém");
+    void linkLocalIsNotUsableAsDnsAddress() throws Exception {
+        assertFalse(NetworkUtils.isUsableAsDnsAddress(ip("169.254.210.73")),
+                "link-local is not routable");
+        assertFalse(NetworkUtils.isUsableAsDnsAddress(ip("169.254.0.1")),
+                "link-local is not routable");
+        assertFalse(NetworkUtils.isUsableAsDnsAddress(ip("0.0.0.0")),
+                "any-local is nobody's address");
     }
 
     @Test
-    void enderecoPrivadoServeParaApontarDns() throws Exception {
-        assertTrue(NetworkUtils.serveParaApontarDns(ip("192.168.1.13")));
-        assertTrue(NetworkUtils.serveParaApontarDns(ip("10.0.0.5")));
-        assertTrue(NetworkUtils.serveParaApontarDns(ip("172.17.0.1")));
+    void privateAddressIsUsableAsDnsAddress() throws Exception {
+        assertTrue(NetworkUtils.isUsableAsDnsAddress(ip("192.168.1.13")));
+        assertTrue(NetworkUtils.isUsableAsDnsAddress(ip("10.0.0.5")));
+        assertTrue(NetworkUtils.isUsableAsDnsAddress(ip("172.17.0.1")));
     }
 
     @Test
-    void loopbackNaoServeParaApontarDns() throws Exception {
-        // O loopback é local, mas apontar o celular para ele não funciona:
-        // o 127.0.0.1 do celular é o próprio celular.
-        assertFalse(NetworkUtils.serveParaApontarDns(ip("127.0.0.1")));
+    void loopbackIsNotUsableAsDnsAddress() throws Exception {
+        // Loopback is local, but pointing a phone at it does not work: the phone's
+        // own 127.0.0.1 is the phone itself.
+        assertFalse(NetworkUtils.isUsableAsDnsAddress(ip("127.0.0.1")));
     }
 
     @Test
-    void nenhumEnderecoListadoEhLinkLocal() {
-        for (String endereco : NetworkUtils.localIPv4Addresses()) {
-            assertFalse(endereco.startsWith("169.254."),
-                    "link-local não pode ser oferecido ao usuário: " + endereco);
-            assertFalse(endereco.equals("0.0.0.0"),
-                    "any-local não pode ser oferecido ao usuário: " + endereco);
+    void noListedAddressIsLinkLocal() {
+        for (String address : NetworkUtils.localIPv4Addresses()) {
+            assertFalse(address.startsWith("169.254."),
+                    "link-local must not be offered to the user: " + address);
+            assertFalse(address.equals("0.0.0.0"),
+                    "any-local must not be offered to the user: " + address);
         }
     }
 }

@@ -9,28 +9,28 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
-// FIXME (2026-10-21, @ChicoMagnusOpus): a execução real do flush não é testada
-// no CI em todos os SOs (exigiria runners Windows/macOS + permissões) — os testes
-// cobrem só a seleção dos comandos por SO. Validar manualmente.
+// FIXME (2026-10-21, @ChicoMagnusOpus): the real flush execution is not tested
+// on CI on every OS (it would require Windows/macOS runners + permissions) — the
+// tests cover only the per-OS command selection. Validate manually.
 /**
- * Limpeza do cache de DNS após modificações no hosts — etapa best-effort.
+ * DNS cache cleanup after hosts modifications — a best-effort step.
  *
- * <p>Falha no flush <b>nunca</b> impede o bloqueio de ter sido salvo: só gera o
- * aviso {@link PermissionAdvisor#dnsFlushFailureWarning()}. Comandos executados
- * via {@link ProcessBuilder}, com exit code e stderr capturados e timeout de 10s.
+ * <p>A flush failure <b>never</b> prevents the block from being saved: it only produces the
+ * {@link PermissionAdvisor#dnsFlushFailureWarning()} warning. Commands are run
+ * via {@link ProcessBuilder}, with exit code and stderr captured and a 10s timeout.
  *
  * <ul>
- *   <li>Linux: tenta {@code systemd-resolve --flush-caches}; se falhar
- *       (comando ausente em distros sem systemd-resolved), tenta
- *       {@code resolvectl flush-caches}. Se ambos falharem, avisa que pode ser
- *       preciso reiniciar o navegador.</li>
+ *   <li>Linux: tries {@code systemd-resolve --flush-caches}; if that fails
+ *       (command missing on distros without systemd-resolved), tries
+ *       {@code resolvectl flush-caches}. If both fail, it warns that the browser may need
+ *       to be restarted.</li>
  *   <li>macOS: {@code dscacheutil -flushcache} + {@code killall -HUP mDNSResponder}.</li>
  *   <li>Windows: {@code ipconfig /flushdns}.</li>
  * </ul>
  */
 public final class DnsCacheFlusher {
 
-    /** Executa um comando e devolve o exit code (injetável para testes). */
+    /** Runs a command and returns the exit code (injectable for tests). */
     public interface CommandRunner extends com.sitelock.core.CommandRunner {
     }
 
@@ -43,80 +43,80 @@ public final class DnsCacheFlusher {
     private final CommandRunner runner;
     private final boolean privileged;
 
-    /** Usa o SO real e execução via {@link ProcessBuilder}. */
+    /** Uses the real OS and runs via {@link ProcessBuilder}. */
     public DnsCacheFlusher() {
         this(OsType.detect(), isPrivilegedProcess(), DnsCacheFlusher::runWithProcessBuilder);
     }
 
-    /** Injeta o SO (produção com SO simulado / testes). */
+    /** Injects the OS (production with a simulated OS / tests). */
     public DnsCacheFlusher(OsType osType) {
         this(osType, isPrivilegedProcess(), DnsCacheFlusher::runWithProcessBuilder);
     }
 
-    /** Injeta o valor de {@code os.name} (para testes dos três ramos). */
+    /** Injects the {@code os.name} value (for tests of the three branches). */
     public DnsCacheFlusher(String osName) {
         this(OsType.detect(osName), isPrivilegedProcess(), DnsCacheFlusher::runWithProcessBuilder);
     }
 
-    // Injeta SO + runner (os testes usam um fake, sem processo real).
+    // Injects OS + runner (tests use a fake, with no real process).
     DnsCacheFlusher(OsType osType, CommandRunner runner) {
         this(osType, isPrivilegedProcess(), runner);
     }
 
-    // Injeta SO + privilégio + runner. É este construtor que os testes usam
-    // para provar a regra que importa: sem root, nada é tentado.
+    // Injects OS + privilege + runner. This is the constructor the tests use
+    // to prove the rule that matters: without root, nothing is attempted.
     DnsCacheFlusher(OsType osType, boolean privileged, CommandRunner runner) {
         this.osType = osType == null ? OsType.UNKNOWN : osType;
         this.privileged = privileged;
         this.runner = runner == null ? DnsCacheFlusher::runWithProcessBuilder : runner;
     }
 
-    // POR QUE: no Unix só o root faz o flush do resolved ser possível — fora
-    // dele, o systemd-resolved aceita a chamada e o polkit abre um diálogo
-    // pedindo a senha, e um passo opcional não pode travar esperando senha.
+    // WHY: on Unix only root can make the resolved flush happen — outside
+    // of it, systemd-resolved accepts the call and polkit opens a dialog
+    // asking for the password, and an optional step must not block waiting for a password.
     static boolean isPrivilegedProcess() {
         return "root".equals(System.getProperty("user.name", ""));
     }
 
     /**
-     * Se este processo pode tentar o flush sem abrir diálogo de autenticação.
-     * Windows não tem polkit: lá o flush é sempre tentado, e só depende de o
-     * processo já ser administrador.
+     * Whether this process can attempt the flush without opening an authentication dialog.
+     * Windows has no polkit: there the flush is always attempted, and it only depends on the
+     * process already being an administrator.
      */
     public boolean isPrivileged() {
         return privileged || osType.isWindows();
     }
 
-    // Comandos tentados em ordem para o SO corrente (exposto para testes).
+    // Commands attempted in order for the current OS (exposed for tests).
     List<List<String>> commandsForCurrentOs() {
         return commandsFor(osType);
     }
 
-    // Seleção de comandos por SO — pura, sem executar nada.
+    // Per-OS command selection — pure, runs nothing.
     static List<List<String>> commandsFor(OsType os) {
         if (os != null && os.isWindows()) {
             return List.of(List.of("ipconfig", "/flushdns"));
         }
         if (os != null && os.isMac()) {
-            // Equivale a: dscacheutil -flushcache && killall -HUP mDNSResponder
+            // Equivalent to: dscacheutil -flushcache && killall -HUP mDNSResponder
             return List.of(List.of("sh", "-c", "dscacheutil -flushcache && killall -HUP mDNSResponder"));
         }
-        // Linux e UNKNOWN: tenta systemd-resolve, depois resolvectl.
+        // Linux and UNKNOWN: tries systemd-resolve, then resolvectl.
         return List.of(
                 List.of("systemd-resolve", "--flush-caches"),
                 List.of("resolvectl", "flush-caches"));
     }
 
     /**
-     * Executa o flush. Nunca lança exceção para o chamador do CLI:
-     * devolve {@link FlushResult} e quem chama decide logar o aviso.
+     * Runs the flush. Never throws to the CLI caller:
+     * returns a {@link FlushResult} and the caller decides whether to log the warning.
      */
     public FlushResult flush() {
         List<List<String>> commands = commandsForCurrentOs();
         if (!isPrivileged()) {
-            // Sem elevação nada é tentado: no Linux e no macOS a chamada passa
-            // por systemd-resolved/dscacheutil, que abrem um pedido de senha
-            // (polkit) para completar um passo que é opcional.
+            // Without elevation nothing is attempted: on Linux and macOS the call goes
+            // through systemd-resolved/dscacheutil, which open a password prompt
+            // (polkit) to complete a step that is optional.
             return new FlushResult(false, "");
         }
         List<String> errors = new ArrayList<>();
@@ -128,21 +128,21 @@ public final class DnsCacheFlusher {
                 }
                 errors.add(String.join(" ", cmd) + " (exit " + exit + ")");
             } catch (IOException e) {
-                // Comando ausente ou com falha (ex.: sem systemd-resolved) — tenta o próximo.
+                // Command missing or failing (e.g. no systemd-resolved) — try the next one.
                 errors.add(String.join(" ", cmd) + " (" + e.getMessage() + ")");
             } catch (Exception e) {
-                errors.add(String.join(" ", cmd) + " (erro: " + e.getMessage() + ")");
+                errors.add(String.join(" ", cmd) + " (error: " + e.getMessage() + ")");
             }
         }
-        // No Linux, esgotar as duas variantes ainda é "aviso", não erro fatal.
+        // On Linux, exhausting both variants is still a "warning", not a fatal error.
         return new FlushResult(false, String.join("; ", errors));
     }
 
     /**
-     * Atalho best-effort para os comandos CLI: executa e, se falhar, imprime o
-     * aviso padrão no stderr sem lançar exceção e sem mudar o exit code do comando.
+     * Best-effort shortcut for the CLI commands: runs it and, on failure, prints the
+     * standard warning to stderr without throwing and without changing the command's exit code.
      *
-     * @return true se o flush funcionou, false se só avisou.
+     * @return true if the flush worked, false if it only warned.
      */
     public boolean flushBestEffort() {
         FlushResult r;
@@ -152,17 +152,17 @@ public final class DnsCacheFlusher {
             r = new FlushResult(false, String.valueOf(e.getMessage()));
         }
         if (!r.success()) {
-            System.err.println("Aviso: " + PermissionAdvisor.dnsFlushFailureWarning());
+            System.err.println("Warning: " + PermissionAdvisor.dnsFlushFailureWarning());
             if (r.detail() != null && !r.detail().isBlank()) {
                 System.err.println("(flush DNS: " + r.detail() + ")");
             } else if (!isPrivileged()) {
-                // Detalhe honesto: não tentamos nada porque falta elevação. Culpar
-                // "Permission denied" aqui sugeriria que o bloqueio falhou, e ele
-                // não falhou — quem roda privileged não chega neste caminho.
-                System.err.println("(flush DNS: só roda com elevação; o bloqueio em si foi salvo.)");
+                // Honest detail: we attempted nothing because elevation is missing. Blaming
+                // "Permission denied" here would suggest the block failed, and it
+                // did not — whoever runs privileged never reaches this path.
+                System.err.println("(flush DNS: only runs with elevation; the block itself was saved.)");
             } else if (osType == OsType.LINUX || osType == OsType.UNKNOWN) {
-                System.err.println("(flush DNS: tente 'systemd-resolve --flush-caches' ou "
-                        + "'resolvectl flush-caches'; se ausentes, reinicie o navegador.)");
+                System.err.println("(flush DNS: try 'systemd-resolve --flush-caches' or "
+                        + "'resolvectl flush-caches'; if missing, restart the browser.)");
             }
         }
         return r.success();
@@ -179,16 +179,16 @@ public final class DnsCacheFlusher {
         try {
             p = pb.start();
         } catch (IOException e) {
-            throw new IOException("comando não encontrado: " + command.get(0).toLowerCase(Locale.ROOT), e);
+            throw new IOException("command not found: " + command.get(0).toLowerCase(Locale.ROOT), e);
         }
-        // A saída é drenada em paralelo ao waitFor. Drenar depois de esperar
-        // trava quando o comando escreve mais que o buffer do pipe.
+        // Output is drained in parallel with waitFor. Draining after waiting
+        // blocks when the command writes more than the pipe buffer.
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         Thread drain = Thread.ofVirtual().name("dns-flush-output").start(() -> {
             try (InputStream in = p.getInputStream()) {
                 in.transferTo(buffer);
             } catch (IOException ignored) {
-                // O timeout/exit code já diz o que importa; saída parcial é detalhe.
+                // The timeout/exit code already says what matters; partial output is a detail.
             }
         });
         boolean done;
@@ -197,15 +197,15 @@ public final class DnsCacheFlusher {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             p.destroyForcibly();
-            aguardarDrenagem(drain);
-            throw new IOException("timeout aguardando flush de DNS", e);
+            awaitDrain(drain);
+            throw new IOException("timeout waiting for DNS flush", e);
         }
         if (!done) {
             p.destroyForcibly();
-            aguardarDrenagem(drain);
-            throw new IOException("timeout (> " + TIMEOUT_SECONDS + "s) no flush de DNS");
+            awaitDrain(drain);
+            throw new IOException("timeout (> " + TIMEOUT_SECONDS + "s) on DNS flush");
         }
-        aguardarDrenagem(drain);
+        awaitDrain(drain);
         String out = buffer.toString(StandardCharsets.UTF_8);
         int exit = p.exitValue();
         if (exit != 0 && !out.isBlank()) {
@@ -214,7 +214,7 @@ public final class DnsCacheFlusher {
         return exit;
     }
 
-    private static void aguardarDrenagem(Thread drain) {
+    private static void awaitDrain(Thread drain) {
         try {
             drain.join(1000);
         } catch (InterruptedException e) {

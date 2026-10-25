@@ -3,14 +3,14 @@ package com.sitelock.core;
 import java.util.Locale;
 
 /**
- * Sistema operacional normalizado a partir de {@code os.name}.
+ * Operating system normalized from {@code os.name}.
  *
- * <p>Centraliza a detecção para que {@link HostsFileLocator},
- * {@link PermissionAdvisor} e {@link DnsCacheFlusher} decidam o comportamento
- * por SO num único ponto, em vez de espalhar {@code System.getProperty("os.name")}
- * pelo código.
+ * <p>Detection is centralized so that {@link HostsFileLocator},
+ * {@link PermissionAdvisor} and {@link DnsCacheFlusher} decide behavior
+ * per OS in a single place, instead of spreading {@code System.getProperty("os.name")}
+ * across the code.
  *
- * <p>Detecção case-insensitive, cobrindo variações comuns:
+ * <p>Case-insensitive detection, covering common variations:
  * "Windows 10", "Windows 11", "Mac OS X", "Darwin", "Linux".
  */
 public enum OsType {
@@ -19,16 +19,16 @@ public enum OsType {
     WINDOWS,
     UNKNOWN;
 
-    /** Detecta a partir do {@code os.name} real da JVM. */
+    /** Detects from the JVM's real {@code os.name}. */
     public static OsType detect() {
         return detect(System.getProperty("os.name", ""));
     }
 
-    // ATENÇÃO: "darwin" contém "win" como substring, então mac/darwin é testado
-    // antes de win.
+    // WARNING: "darwin" contains "win" as a substring, so mac/darwin is tested
+    // before win.
     /**
-     * Detecta a partir de um valor injetado de {@code os.name}.
-     * Existe para permitir testes unitários dos três ramos em qualquer máquina.
+     * Detects from an injected {@code os.name} value.
+     * Exists to allow unit tests of the three branches on any machine.
      */
     public static OsType detect(String osName) {
         String n = osName == null ? "" : osName.toLowerCase(Locale.ROOT);
@@ -52,7 +52,7 @@ public enum OsType {
         return this == MACOS;
     }
 
-    /** Linux + macOS + UNKNOWN (comportamento Unix-like por padrão). */
+    /** Linux + macOS + UNKNOWN (Unix-like behavior by default). */
     public boolean isUnixLike() {
         return this == LINUX || this == MACOS || this == UNKNOWN;
     }

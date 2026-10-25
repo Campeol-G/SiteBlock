@@ -10,18 +10,18 @@ import java.nio.file.Path;
 import java.util.concurrent.Callable;
 
 /**
- * siteblock daemon disable — desliga o autostart.
+ * siteblock daemon disable — turns autostart off.
  *
- * <p>Simétrico ao {@code enable}: remove o artefato e desliga o agendador.
+ * <p>Symmetrical to {@code enable}: removes the artifact and disables the scheduler.
  */
 @Command(name = "disable",
-        description = "Remove o daemon de expiracao do boot.",
+        description = "Removes the expiration daemon from boot.",
         mixinStandardHelpOptions = true)
 public class DaemonDisableCommand implements Callable<Integer> {
 
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
 
-    // Injetados para teste; null = SO e raiz reais.
+    // Injected for tests; null = real OS and root.
     OsType osOverride;
     Path systemRootOverride;
     CommandRunner runnerOverride;
@@ -42,18 +42,18 @@ public class DaemonDisableCommand implements Callable<Integer> {
 
         AutostartInstaller installer = new AutostartInstaller(os, systemRoot, runnerOverride);
         if (!AutostartInstaller.isEnabled(os, systemRoot)) {
-            System.out.println("O autostart do SiteBlock não está instalado.");
+            System.out.println("SiteBlock autostart is not installed.");
             return 0;
         }
 
         AutostartInstaller.InstallResult result = installer.disable();
         if (!result.success()) {
-            System.err.println("Erro ao remover o autostart: " + result.detail());
+            System.err.println("Error removing autostart: " + result.detail());
             return 1;
         }
 
-        System.out.println("Autostart removido. O daemon para de subir sozinho a cada boot.");
-        System.out.println("Um daemon que já estiver rodando continua até: "
+        System.out.println("Autostart removed. The daemon will no longer start by itself on each boot.");
+        System.out.println("A daemon that is already running keeps running until: "
                 + CliSupport.elevatedCommand("daemon stop"));
         return 0;
     }

@@ -21,16 +21,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * O aviso de daemon ausente.
+ * The missing-daemon warning.
  *
- * <p>Sem ele, a feature continua invisível e o comportamento antigo permanece o
- * que a pessoa vai achar normal: digita {@code --for 4h}, o prazo vence, e o
- * site segue preso porque ninguém avisou que era preciso outro comando.
+ * <p>Without it, the feature stays invisible and the old behavior remains what
+ * people assume is normal: they type {@code --for 4h}, the deadline passes, and the
+ * site stays blocked because nobody told them another command was needed.
  *
- * <p>Regra do gatilho: avisa quando <b>não há daemon vivo</b> <b>ou</b> <b>não
- * há autostart instalado</b>. Os dois são defeito do ponto de vista de quem
- * digitou o prazo, e mesmo com autostart instalado o daemon pode estar naquele
- * boot atrasado.
+ * <p>Trigger rule: warn when there is <b>no live daemon</b>. Autostart is not
+ * checked here — even with autostart installed, the daemon may not be up yet on that boot.
  */
 class DaemonWarningTest {
 
@@ -48,16 +46,16 @@ class DaemonWarningTest {
     }
 
     private String state() {
-        return tmp.resolve("estado/blocks.json").toString();
+        return tmp.resolve("state/blocks.json").toString();
     }
 
     private Path daemonJson() {
-        return tmp.resolve("estado/daemon.json");
+        return tmp.resolve("state/daemon.json");
     }
 
-    private Resultado rodar(ThrowingRunnable r) throws Exception {
-        PrintStream outOriginal = System.out;
-        PrintStream errOriginal = System.err;
+    private Result run(ThrowingRunnable r) throws Exception {
+        PrintStream originalOut = System.out;
+        PrintStream originalErr = System.err;
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         PrintStream fake = new PrintStream(buffer, true, StandardCharsets.UTF_8);
         System.setOut(fake);
@@ -65,13 +63,13 @@ class DaemonWarningTest {
         try {
             r.run();
         } finally {
-            System.setOut(outOriginal);
-            System.setErr(errOriginal);
+            System.setOut(originalOut);
+            System.setErr(originalErr);
         }
-        return new Resultado(buffer.toString(StandardCharsets.UTF_8));
+        return new Result(buffer.toString(StandardCharsets.UTF_8));
     }
 
-    private record Resultado(String texto) {
+    private record Result(String text) {
     }
 
     @FunctionalInterface
@@ -79,92 +77,92 @@ class DaemonWarningTest {
         void run() throws Exception;
     }
 
-    private void instalarDaemonVivo() throws Exception {
-        ExpirationDaemonState.write(tmp.resolve("estado"), new ExpirationDaemonState(
-                ProcessHandle.current().pid(), Instant.now(), tmp.resolve("estado").toString(), null));
+    private void installLiveDaemon() throws Exception {
+        ExpirationDaemonState.write(tmp.resolve("state"), new ExpirationDaemonState(
+                ProcessHandle.current().pid(), Instant.now(), tmp.resolve("state").toString(), null));
     }
 
     @Test
     void blockWithDurationWarnsWhenNoDaemonExists() throws Exception {
-        Resultado r = rodar(() -> new BlockCommand(List.of("tiktok.com"), "30m",
+        Result r = run(() -> new BlockCommand(List.of("tiktok.com"), "30m",
                 hosts().toString(), state()).call());
 
-        assertTrue(r.texto().contains("AVISO:"), r.texto());
-        assertTrue(r.texto().contains("daemon enable"),
-                "o aviso precisa dizer o comando: " + r.texto());
-        assertTrue(r.texto().contains("só vai ser aplicado"),
-                "o aviso precisa dizer a consequência real: " + r.texto());
+        assertTrue(r.text().contains("WARNING:"), r.text());
+        assertTrue(r.text().contains("daemon enable"),
+                "the warning must name the command: " + r.text());
+        assertTrue(r.text().contains("only enforced"),
+                "the warning must state the real consequence: " + r.text());
     }
 
     @Test
     void blockPermanentDoesNotWarn() throws Exception {
-        Resultado r = rodar(() -> new BlockCommand(List.of("tiktok.com"), null,
+        Result r = run(() -> new BlockCommand(List.of("tiktok.com"), null,
                 hosts().toString(), state()).call());
 
-        // O bloqueio tem que ter acontecido: sem isso a ausência do aviso
-        // seria verdade por acidente, e não por o bloqueio ser permanente.
-        assertTrue(r.texto().contains("Bloqueado tiktok.com"), r.texto());
-        assertFalse(r.texto().contains("AVISO:"),
-                "bloqueio permanente não tem prazo para vencer: " + r.texto());
+        // The block must have happened: otherwise the absence of the warning
+        // would be true by accident, not because the block is permanent.
+        assertTrue(r.text().contains("Blocked tiktok.com"), r.text());
+        assertFalse(r.text().contains("WARNING:"),
+                "a permanent block has no deadline to expire: " + r.text());
     }
 
     @Test
     void blockDoesNotWarnWhenDaemonIsRunning() throws Exception {
-        instalarDaemonVivo();
+        installLiveDaemon();
 
-        Resultado r = rodar(() -> new BlockCommand(List.of("tiktok.com"), "30m",
+        Result r = run(() -> new BlockCommand(List.of("tiktok.com"), "30m",
                 hosts().toString(), state()).call());
 
-        assertTrue(r.texto().contains("Bloqueado tiktok.com"), r.texto());
-        assertFalse(r.texto().contains("AVISO:"),
-                "com daemon vivo e este teste sem autostart real, o aviso seria ruido: " + r.texto());
+        assertTrue(r.text().contains("Blocked tiktok.com"), r.text());
+        assertFalse(r.text().contains("WARNING:"),
+                "with a live daemon, the warning would be noise: " + r.text());
     }
 
     @Test
     void applyWithTemporaryWarnsWhenNoDaemonExists() throws Exception {
         assertEquals(0, new BlockCommand(List.of("tiktok.com"), "4h", hosts().toString(), state()).call());
-        assertEquals(0, new ProfileSaveCommand("trabalho", false, hosts().toString(), state()).call());
+        assertEquals(0, new ProfileSaveCommand("work", false, hosts().toString(), state()).call());
 
-        Resultado r = rodar(() -> new ProfileApplyCommand("trabalho", hosts().toString(),
+        Result r = run(() -> new ProfileApplyCommand("work", hosts().toString(),
                 state(), null).call());
 
-        assertTrue(r.texto().contains("AVISO:"), r.texto());
-        assertTrue(r.texto().contains("daemon enable"), r.texto());
+        assertTrue(r.text().contains("WARNING:"), r.text());
+        assertTrue(r.text().contains("daemon enable"), r.text());
     }
 
     @Test
     void statusShowsDaemonLineWhenTemporaryIsActive() throws Exception {
         assertEquals(0, new BlockCommand(List.of("tiktok.com"), "4h", hosts().toString(), state()).call());
 
-        Resultado r = rodar(() -> new StatusCommand(hosts().toString(), state()).call());
+        Result r = run(() -> new StatusCommand(hosts().toString(), state()).call());
 
-        assertTrue(r.texto().contains("daemon enable"),
-                "o status tem que dizer o comando que liga o daemon: " + r.texto());
+        assertTrue(r.text().contains("daemon enable"),
+                "status must show the command that turns the daemon on: " + r.text());
     }
 
     @Test
     void statusWithoutTemporaryHasNoDaemonLine() throws Exception {
         assertEquals(0, new BlockCommand(List.of("tiktok.com"), null, hosts().toString(), state()).call());
 
-        Resultado r = rodar(() -> new StatusCommand(hosts().toString(), state()).call());
+        Result r = run(() -> new StatusCommand(hosts().toString(), state()).call());
 
-        assertTrue(r.texto().contains("Domínios bloqueados (1):"),
-                "o bloqueio tem que estar listado: " + r.texto());
-        assertFalse(r.texto().contains("daemon enable"),
-                "sem temporário ativo não há o que avisar: " + r.texto());
+        assertTrue(r.text().contains("Blocked domains (1):"),
+                "the block must be listed: " + r.text());
+        assertFalse(r.text().contains("daemon enable"),
+                "with no active temporary block there is nothing to warn about: " + r.text());
     }
 
     @Test
     void statusWithOnlyPermanentsHasNoDaemonLine() throws Exception {
-        Map<String, BlockEntry> estado = new TreeMap<>();
-        estado.put("tiktok.com", new BlockEntry("tiktok.com", Instant.now(), null));
-        Files.createDirectories(tmp.resolve("estado"));
-        new BlockStore(Path.of(state())).save(estado);
+        Map<String, BlockEntry> state = new TreeMap<>();
+        state.put("tiktok.com", new BlockEntry("tiktok.com", Instant.now(), null));
+        Files.createDirectories(tmp.resolve("state"));
+        new BlockStore(Path.of(state())).save(state);
 
-        Resultado r = rodar(() -> new StatusCommand(hosts().toString(), state()).call());
+        Result r = run(() -> new StatusCommand(hosts().toString(), state()).call());
 
-        assertTrue(r.texto().contains("Domínios bloqueados (1):"),
-                "o bloqueio tem que estar listado: " + r.texto());
-        assertFalse(r.texto().contains("daemon enable"), r.texto());
+        assertTrue(r.text().contains("Blocked domains (1):"),
+                "the block must be listed: " + r.text());
+        assertFalse(r.text().contains("daemon enable"), r.text());
     }
 }

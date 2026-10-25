@@ -17,13 +17,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** profile save/list/show/delete contra arquivos temporários. */
+/** Profile save/list/show/delete commands against temporary files. */
 class ProfileCommandsTest {
 
     @TempDir
     Path tmp;
 
-    // Criar uma vez: reescrever apagaria os bloqueios que o teste acabou de fazer.
+    // Create once: rewriting would erase the blocks the test just made.
     private Path hosts() throws Exception {
         if (hosts == null) {
             hosts = tmp.resolve("hosts");
@@ -49,38 +49,38 @@ class ProfileCommandsTest {
     @Test
     void saveStoresRemainingDurations() throws Exception {
         block("tiktok.com");
-        assertEquals(0, new ProfileSaveCommand("trabalho", false, hosts().toString(), state()).call());
+        assertEquals(0, new ProfileSaveCommand("work", false, hosts().toString(), state()).call());
 
         String json = Files.readString(profilesFile(), StandardCharsets.UTF_8);
-        assertTrue(json.contains("\"trabalho\""), json);
+        assertTrue(json.contains("\"work\""), json);
         assertTrue(json.contains("tiktok.com"), json);
         assertTrue(json.contains("durationMillis"), json);
 
-        // O que se grava é o que resta, não as 4h originais: um profile é receita.
+        // What is stored is what remains, not the original 4h: a profile is a recipe.
         long ms = extractedDurationMillis(json, "tiktok.com");
-        assertTrue(ms > 0, "prazo restante deve ser positivo: " + ms);
-        assertTrue(ms < 4 * 3600_000L, "não pode gravar as 4h originais: " + ms);
+        assertTrue(ms > 0, "the remaining deadline should be positive: " + ms);
+        assertTrue(ms < 4 * 3600_000L, "it must not store the original 4h: " + ms);
     }
 
     @Test
     void saveFailsWithNoActiveBlocks() throws Exception {
-        int exit = new ProfileSaveCommand("vazio", false, hosts().toString(), state()).call();
+        int exit = new ProfileSaveCommand("empty", false, hosts().toString(), state()).call();
         assertEquals(1, exit);
-        assertFalse(Files.exists(profilesFile()), "perfil vazio não faz nada e esconde o erro");
+        assertFalse(Files.exists(profilesFile()), "an empty profile does nothing and hides the error");
     }
 
     @Test
     void saveRefusesToOverwriteWithoutForce() throws Exception {
         block("tiktok.com");
-        assertEquals(0, new ProfileSaveCommand("trabalho", false, hosts().toString(), state()).call());
-        String primeiro = Files.readString(profilesFile(), StandardCharsets.UTF_8);
+        assertEquals(0, new ProfileSaveCommand("work", false, hosts().toString(), state()).call());
+        String first = Files.readString(profilesFile(), StandardCharsets.UTF_8);
 
         block("youtube.com");
-        assertEquals(1, new ProfileSaveCommand("trabalho", false, hosts().toString(), state()).call());
-        assertEquals(primeiro, Files.readString(profilesFile(), StandardCharsets.UTF_8),
-                "sem --force o perfil existente tem que ficar intacto");
+        assertEquals(1, new ProfileSaveCommand("work", false, hosts().toString(), state()).call());
+        assertEquals(first, Files.readString(profilesFile(), StandardCharsets.UTF_8),
+                "without --force the existing profile must stay intact");
 
-        assertEquals(0, new ProfileSaveCommand("trabalho", true, hosts().toString(), state()).call());
+        assertEquals(0, new ProfileSaveCommand("work", true, hosts().toString(), state()).call());
         assertTrue(Files.readString(profilesFile(), StandardCharsets.UTF_8).contains("youtube.com"));
     }
 
@@ -93,11 +93,11 @@ class ProfileCommandsTest {
     @Test
     void addRejectsDurationThatWouldOverflowMillis() throws Exception {
         block("tiktok.com");
-        assertEquals(0, new ProfileSaveCommand("trabalho", false,
+        assertEquals(0, new ProfileSaveCommand("work", false,
                 hosts().toString(), state()).call());
 
         ProfileCommand parent = new ProfileCommand();
-        parent.name = "trabalho";
+        parent.name = "work";
         ProfileAddCommand cmd = new ProfileAddCommand();
         cmd.parent = parent;
         cmd.domainsRaw = List.of("youtube.com");
@@ -106,75 +106,74 @@ class ProfileCommandsTest {
 
         assertEquals(1, cmd.call());
         assertFalse(Files.readString(profilesFile(), StandardCharsets.UTF_8).contains("youtube.com"),
-                "duração inválida não pode gravar entrada no perfil");
+                "an invalid duration must not write an entry to the profile");
     }
 
     @Test
     void saveSkipsExpiredThatAreStillPending() throws Exception {
-        // hosts não gravável: o sweep devolve skippedDueToPermission e o
-        // expirado continua no estado. Ele não pode entrar no perfil — senão
-        // aplicar a receita amanhã re-bloquearia um domínio que já venceu.
+        // hosts file not writable: the sweep returns skippedDueToPermission and the
+        // expired entry stays in the state. It must not enter the profile — otherwise
+        // applying the recipe tomorrow re-blocks a domain that has already expired.
         Path sf = Path.of(state());
         Files.createDirectories(sf.getParent());
         Files.writeString(sf, """
                 {
-                  "vencido.com" : {
-                    "domain" : "vencido.com",
+                  "expired.com" : {
+                    "domain" : "expired.com",
                     "createdAt" : "2020-01-01T00:00:00Z",
                     "expiresAt" : "2020-01-01T01:00:00Z"
                   },
-                  "vivo.com" : {
-                    "domain" : "vivo.com",
+                  "live.com" : {
+                    "domain" : "live.com",
                     "createdAt" : "2020-01-01T00:00:00Z",
                     "expiresAt" : null
                   }
                 }
                 """, StandardCharsets.UTF_8);
 
-        Path semGravacao = tmp.resolve("sem-pai/hosts");
-        assertEquals(0, new ProfileSaveCommand("limpo", false, semGravacao.toString(), state()).call());
+        Path unwritable = tmp.resolve("no-parent/hosts");
+        assertEquals(0, new ProfileSaveCommand("clean", false, unwritable.toString(), state()).call());
 
-        String perfil = Files.readString(profilesFile(), StandardCharsets.UTF_8);
-        assertFalse(perfil.contains("vencido.com"),
-                "expirado pendente não pode virar entrada de perfil: " + perfil);
-        assertTrue(perfil.contains("vivo.com"), perfil);
+        String profile = Files.readString(profilesFile(), StandardCharsets.UTF_8);
+        assertFalse(profile.contains("expired.com"),
+                "a pending expired entry must not become a profile entry: " + profile);
+        assertTrue(profile.contains("live.com"), profile);
     }
 
     /**
-     * Salvar um perfil não pode apagar a receita que outro terminal gravou.
+     * Saving a profile must not erase a recipe another terminal wrote.
      *
-     * <p>O comando lia as receitas e gravava o arquivo inteiro: uma receita
-     * escrita no meio do caminho sumia. O teste é determinístico — o outro
-     * escritor grava o arquivo por fora da trava, no momento em que o comando
-     * carrega as receitas.
+     * <p>The command read the recipes and wrote the whole file: a recipe written
+     * in between disappeared. The test is deterministic — the other writer saves
+     * the file outside the lock, at the moment the command loads the recipes.
      */
     @Test
-    void saveNaoPerdeAReceitaEscritaPorOutroTerminal() throws Exception {
+    void saveDoesNotLoseRecipeWrittenByAnotherTerminal() throws Exception {
         block("tiktok.com");
 
-        ProfileStore espiao = new ProfileStore(profilesFile()) {
+        ProfileStore spy = new ProfileStore(profilesFile()) {
             @Override
             public Map<String, Profile> load() throws IOException {
-                Map<String, Profile> perfis = super.load();
-                escreverReceitaPorForaDaTrava(profilesFile(), "outro");
-                return perfis;
+                Map<String, Profile> profiles = super.load();
+                writeRecipeOutsideLock(profilesFile(), "other");
+                return profiles;
             }
         };
 
-        ProfileSaveCommand cmd = new ProfileSaveCommand("trabalho", false,
+        ProfileSaveCommand cmd = new ProfileSaveCommand("work", false,
                 hosts().toString(), state());
-        cmd.storeOverride = espiao;
+        cmd.storeOverride = spy;
         assertEquals(0, cmd.call());
 
-        Map<String, Profile> depois = new ProfileStore(profilesFile()).load();
-        assertTrue(depois.containsKey("trabalho"),
-                "o perfil salvo tem que estar lá: " + depois.keySet());
-        assertTrue(depois.containsKey("outro"),
-                "a receita escrita por outro terminal não pode se perder: " + depois.keySet());
+        Map<String, Profile> after = new ProfileStore(profilesFile()).load();
+        assertTrue(after.containsKey("work"),
+                "the saved profile must be there: " + after.keySet());
+        assertTrue(after.containsKey("other"),
+                "the recipe written by another terminal must not be lost: " + after.keySet());
     }
 
-    // Grava o profiles.json por fora da trava, como um escritor que não a respeita.
-    private void escreverReceitaPorForaDaTrava(Path file, String nome) throws IOException {
+    // Writes profiles.json outside the lock, like a writer that does not respect it.
+    private void writeRecipeOutsideLock(Path file, String name) throws IOException {
         String json = """
                 {
                   "version" : 1,
@@ -183,84 +182,85 @@ class ProfileCommandsTest {
                       "createdAt" : "2026-10-15T12:02:11Z",
                       "updatedAt" : "2026-10-15T12:02:11Z",
                       "entries" : {
-                        "outro.com" : { "durationMillis" : null }
+                        "other.com" : { "durationMillis" : null }
                       }
                     }
                   }
                 }
-                """.formatted(nome);
+                """.formatted(name);
         Files.writeString(file, json, StandardCharsets.UTF_8);
     }
 
     @Test
-    void listShowsNameAndCount() throws Exception {        block("tiktok.com", "youtube.com");
-        assertEquals(0, new ProfileSaveCommand("trabalho", false, hosts().toString(), state()).call());
-        assertEquals(0, new ProfileSaveCommand("descanso", false, hosts().toString(), state()).call());
+    void listShowsNameAndCount() throws Exception {
+        block("tiktok.com", "youtube.com");
+        assertEquals(0, new ProfileSaveCommand("work", false, hosts().toString(), state()).call());
+        assertEquals(0, new ProfileSaveCommand("rest", false, hosts().toString(), state()).call());
 
         String out = capture(() -> new ProfileListCommand(state()).call());
-        assertTrue(out.contains("trabalho"), out);
-        assertTrue(out.contains("descanso"), out);
-        assertTrue(out.contains("2"), "tem que mostrar o número de domínios: " + out);
+        assertTrue(out.contains("work"), out);
+        assertTrue(out.contains("rest"), out);
+        assertTrue(out.contains("2"), "it must show the number of domains: " + out);
     }
 
     @Test
     void listWithNoProfilesSaysSo() {
         String out = capture(() -> new ProfileListCommand(state()).call());
         assertEquals(0, new ProfileListCommand(state()).call());
-        assertTrue(out.toLowerCase().contains("nenhum"), out);
+        assertTrue(out.toLowerCase().contains("no profiles"), out);
     }
 
     @Test
     void showListsDomainsWithDurations() throws Exception {
         assertEquals(0, new BlockCommand(List.of("tiktok.com"), null, hosts().toString(), state()).call());
-        assertEquals(0, new ProfileSaveCommand("permanentes", false, hosts().toString(), state()).call());
+        assertEquals(0, new ProfileSaveCommand("permanent", false, hosts().toString(), state()).call());
 
-        String out = capture(() -> new ProfileShowCommand("permanentes", state()).call());
+        String out = capture(() -> new ProfileShowCommand("permanent", state()).call());
         assertTrue(out.contains("tiktok.com"), out);
-        assertTrue(out.contains("permanente"), out);
+        assertTrue(out.contains("permanent"), out);
     }
 
     @Test
     void showUnknownProfileFails() throws Exception {
-        assertEquals(1, new ProfileShowCommand("nao-existe", state()).call());
+        assertEquals(1, new ProfileShowCommand("missing", state()).call());
     }
 
     @Test
     void deleteRemovesProfile() throws Exception {
         block("tiktok.com");
-        assertEquals(0, new ProfileSaveCommand("temporario", false, hosts().toString(), state()).call());
+        assertEquals(0, new ProfileSaveCommand("temporary", false, hosts().toString(), state()).call());
 
-        assertEquals(0, new ProfileDeleteCommand("temporario", "SIM", state()).call());
+        assertEquals(0, new ProfileDeleteCommand("temporary", "YES", state()).call());
 
-        assertEquals(1, new ProfileShowCommand("temporario", state()).call());
+        assertEquals(1, new ProfileShowCommand("temporary", state()).call());
     }
 
     @Test
     void deleteCancelledKeepsProfile() throws Exception {
         block("tiktok.com");
-        assertEquals(0, new ProfileSaveCommand("temporario", false, hosts().toString(), state()).call());
+        assertEquals(0, new ProfileSaveCommand("temporary", false, hosts().toString(), state()).call());
 
-        assertEquals(3, new ProfileDeleteCommand("temporario", "nao", state()).call());
+        assertEquals(3, new ProfileDeleteCommand("temporary", "no", state()).call());
 
-        assertEquals(0, new ProfileShowCommand("temporario", state()).call(),
-                "cancelar não pode apagar o perfil");
+        assertEquals(0, new ProfileShowCommand("temporary", state()).call(),
+                "cancelling must not delete the profile");
     }
 
     @Test
     void deleteUnknownProfileFails() throws Exception {
-        assertEquals(1, new ProfileDeleteCommand("nao-existe", "SIM", state()).call());
+        assertEquals(1, new ProfileDeleteCommand("missing", "YES", state()).call());
     }
 
     private static long extractedDurationMillis(String json, String domain) {
         int i = json.indexOf("\"" + domain + "\"");
-        assertTrue(i >= 0, "domínio ausente do JSON: " + json);
+        assertTrue(i >= 0, "domain missing from the JSON: " + json);
         int j = json.indexOf("durationMillis", i);
-        assertTrue(j > 0, "durationMillis ausente: " + json);
-        String resto = json.substring(j);
-        int abre = resto.indexOf(':');
-        int fecha = resto.indexOf('\n', abre);
-        String num = resto.substring(abre + 1, fecha).replace(",", "").replace(" ", "").trim();
-        return Long.parseLong(num);
+        assertTrue(j > 0, "durationMillis missing: " + json);
+        String rest = json.substring(j);
+        int open = rest.indexOf(':');
+        int close = rest.indexOf('\n', open);
+        String number = rest.substring(open + 1, close).replace(",", "").replace(" ", "").trim();
+        return Long.parseLong(number);
     }
 
     private static String capture(Runnable r) {

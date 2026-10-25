@@ -1,6 +1,6 @@
 package com.sitelock.dns;
 
-/** Falha amigável do servidor DNS (mensagem pronta para o usuário, sem stack trace). */
+/** User-friendly DNS server failure (message ready to print, no stack trace). */
 public class DnsServerException extends RuntimeException {
 
     public DnsServerException(String message) {

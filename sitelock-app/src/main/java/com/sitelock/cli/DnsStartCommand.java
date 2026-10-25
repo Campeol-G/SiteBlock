@@ -35,34 +35,34 @@ import java.util.concurrent.Callable;
 /**
  * siteblock dns start [--port 53] [--upstream 1.1.1.1] [--for 2h].
  *
- * <p>Sobe o servidor DNS em background e retorna na hora. O daemon reaproveita a lista
- * de bloqueados atual: {@code block}/{@code unblock} em outro terminal valem na próxima
- * consulta. Com {@code --for}, o {@code dns stop} antes do prazo exige {@code --force}.
+ * <p>Starts the DNS server in the background and returns right away. The daemon reuses the current
+ * blocked list: {@code block}/{@code unblock} in another terminal take effect on the next
+ * query. With {@code --for}, {@code dns stop} before the deadline requires {@code --force}.
  */
 @Command(name = "start",
-        description = "Inicia o servidor DNS local em background.",
+        description = "Starts the local DNS server in the background.",
         mixinStandardHelpOptions = true)
 public class DnsStartCommand implements Callable<Integer> {
 
-    // O log é append entre execuções; acima disto, a próxima subida o arquiva.
-    // 5 MiB guarda várias subidas e ainda abre rápido no printLogTail.
+    // The log is appended between runs; above this, the next start archives it.
+    // 5 MiB keeps several starts and still opens fast in printLogTail.
     static final long LOG_ROTATE_BYTES = 5L * 1024 * 1024;
     static final String LISTENING_MARKER = "SITELOCK_DNS_LISTENING";
 
-    @Option(names = "--port", paramLabel = "<porta>", defaultValue = "53",
-            description = "Porta UDP local (default: 53; use 5300 p/ testar sem sudo).")
+    @Option(names = "--port", paramLabel = "<port>", defaultValue = "53",
+            description = "Local UDP port (default: 53; use 5300 to test without sudo).")
     int port;
 
     @Option(names = "--upstream", paramLabel = "<ip>", defaultValue = "1.1.1.1",
-            description = "DNS público para encaminhar o não-bloqueado (default: 1.1.1.1).")
+            description = "Public DNS to forward non-blocked queries (default: 1.1.1.1).")
     String upstream;
 
-    @Option(names = "--for", paramLabel = "<duracao>",
-            description = "Desliga sozinho após a duração. Ex.: 30m, 2h, 1d. Omitido = até 'dns stop'.")
+    @Option(names = "--for", paramLabel = "<duration>",
+            description = "Stops automatically after the duration. E.g. 30m, 2h, 1d. Omitted = until 'dns stop'.")
     String forDuration;
 
-    @Option(names = "--allow-from", paramLabel = "<lista>",
-            description = "Origens liberadas além das locais (IP ou CIDR, separados por vírgula).")
+    @Option(names = "--allow-from", paramLabel = "<list>",
+            description = "Allowed origins beyond the local ones (IP or CIDR, separated by commas).")
     String allowFrom;
 
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
@@ -80,7 +80,7 @@ public class DnsStartCommand implements Callable<Integer> {
     @Override
     public Integer call() {
         if (port < 1 || port > 65535) {
-            System.err.println("Erro: porta inválida: " + port + " (use 1-65535).");
+            System.err.println("Error: invalid port: " + port + " (use 1-65535).");
             return 2;
         }
 
@@ -88,7 +88,7 @@ public class DnsStartCommand implements Callable<Integer> {
         try {
             duration = forDuration == null ? null : DurationParser.parse(forDuration);
         } catch (IllegalArgumentException e) {
-            System.err.println("Erro: " + e.getMessage());
+            System.err.println("Error: " + e.getMessage());
             return 2;
         }
 
@@ -96,25 +96,25 @@ public class DnsStartCommand implements Callable<Integer> {
         try {
             upstreamAddr = InetAddress.getByName(upstream);
         } catch (Exception e) {
-            System.err.println("Erro: upstream inválido '" + upstream + "': " + e.getMessage());
+            System.err.println("Error: invalid upstream '" + upstream + "': " + e.getMessage());
             return 2;
         }
 
-        // ATENÇÃO: porta privilegiada (< 1024) exige elevação só nos Unix. No
-        // Windows o Administrador não se chama "root"; o bind abaixo falha e o
-        // log mostra o motivo, sem um falso aviso de sudo antes de tentar.
+        // NOTE: a privileged port (< 1024) requires elevation only on Unix. On
+        // Windows the Administrator is not called "root"; the bind below fails and the
+        // log shows why, without a false sudo warning before trying.
         if (requiresElevationForPort(port, OsType.detect()) && !isRoot()) {
             String retry = "dns start" + (forDuration != null ? " --for " + forDuration : "");
-            System.err.println("Erro: " + new PermissionAdvisor().privilegedPortHint(port, retry));
+            System.err.println("Error: " + new PermissionAdvisor().privilegedPortHint(port, retry));
             return 1;
         }
 
-        // Valida antes de forkar: erro de digitação no --allow-from não pode
-        // aparecer só depois que o daemon já subiu.
+        // Validate before forking: a typo in --allow-from must not
+        // show up only after the daemon is already up.
         try {
             DnsServer.parseAllowFrom(allowFrom);
         } catch (IllegalArgumentException e) {
-            System.err.println("Erro: " + e.getMessage());
+            System.err.println("Error: " + e.getMessage());
             return 2;
         }
 
@@ -123,25 +123,25 @@ public class DnsStartCommand implements Callable<Integer> {
                 ? Paths.get(stateFileOverride)
                 : stateDir.resolve("blocks.json");
 
-        // A trava cobre a leitura do estado E a subida do filho. Sem ela, dois
-        // `dns start` simultâneos leem "parado", sobem dois daemons e o último
-        // registro apaga o do primeiro. O SO solta a trava se o processo morrer.
+        // The lock covers reading the state AND bringing up the child. Without it, two
+        // simultaneous `dns start`s read "stopped", start two daemons and the last
+        // record erases the first one's. The OS releases the lock if the process dies.
         final DnsDaemonLock lock;
         try {
             lock = DnsDaemonLock.tryAcquire(stateDir).orElse(null);
         } catch (IOException e) {
-            System.err.println("Erro ao obter a trava de inicialização do DNS: " + e.getMessage());
+            System.err.println("Error obtaining DNS startup lock: " + e.getMessage());
             return 1;
         }
         if (lock == null) {
-            System.err.println("Erro: outro 'siteblock dns start' está em andamento. "
-                    + "Aguarde ele terminar e tente de novo.");
+            System.err.println("Error: another 'siteblock dns start' is already in progress. "
+                    + "Wait for it to finish and try again.");
             return 1;
         }
         try (DnsDaemonLock ignored = lock) {
             return startLocked(stateDir, stateFile, duration, upstreamAddr);
         } catch (IOException e) {
-            System.err.println("Erro ao liberar a trava de inicialização do DNS: " + e.getMessage());
+            System.err.println("Error releasing DNS startup lock: " + e.getMessage());
             return 1;
         }
     }
@@ -151,16 +151,16 @@ public class DnsStartCommand implements Callable<Integer> {
         try {
             Optional<DnsDaemonState> existing = DnsDaemonState.read(stateDir);
             if (existing.isPresent() && DnsDaemonState.isAlive(existing.get())) {
-                System.err.println("Erro: o servidor DNS já está rodando (pid "
-                        + existing.get().getPid() + ", porta " + existing.get().getPort() + ").");
-                System.err.println("Use 'siteblock dns status' para ver ou 'siteblock dns stop' para encerrar.");
+                System.err.println("Error: DNS server is already running (pid "
+                        + existing.get().getPid() + ", port " + existing.get().getPort() + ").");
+                System.err.println("Use 'siteblock dns status' to see it or 'siteblock dns stop' to stop it.");
                 return 1;
             }
             if (existing.isPresent()) {
-                DnsDaemonState.delete(stateDir); // PID morto: limpa estado obsoleto.
+                DnsDaemonState.delete(stateDir); // Dead PID: clear stale state.
             }
         } catch (IOException e) {
-            System.err.println("Erro ao ler estado do daemon: " + e.getMessage());
+            System.err.println("Error reading the daemon state: " + e.getMessage());
             return 1;
         }
 
@@ -170,7 +170,7 @@ public class DnsStartCommand implements Callable<Integer> {
         try {
             logOffset = prepareLog(logFile);
         } catch (IOException e) {
-            System.err.println("Erro ao preparar o log do daemon: " + e.getMessage());
+            System.err.println("Error preparing the daemon log: " + e.getMessage());
             return 1;
         }
         final Process process;
@@ -179,8 +179,8 @@ public class DnsStartCommand implements Callable<Integer> {
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
             pb.redirectErrorStream(true);
-            // stdin: PIPE (default) com EOF imediato — o daemon nunca lê stdin,
-            // e DISCARD não é válido para entrada (só saída/erro).
+            // stdin: PIPE (default) with immediate EOF — the daemon never reads stdin,
+            // and DISCARD is not valid for input (only output/error).
             process = pb.start();
             SiteLockPaths.chownToUserIfConfigured(logFile);
             try {
@@ -188,7 +188,7 @@ public class DnsStartCommand implements Callable<Integer> {
             } catch (IOException ignored) {
             }
         } catch (IOException e) {
-            System.err.println("Erro ao iniciar o daemon: " + e.getMessage());
+            System.err.println("Error starting the daemon: " + e.getMessage());
             return 1;
         }
 
@@ -196,21 +196,21 @@ public class DnsStartCommand implements Callable<Integer> {
         Instant now = Instant.now(Clock.systemUTC());
         Instant expiresAt = duration == null ? null : now.plus(duration);
         try {
-            // O pai vê o instante de início do FILHO; gravá-lo aqui fecha a
-            // janela em que o registro existe sem identidade e vale só pelo PID.
+            // The parent sees the CHILD's start instant; recording it here closes the
+            // window in which the record exists without identity and is trusted only on the PID.
             DnsDaemonState state = new DnsDaemonState(
                     pid, port, upstreamAddr.getHostAddress(), now, expiresAt);
             process.info().startInstant().ifPresent(state::setProcessStartedAt);
             DnsDaemonState.write(stateDir, state);
         } catch (IOException e) {
-            System.err.println("Erro ao registrar o daemon (pid " + pid + "): " + e.getMessage());
+            System.err.println("Error recording the daemon (pid " + pid + "): " + e.getMessage());
             process.destroyForcibly();
             return 1;
         }
 
-        // Dá até ~3s para o filho fazer bind; se morrer, mostra o motivo do log.
-        boolean vivo = false;
-        boolean escutando = false;
+        // Gives the child until ~3s to bind; if it dies, shows the reason from the log.
+        boolean alive = false;
+        boolean listening = false;
         for (int i = 0; i < 6; i++) {
             try {
                 Thread.sleep(500);
@@ -219,17 +219,17 @@ public class DnsStartCommand implements Callable<Integer> {
                 break;
             }
             if (!ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)) {
-                vivo = false;
+                alive = false;
                 break;
             }
-            vivo = true;
+            alive = true;
             if (logShowsListening(logFile, logOffset)) {
-                escutando = true;
+                listening = true;
                 break;
             }
         }
-        if (!vivo) {
-            System.err.println("Erro: o servidor DNS não subiu (pid " + pid + " encerrou).");
+        if (!alive) {
+            System.err.println("Error: the DNS server did not come up (pid " + pid + " exited).");
             printLogTail(logFile);
             try {
                 DnsDaemonState.deleteIfOwned(stateDir, pid);
@@ -237,12 +237,12 @@ public class DnsStartCommand implements Callable<Integer> {
             }
             return 1;
         }
-        // O processo vivo não é o mesmo que servidor escutando: o daemon pode
-        // estar vivo e nunca abrir a porta (o watchdog dormia e tentava de novo,
-        // para sempre). Só a marca no log prova que está atendendo.
-        if (!escutando) {
-            System.err.println("Erro: o servidor DNS não subiu: o processo (pid " + pid
-                    + ") está vivo, mas não anunciou que está escutando.");
+        // A live process is not the same as a listening server: the daemon may
+        // be alive and never open the port (the watchdog would sleep and try again,
+        // forever). Only the mark in the log proves it is answering.
+        if (!listening) {
+            System.err.println("Error: the DNS server did not come up: the process (pid " + pid
+                    + ") is alive, but it did not announce that it is listening.");
             process.destroyForcibly();
             printLogTail(logFile);
             try {
@@ -252,19 +252,19 @@ public class DnsStartCommand implements Callable<Integer> {
             return 1;
         }
 
-        System.out.println("Servidor DNS iniciado (pid " + pid + ", porta " + port
+        System.out.println("DNS server started (pid " + pid + ", port " + port
                 + ", upstream " + upstreamAddr.getHostAddress() + ").");
         NetworkUtils.printStartupInfo(port, upstreamAddr.getHostAddress());
-        System.out.println("Domínios bloqueados agora: " + countActive(stateFile)
-                + " (mudanças via 'block'/'unblock' valem na próxima consulta, sem reiniciar).");
+        System.out.println("Blocked domains now: " + countActive(stateFile)
+                + " (changes via 'block'/'unblock' take effect on the next query, no restart needed).");
         if (expiresAt != null) {
-            System.out.println("Desligamento automático em "
+            System.out.println("Automatic shutdown in "
                     + DurationParser.formatRemaining(duration)
-                    + " (--for); 'dns stop' antes disso exige --force.");
+                    + " (--for); 'dns stop' before that requires --force.");
         }
-        System.out.println("AVISO: enquanto os dispositivos apontarem para cá, se este servidor "
-                + "cair eles perdem a internet inteira. Para reverter, volte o DNS do "
-                + "dispositivo para automático/DHCP. Log em: " + logFile);
+        System.out.println("WARNING: while devices point here, if this server "
+                + "goes down they lose the internet entirely. To undo it, set the device's DNS back "
+                + "to automatic/DHCP. Log at: " + logFile);
         return 0;
     }
 
@@ -276,26 +276,26 @@ public class DnsStartCommand implements Callable<Integer> {
 
         List<String> cmd = new ArrayList<>();
         cmd.add(javaCmd);
-        // O log do filho é lido como UTF-8 pelo tail e pelos testes; sem isto o
-        // Windows grava na codepage nativa e a leitura quebra.
+        // The child's log is read as UTF-8 by the tail and by the tests; without this
+        // Windows writes in the native code page and reading breaks.
         cmd.add("-Dstdout.encoding=UTF-8");
         cmd.add("-Dstderr.encoding=UTF-8");
         String binProp = System.getProperty("siteblock.bin");
         if (binProp != null && !binProp.isBlank()) {
             cmd.add("-Dsiteblock.bin=" + binProp);
         }
-        // O filho tem que enxergar o MESMO estado do pai: sem estas properties, um
-        // daemon iniciado como root sem SUDO_USER (autostart) opera em /root/.sitelock
-        // enquanto o `dns status` olha ~/.sitelock — o status diz "PARADO" com o
-        // servidor no ar, e o `dns stop` não o encerra.
+        // The child has to see the SAME state as the parent: without these properties, a
+        // daemon started as root without SUDO_USER (autostart) operates in /root/.sitelock
+        // while `dns status` looks at ~/.sitelock — status says "STOPPED" with the
+        // server up, and `dns stop` does not stop it.
         cmd.add("-Dsitelock.stateDir="
                 + DnsDaemonState.stateDirFor(stateFileOverride).toAbsolutePath());
-        String usuario = System.getProperty("sitelock.user");
-        if (usuario == null || usuario.isBlank()) {
-            usuario = SiteLockPaths.realUserName().orElse(null);
+        String user = System.getProperty("sitelock.user");
+        if (user == null || user.isBlank()) {
+            user = SiteLockPaths.realUserName().orElse(null);
         }
-        if (usuario != null && !usuario.isBlank()) {
-            cmd.add("-Dsitelock.user=" + usuario);
+        if (user != null && !user.isBlank()) {
+            cmd.add("-Dsitelock.user=" + user);
         }
         cmd.add("-cp");
         cmd.add(classpath);
@@ -326,20 +326,20 @@ public class DnsStartCommand implements Callable<Integer> {
     }
 
     /**
-     * Porta &lt; 1024 exige elevação só no Unix. No Windows a elevação é um
-     * token de Administrador, não o nome de usuário "root"; tentar o bind e
-     * mostrar o log é mais útil do que recusar antes de tentar.
+     * A port below 1024 requires elevation only on Unix. On Windows, elevation is an
+     * Administrator token, not the user name "root"; trying the bind and showing the
+     * log is more useful than refusing before trying.
      */
     static boolean requiresElevationForPort(int port, OsType os) {
         return port > 0 && port < 1024 && os != null && !os.isWindows();
     }
 
     /**
-     * Devolve o offset a partir do qual a subida atual escreve no log.
+     * Returns the offset from which the current start writes to the log.
      *
-     * <p>Log acima de {@link #LOG_ROTATE_BYTES} vira {@code .1} e o offset é
-     * zero; assim a marca de escuta de uma execução antiga não é confundida
-     * com a desta.
+     * <p>Log above {@link #LOG_ROTATE_BYTES} becomes {@code .1} and the offset is
+     * zero; that way the listening mark of an old run is not confused
+     * with this one's.
      */
     static long prepareLog(Path logFile) throws IOException {
         if (!Files.exists(logFile)) {
@@ -349,8 +349,8 @@ public class DnsStartCommand implements Callable<Integer> {
         if (size <= LOG_ROTATE_BYTES) {
             return size;
         }
-        Path arquivado = logFile.resolveSibling(logFile.getFileName() + ".1");
-        Files.move(logFile, arquivado, StandardCopyOption.REPLACE_EXISTING);
+        Path archived = logFile.resolveSibling(logFile.getFileName() + ".1");
+        Files.move(logFile, archived, StandardCopyOption.REPLACE_EXISTING);
         return 0;
     }
 
@@ -358,7 +358,7 @@ public class DnsStartCommand implements Callable<Integer> {
         byte[] needle = LISTENING_MARKER.getBytes(StandardCharsets.UTF_8);
         try (FileChannel channel = FileChannel.open(logFile, StandardOpenOption.READ)) {
             if (offset > channel.size()) {
-                return false; // arquivo trocado/truncado durante a subida
+                return false; // file swapped/truncated during startup
             }
             channel.position(offset);
             ByteBuffer buffer = ByteBuffer.allocate(8192);
@@ -388,10 +388,10 @@ public class DnsStartCommand implements Callable<Integer> {
         try {
             List<String> lines = Files.readAllLines(logFile);
             int from = Math.max(0, lines.size() - 20);
-            System.err.println("--- últimas linhas do log (" + logFile + ") ---");
+            System.err.println("--- last lines of log (" + logFile + ") ---");
             lines.subList(from, lines.size()).forEach(l -> System.err.println(l));
         } catch (IOException e) {
-            System.err.println("(não foi possível ler o log: " + e.getMessage() + ")");
+            System.err.println("(could not read log: " + e.getMessage() + ")");
         }
     }
 
@@ -402,7 +402,7 @@ public class DnsStartCommand implements Callable<Integer> {
             long active = state.values().stream().filter(e -> !e.isExpired(now)).count();
             return String.valueOf(active);
         } catch (Exception e) {
-            return "? (estado ilegível: " + e.getMessage() + ")";
+            return "? (state unreadable: " + e.getMessage() + ")";
         }
     }
 }

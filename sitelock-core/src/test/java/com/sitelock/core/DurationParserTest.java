@@ -53,7 +53,7 @@ class DurationParserTest {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                 () -> DurationParser.parse(input));
         assertTrue(e.getMessage().contains("'" + input + "'"), e.getMessage());
-        assertTrue(e.getMessage().contains("fora do intervalo"), e.getMessage());
+        assertTrue(e.getMessage().contains("supported range"), e.getMessage());
         assertTrue(e.getMessage().contains(DurationParser.LIMIT_HELP), e.getMessage());
     }
 
@@ -63,13 +63,13 @@ class DurationParserTest {
     void rejectsInvalidFormats(String input) {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                 () -> DurationParser.parse(input));
-        // POR QUE: a mensagem tem que citar a entrada rejeitada. Sem isso a
-        // asserção só conferia o exemplo fixo da ajuda — que vale para
-        // qualquer entrada, e portanto não prova nada.
+        // WHY: the message has to cite the rejected input. Without it the
+        // assertion only checked the fixed help example — which holds for
+        // any input, and therefore proves nothing.
         assertTrue(e.getMessage().contains("'" + input + "'"),
-                "a mensagem tem que citar a entrada rejeitada, mas foi: " + e.getMessage());
+                "the message has to cite the rejected input, but it was: " + e.getMessage());
         assertTrue(e.getMessage().contains(DurationParser.FORMAT_HELP),
-                "a mensagem tem que dizer o formato esperado, mas foi: " + e.getMessage());
+                "the message has to state the expected format, but it was: " + e.getMessage());
     }
 
     @ParameterizedTest
@@ -77,20 +77,20 @@ class DurationParserTest {
     void rejectsBlankInputSayingItIsEmpty(String input) {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                 () -> DurationParser.parse(input));
-        assertTrue(e.getMessage().contains("vazia"),
-                "a mensagem tem que dizer que a duração está vazia, mas foi: " + e.getMessage());
+        assertTrue(e.getMessage().contains("Empty duration"),
+                "the message has to say the duration is empty, but it was: " + e.getMessage());
         assertTrue(e.getMessage().contains(DurationParser.FORMAT_HELP),
-                "a mensagem tem que dizer o formato esperado, mas foi: " + e.getMessage());
+                "the message has to state the expected format, but it was: " + e.getMessage());
     }
 
     @Test
     void rejectsNull() {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                 () -> DurationParser.parse(null));
-        assertTrue(e.getMessage().contains("vazia"),
-                "a mensagem tem que dizer que a duração está vazia, mas foi: " + e.getMessage());
+        assertTrue(e.getMessage().contains("Empty duration"),
+                "the message has to say the duration is empty, but it was: " + e.getMessage());
         assertTrue(e.getMessage().contains(DurationParser.FORMAT_HELP),
-                "a mensagem tem que dizer o formato esperado, mas foi: " + e.getMessage());
+                "the message has to state the expected format, but it was: " + e.getMessage());
     }
 
     @Test

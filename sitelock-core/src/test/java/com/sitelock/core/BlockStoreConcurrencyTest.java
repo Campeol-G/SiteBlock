@@ -18,8 +18,8 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Regressão: leituras concorrentes na mesma JVM não podem estourar
- * OverlappingFileLockException (o servidor DNS lê o estado em N threads).
+ * Regression: concurrent reads in the same JVM must not throw
+ * OverlappingFileLockException (the DNS server reads the state on N threads).
  */
 class BlockStoreConcurrencyTest {
 
@@ -27,13 +27,13 @@ class BlockStoreConcurrencyTest {
     Path tmp;
 
     @Test
-    void leiturasConcorrentesNaoLancamOverlappingFileLock() throws Exception {
+    void concurrentReadsDoNotThrowOverlappingFileLock() throws Exception {
         Path stateFile = tmp.resolve("blocks.json");
         BlockStore store = new BlockStore(stateFile);
         Map<String, BlockEntry> blocks = new TreeMap<>();
         blocks.put("tiktok.com", new BlockEntry("tiktok.com",
                 Instant.parse("2026-01-01T00:00:00Z"), null));
-        store.save(blocks); // cria state + lock file
+        store.save(blocks); // creates the state and lock files
 
         int threads = 16;
         int readsPerThread = 25;
@@ -55,7 +55,7 @@ class BlockStoreConcurrencyTest {
             int total = 0;
             for (Future<Integer> f : results) {
                 assertTrue(f.isDone() && !f.isCancelled());
-                total += f.get(); // relança qualquer exceção da worker (falha o teste)
+                total += f.get(); // rethrows any worker exception (fails the test)
             }
             assertEquals(threads * readsPerThread, total);
         } finally {

@@ -5,7 +5,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Parser de durações para a flag {@code --for}. O formato aceito está em
+ * Duration parser for the {@code --for} flag. Expected format is in
  * {@link #FORMAT_HELP}.
  */
 public final class DurationParser {
@@ -14,36 +14,36 @@ public final class DurationParser {
             Pattern.compile("^(?:(\\d+)d)?(?:(\\d+)h)?(?:(\\d+)m)?$");
 
     public static final String FORMAT_HELP =
-            "Formato esperado: <numero>d<h><m> colados, ex.: 30m, 2h, 1h30m, 1d, 1d2h30m (apenas m/h/d minúsculos, sem espaços)";
+            "Expected format: <number>d<h><m> concatenated, e.g. 30m, 2h, 1h30m, 1d, 1d2h30m (only lowercase m/h/d, no spaces)";
 
-    // POR QUE: sem teto explícito, uma entrada válida para o Duration estoura
-    // no Instant.plus (DateTimeException) ou no Duration.toMillis (ArithmeticException).
-    // 1.000 anos cabe com folga nos dois e é muito mais do que qualquer uso real.
+    // WHY: no explicit cap; a valid duration entry overflows
+    // in Instant.plus (DateTimeException) or Duration.toMillis (ArithmeticException).
+    // 1,000 years fits easily in both and is far more than any real use.
     public static final long MAX_DAYS = 365_000;
     public static final Duration MAX_DURATION = Duration.ofDays(MAX_DAYS);
-    public static final String LIMIT_HELP = "Máximo: " + MAX_DAYS + "d (1000 anos).";
+    public static final String LIMIT_HELP = "Max: " + MAX_DAYS + "d (1000 years).";
 
     private DurationParser() {
     }
 
     /**
-     * @param input texto de {@code --for}
-     * @throws IllegalArgumentException se o texto não estiver no formato, for
-     *         zero ou exceder o intervalo suportado
+     * @param input text from {@code --for}
+     * @throws IllegalArgumentException if the text is not in format, is
+     *         zero or exceeds the supported range
      */
     public static Duration parse(String input) {
         if (input == null || input.isBlank()) {
-            throw new IllegalArgumentException("Duração vazia. " + FORMAT_HELP);
+            throw new IllegalArgumentException("Empty duration. " + FORMAT_HELP);
         }
         Matcher m = PATTERN.matcher(input);
         if (!m.matches()) {
-            throw new IllegalArgumentException("Duração inválida: '" + input + "'. " + FORMAT_HELP);
+            throw new IllegalArgumentException("Invalid duration: '" + input + "'. " + FORMAT_HELP);
         }
         String d = m.group(1);
         String h = m.group(2);
         String min = m.group(3);
         if (d == null && h == null && min == null) {
-            throw new IllegalArgumentException("Duração inválida: '" + input + "'. " + FORMAT_HELP);
+            throw new IllegalArgumentException("Invalid duration: '" + input + "'. " + FORMAT_HELP);
         }
         try {
             long days = d == null ? 0 : Long.parseLong(d);
@@ -52,26 +52,26 @@ public final class DurationParser {
             Duration total = Duration.ofDays(days).plusHours(hours).plusMinutes(minutes);
             if (total.isZero() || total.isNegative()) {
                 throw new IllegalArgumentException(
-                        "Duração deve ser maior que zero: '" + input + "'. " + FORMAT_HELP);
+                        "Duration must be greater than zero: '" + input + "'. " + FORMAT_HELP);
             }
             if (total.compareTo(MAX_DURATION) > 0) {
-                throw foraDoIntervalo(input, null);
+                throw outOfRange(input, null);
             }
             return total;
         } catch (ArithmeticException | NumberFormatException e) {
-            throw foraDoIntervalo(input, e);
+            throw outOfRange(input, e);
         }
     }
 
-    private static IllegalArgumentException foraDoIntervalo(String input, Exception cause) {
+    private static IllegalArgumentException outOfRange(String input, Exception cause) {
         return new IllegalArgumentException(
-                "Duração fora do intervalo suportado: '" + input + "'. "
+                "Duration out of supported range: '" + input + "'. "
                         + FORMAT_HELP + " " + LIMIT_HELP,
                 cause);
     }
 
     /**
-     * Formata tempo restante para o status. Ex.: "1d 2h 3m", "30m", "45s".
+     * Formats remaining time for status. E.g. "1d 2h 3m", "30m", "45s".
      */
     public static String formatRemaining(Duration remaining) {
         if (remaining == null || remaining.isZero() || remaining.isNegative()) {

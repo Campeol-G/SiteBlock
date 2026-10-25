@@ -12,31 +12,31 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Parsing manual de pacotes DNS (RFC 1035 §4.1), sem bibliotecas de alto nível.
+ * Hand-rolled DNS packet parsing (RFC 1035 §4.1), with no high-level libraries.
  *
- * <p>Suporta consultas padrão (OPCODE 0, QR 0) com exatamente uma pergunta (QDCOUNT 1).
- * Ponteiros de compressão no QNAME são rejeitados: consultas bem formadas enviadas
- * por stubs (celulares, PCs) nunca comprimem a pergunta, então um ponteiro aqui
- * indica pacote malformado ou malicioso.
+ * <p>Supports standard queries (OPCODE 0, QR 0) with exactly one question (QDCOUNT 1).
+ * Compression pointers in the QNAME are rejected: well-formed queries sent by stubs
+ * (phones, PCs) never compress the question, so a pointer here means a malformed or
+ * malicious packet.
  *
- * <p>Seções adicionais (ex.: OPT do EDNS, ARCOUNT &gt; 0) são toleradas: o OPT é
- * lido (payload size do cliente) e o resto é ignorado — o encaminhamento ao
- * upstream retransmite os bytes originais intactos, então nada se perde.
- * Respostas de bloqueio ecoam um OPT mínimo (RFC 6891).
+ * <p>Additional sections (e.g. the EDNS OPT, ARCOUNT &gt; 0) are tolerated: the OPT is
+ * read (client payload size) and the rest is ignored — forwarding to the upstream
+ * retransmits the original bytes untouched, so nothing is lost.
+ * Block responses echo a minimal OPT (RFC 6891).
  */
 public final class DnsPacketParser {
 
-    /** Tamanho do header DNS fixo (ID + flags + 4 contadores). */
+    /** Size of the fixed DNS header (ID + flags + 4 counters). */
     static final int HEADER_LEN = 12;
 
-    /** QTYPE do pseudo-registro OPT do EDNS (RFC 6891 §6.1.1). */
+    /** QTYPE of the EDNS OPT pseudo-record (RFC 6891 §6.1.1). */
     static final int TYPE_OPT = 41;
 
-    /** QTYPE do registro CNAME (RFC 1035 §3.2.2). */
+    /** QTYPE of the CNAME record (RFC 1035 §3.2.2). */
     static final int TYPE_CNAME = 5;
 
-    // Decoder UTF-8 estrito (rejeita entrada inválida em vez de trocar por U+FFFD).
-    // Por thread: o decoder do JDK não é thread-safe.
+    // Strict UTF-8 decoder (rejects invalid input instead of substituting U+FFFD).
+    // Per thread: the JDK decoder is not thread-safe.
     private static final ThreadLocal<CharsetDecoder> UTF8_STRICT = ThreadLocal.withInitial(() ->
             StandardCharsets.UTF_8.newDecoder()
                     .onMalformedInput(CodingErrorAction.REPORT)
@@ -46,21 +46,21 @@ public final class DnsPacketParser {
     }
 
     /**
-     * @param data   bytes recebidos via UDP
-     * @param length quantidade de bytes válidos em {@code data}
-     * @return consulta parseada
-     * @throws DnsParseException se o pacote não for uma consulta padrão bem formada
+     * @param data   bytes received over UDP
+     * @param length number of valid bytes in {@code data}
+     * @return parsed query
+     * @throws DnsParseException if the packet is not a well-formed standard query
      */
     public static DnsQuery parse(byte[] data, int length) throws DnsParseException {
         if (data == null) {
-            throw new DnsParseException("pacote nulo");
+            throw new DnsParseException("null packet");
         }
         if (length < HEADER_LEN) {
             throw new DnsParseException(
-                    "pacote curto: " + length + " bytes (header exige " + HEADER_LEN + ")");
+                    "short packet: " + length + " bytes (header requires " + HEADER_LEN + ")");
         }
         if (length > data.length) {
-            throw new DnsParseException("length (" + length + ") maior que o buffer (" + data.length + ")");
+            throw new DnsParseException("length (" + length + ") exceeds buffer (" + data.length + ")");
         }
 
         int transactionId = u16(data, 0);
@@ -69,14 +69,14 @@ public final class DnsPacketParser {
 
         boolean isResponse = (flags & 0x8000) != 0;
         if (isResponse) {
-            throw new DnsParseException("bit QR=1: pacote é resposta, não consulta");
+            throw new DnsParseException("QR=1 bit set: packet is a response, not a query");
         }
         int opcode = (flags >>> 11) & 0x0F;
         if (opcode != 0) {
-            throw new DnsParseException("OPCODE=" + opcode + " não suportado (só consulta padrão)");
+            throw new DnsParseException("OPCODE=" + opcode + " not supported (standard query only)");
         }
         if (qdCount != 1) {
-            throw new DnsParseException("QDCOUNT=" + qdCount + " (esperado exatamente 1)");
+            throw new DnsParseException("QDCOUNT=" + qdCount + " (expected exactly 1)");
         }
 
         int off = HEADER_LEN;
@@ -84,18 +84,18 @@ public final class DnsPacketParser {
         boolean firstLabel = true;
         boolean terminated = false;
         int wireLen = 0;
-        // Trava de segurança contra pacote malicioso sem terminador: no máximo
-        // 128 rótulos e o nome nunca passa de 253 chars (RFC 1035 §3.1).
+        // Safety guard against a malicious packet with no terminator: at most
+        // 128 labels, and the name never exceeds 253 chars (RFC 1035 §3.1).
         for (int labels = 0; labels < 128; labels++) {
             if (off >= length) {
-                throw new DnsParseException("QNAME ultrapassa o fim do pacote");
+                throw new DnsParseException("QNAME extends past end of packet");
             }
             int labelLen = data[off] & 0xFF;
             if ((labelLen & 0xC0) == 0xC0) {
-                throw new DnsParseException("ponteiro de compressão no QNAME (não esperado em consulta)");
+                throw new DnsParseException("compression pointer in QNAME (not expected in a query)");
             }
             if (labelLen > 63) {
-                throw new DnsParseException("rótulo com tamanho inválido: " + labelLen);
+                throw new DnsParseException("label with invalid length: " + labelLen);
             }
             if (labelLen == 0) {
                 off++;
@@ -104,40 +104,40 @@ public final class DnsPacketParser {
             }
             off++;
             if (off + labelLen > length) {
-                throw new DnsParseException("rótulo ultrapassa o fim do pacote");
+                throw new DnsParseException("label extends past end of packet");
             }
             String label = decodeLabel(data, off, labelLen).toLowerCase(Locale.ROOT);
             if (!firstLabel) {
                 name.append('.');
-                wireLen += 1; // o ponto do nome também ocupa 1 byte no fio
+                wireLen += 1; // the dot in the name also takes one byte on the wire
             }
             name.append(label);
             firstLabel = false;
             off += labelLen;
             wireLen += labelLen;
-            // O limite do RFC 1035 §3.1 é sobre o nome no fio (bytes), não sobre os
-            // chars decodificados: um rótulo UTF-8 ocupa mais de um byte.
+            // The RFC 1035 §3.1 limit applies to the name on the wire (bytes), not to
+            // decoded chars: a UTF-8 label takes more than one byte.
             if (wireLen > 253) {
-                throw new DnsParseException("nome com mais de 253 caracteres");
+                throw new DnsParseException("name longer than 253 characters");
             }
         }
         if (!terminated) {
-            throw new DnsParseException("QNAME sem terminador (pacote malformado ou malicioso)");
+            throw new DnsParseException("QNAME without terminator (malformed or malicious packet)");
         }
 
         String canonical;
         try {
             canonical = toAsciiName(name.toString());
         } catch (IllegalArgumentException e) {
-            // Nome inválido para IDNA: pacote descartado (nada de derrubar o servidor).
-            throw new DnsParseException("nome inválido para IDNA: " + e.getMessage());
+            // Name invalid for IDNA: drop the packet (never bring the server down).
+            throw new DnsParseException("invalid IDNA name: " + e.getMessage());
         }
         if (canonical.length() > 253) {
-            throw new DnsParseException("nome com mais de 253 caracteres");
+            throw new DnsParseException("name longer than 253 characters");
         }
 
         if (off + 4 > length) {
-            throw new DnsParseException("faltam QTYPE/QCLASS após o QNAME");
+            throw new DnsParseException("missing QTYPE/QCLASS after QNAME");
         }
         int qtype = u16(data, off);
         int qclass = u16(data, off + 2);
@@ -151,125 +151,125 @@ public final class DnsPacketParser {
     }
 
     /**
-     * Nomes da section answer de uma RESPOSTA (QR=1).
+     * Names in the answer section of a RESPONSE (QR=1).
      *
-     * <p>POR QUE: a cadeia de aliases só aparece na resposta do upstream — o nome
-     * consultado é livre, mas o CNAME aponta para um nome bloqueado. Para ver a
-     * cadeia é preciso ler a section answer, e lá os nomes vêm <b>comprimidos</b>
-     * (ponteiro 0xC0xx), ao contrário do QNAME da consulta.
+     * <p>WHY: an alias chain only shows up in the upstream response — the queried
+     * name is free, but the CNAME points at a blocked name. Seeing the chain
+     * requires reading the answer section, where names come <b>compressed</b>
+     * (0xC0xx pointers), unlike the query QNAME.
      *
-     * <p>Devolve o owner de cada registro e o alvo de cada CNAME: são os nomes
-     * da cadeia. Um registro malformado encerra a leitura (o resto da seção não
-     * é confiável) e nada é lido fora do pacote — a lista volta incompleta, o
-     * pacote nunca quebra o servidor.
+     * <p>Returns the owner of each record and the target of each CNAME: those are
+     * the names in the chain. A malformed record ends parsing (the rest of the
+     * section is not trustworthy), and nothing is read outside the packet — the
+     * list comes back incomplete, but the packet never takes the server down.
      *
-     * @param data   bytes da resposta
-     * @param length quantidade de bytes válidos em {@code data}
+     * @param data   response bytes
+     * @param length number of valid bytes in {@code data}
      */
-    public static List<String> nomesDaAnswer(byte[] data, int length) {
-        List<String> nomes = new ArrayList<>();
+    public static List<String> answerSectionNames(byte[] data, int length) {
+        List<String> names = new ArrayList<>();
         if (data == null || length < HEADER_LEN || length > data.length) {
-            return nomes;
+            return names;
         }
         int anCount = u16(data, 6);
         if (anCount == 0) {
-            return nomes; // NXDOMAIN/NODATA: não há cadeia para inspecionar
+            return names; // NXDOMAIN/NODATA: there is no chain to inspect
         }
-        // A question é pulada com o mesmo leitor: numa resposta o nome dela
-        // também pode vir comprimido.
-        Nome pergunta = lerNome(data, HEADER_LEN, length, length);
-        if (pergunta == null || pergunta.fim() + 4 > length) {
-            return nomes;
+        // The question is skipped with the same reader: in a response its name can
+        // also be compressed.
+        WireName question = readName(data, HEADER_LEN, length, length);
+        if (question == null || question.end() + 4 > length) {
+            return names;
         }
-        int off = pergunta.fim() + 4; // depois do QTYPE/QCLASS
+        int off = question.end() + 4; // past QTYPE/QCLASS
         for (int i = 0; i < anCount; i++) {
             if (off >= length) {
                 break;
             }
-            Nome owner = lerNome(data, off, length, length);
+            WireName owner = readName(data, off, length, length);
             if (owner == null) {
                 break;
             }
-            off = owner.fim();
+            off = owner.end();
             if (off + 10 > length) {
-                break; // registro truncado
+                break; // truncated record
             }
             int type = u16(data, off);
             int rdlen = u16(data, off + 8);
-            int rdata = off + 10;
-            if (rdata + rdlen > length) {
-                break; // RDATA truncada
+            int rdataOffset = off + 10;
+            if (rdataOffset + rdlen > length) {
+                break; // truncated RDATA
             }
-            if (!owner.texto().isEmpty()) {
-                nomes.add(owner.texto());
+            if (!owner.text().isEmpty()) {
+                names.add(owner.text());
             }
             if (type == TYPE_CNAME) {
-                // O alvo do CNAME é o próximo elo da cadeia: a RDATA é um nome.
-                Nome alvo = lerNome(data, rdata, rdata + rdlen, length);
-                if (alvo != null && !alvo.texto().isEmpty()) {
-                    nomes.add(alvo.texto());
+                // The CNAME target is the next link in the chain: the RDATA is a name.
+                WireName target = readName(data, rdataOffset, rdataOffset + rdlen, length);
+                if (target != null && !target.text().isEmpty()) {
+                    names.add(target.text());
                 }
             }
-            off = rdata + rdlen;
+            off = rdataOffset + rdlen;
         }
-        return nomes;
+        return names;
     }
 
-    // Um nome lido do fio: o texto e o offset logo depois dele.
-    private record Nome(String texto, int fim) {
+    // A name read from the wire: its text and the offset just past it.
+    private record WireName(String text, int end) {
     }
 
-    // Lê um nome no fio, seguindo ponteiros de compressão (RFC 1035 §4.1.4).
-    // "limite" é onde os rótulos podem ser lidos direto (a RDATA); "fimPacote" é
-    // o fim do pacote, onde os ponteiros podem apontar. Null se não couber.
-    private static Nome lerNome(byte[] data, int off, int limite, int fimPacote) {
-        if (off < 0 || off >= limite || limite > fimPacote) {
+    // Reads a name from the wire, following compression pointers (RFC 1035 §4.1.4).
+    // "limit" is where labels may be read directly (the RDATA); "packetEnd" is the
+    // end of the packet, where pointers may point. Null if it does not fit.
+    private static WireName readName(byte[] data, int off, int limit, int packetEnd) {
+        if (off < 0 || off >= limit || limit > packetEnd) {
             return null;
         }
         StringBuilder sb = new StringBuilder();
         int p = off;
-        int fim = -1;
-        int limiteAtual = limite;
-        boolean completo = false;
-        // Trava de segurança: nome com rótulos demais ou ponteiro em ciclo.
-        for (int passos = 0; passos < 128; passos++) {
-            if (p < 0 || p >= fimPacote) {
+        int end = -1;
+        int currentLimit = limit;
+        boolean complete = false;
+        // Safety guard: a name with too many labels or a pointer cycle.
+        for (int steps = 0; steps < 128; steps++) {
+            if (p < 0 || p >= packetEnd) {
                 return null;
             }
             int b = data[p] & 0xFF;
             if ((b & 0xC0) == 0xC0) {
-                if (p + 1 >= fimPacote) {
+                if (p + 1 >= packetEnd) {
                     return null;
                 }
-                int destino = ((b & 0x3F) << 8) | (data[p + 1] & 0xFF);
-                if (destino >= fimPacote) {
+                int destination = ((b & 0x3F) << 8) | (data[p + 1] & 0xFF);
+                if (destination >= packetEnd) {
                     return null;
                 }
-                if (fim < 0) {
-                    fim = p + 2;
+                if (end < 0) {
+                    end = p + 2;
                 }
-                // ATENÇÃO: depois do salto os rótulos vêm do pacote, não da
-                // RDATA — por isso o limite passa a ser o fim do pacote.
-                limiteAtual = fimPacote;
-                p = destino;
+                // NOTE: after the jump the labels come from the packet, not from
+                // the RDATA — that is why the limit becomes the end of the packet.
+                currentLimit = packetEnd;
+                p = destination;
                 continue;
             }
             if ((b & 0xC0) != 0) {
-                return null; // bits reservados (0x40/0x80) não valem num nome
+                return null; // reserved bits (0x40/0x80) are not valid in a name
             }
             if (b > 63) {
                 return null;
             }
             if (b == 0) {
                 p++;
-                if (fim < 0) {
-                    fim = p;
+                if (end < 0) {
+                    end = p;
                 }
-                completo = true;
+                complete = true;
                 break;
             }
-            if (p + 1 + b > limiteAtual) {
-                return null; // rótulo ultrapassa a região permitida
+            if (p + 1 + b > currentLimit) {
+                return null; // label extends past the allowed region
             }
             p++;
             if (sb.length() > 0) {
@@ -278,18 +278,18 @@ public final class DnsPacketParser {
             sb.append(decodeLabel(data, p, b).toLowerCase(Locale.ROOT));
             p += b;
             if (sb.length() > 253) {
-                return null; // nome maior que o limite do RFC 1035 §3.1
+                return null; // name longer than the RFC 1035 §3.1 limit
             }
         }
-        if (!completo) {
-            return null; // nome sem terminador ou com rótulos demais
+        if (!complete) {
+            return null; // name without terminator or with too many labels
         }
-        return new Nome(sb.toString(), fim);
+        return new WireName(sb.toString(), end);
     }
 
-    // Lê o payload UDP anunciado pelo cliente no OPT do EDNS (RFC 6891).
-    // A section additional é tolerada: se estiver malformada ou truncada, o OPT
-    // é ignorado (0 = sem EDNS). Nunca ler fora do buffer.
+    // Reads the UDP payload advertised by the client in the EDNS OPT (RFC 6891).
+    // The additional section is tolerated: if it is malformed or truncated, the OPT
+    // is ignored (0 = no EDNS). Never read outside the buffer.
     private static int readEdnsPayloadSize(byte[] data, int off, int length, int arCount) {
         int p = off;
         for (int i = 0; i < arCount; i++) {
@@ -299,25 +299,25 @@ public final class DnsPacketParser {
             }
             p = next;
             if (p + 10 > length) {
-                return 0; // registro truncado
+                return 0; // truncated record
             }
             int type = u16(data, p);
             int cls = u16(data, p + 2);
             int rdlen = u16(data, p + 8);
             p += 10;
             if (p + rdlen > length) {
-                return 0; // RDATA truncada
+                return 0; // truncated RDATA
             }
             if (type == TYPE_OPT) {
-                return cls; // CLASS do OPT = payload size do cliente
+                return cls; // OPT CLASS = client payload size
             }
             p += rdlen;
         }
         return 0;
     }
 
-    // Devolve o offset logo depois do nome (rótulos ou ponteiro de compressão),
-    // ou -1 se o nome não couber no pacote.
+    // Returns the offset just past the name (labels or compression pointer),
+    // or -1 if the name does not fit in the packet.
     private static int skipName(byte[] data, int off, int length) {
         int p = off;
         for (int labels = 0; labels < 128; labels++) {
@@ -336,15 +336,16 @@ public final class DnsPacketParser {
                 return -1;
             }
             if (l == 0) {
-                return p; // nome terminado
+                return p; // terminated name
             }
         }
         return -1;
     }
 
-    // Decodifica um rótulo sem perder byte nenhum: 1 byte vira 1 char. UTF-8
-    // quando o rótulo é válido (IDN em vez de punycode), senão ISO-8859-1 — o
-    // decoder ASCII trocaria todo byte >= 0x80 por U+FFFD e o nome não casaria.
+    // Decodes a label without losing a single byte: one byte becomes one char. UTF-8
+    // when the label is valid (IDN instead of punycode), otherwise ISO-8859-1 — the
+    // ASCII decoder would replace every byte >= 0x80 with U+FFFD and the name would
+    // never match.
     private static String decodeLabel(byte[] data, int off, int len) {
         boolean ascii = true;
         for (int i = off; i < off + len; i++) {
@@ -364,12 +365,12 @@ public final class DnsPacketParser {
     }
 
     /**
-     * Converte um nome para a forma ASCII canônica (IDNA/punycode), em minúsculas.
+     * Converts a name to its canonical lowercase ASCII form (IDNA/punycode).
      *
-     * <p>É o que faz o nome em unicode e o nome em punycode casarem com a mesma
-     * entrada da lista de bloqueio ("пример.рф" e "xn--e1afmkfd.xn--p1ai").
+     * <p>This is what makes a Unicode name and a punycode name match the same
+     * blocklist entry ("пример.рф" and "xn--e1afmkfd.xn--p1ai").
      *
-     * @throws IllegalArgumentException se o nome não for válido para IDNA
+     * @throws IllegalArgumentException if the name is not valid for IDNA
      */
     public static String toAsciiName(String name) {
         String s = name == null ? "" : name.trim();
@@ -379,7 +380,7 @@ public final class DnsPacketParser {
         if (s.isEmpty()) {
             return "";
         }
-        // IDN.toASCII não minúscula o ASCII: normalizamos aqui.
+        // IDN.toASCII does not lowercase ASCII: normalize it here.
         return IDN.toASCII(s).toLowerCase(Locale.ROOT);
     }
 

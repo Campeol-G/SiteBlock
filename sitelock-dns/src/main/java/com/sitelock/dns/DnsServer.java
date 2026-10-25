@@ -31,43 +31,43 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Servidor DNS (RFC 1035) para a rede local: escuta UDP e TCP na mesma porta,
- * despacha cada consulta para uma thread do pool e responde sinkhole
- * (bloqueado) ou encaminha ao upstream (liberado).
+ * DNS server (RFC 1035) for the local network: listens on UDP and TCP on the same
+ * port, dispatches each query to a pool thread, and answers with the sinkhole
+ * (blocked) or forwards upstream (allowed).
  */
 public class DnsServer {
 
-    /** Timeout padrão de espera pelo upstream antes de responder SERVFAIL. */
+    /** Default wait for the upstream before answering SERVFAIL. */
     public static final int DEFAULT_UPSTREAM_TIMEOUT_MS = 2000;
 
-    // Buffer por datagrama e resposta do upstream. 65535 é o teto de uma
-    // mensagem DNS (2 bytes de tamanho no TCP); no UDP o maior payload é 65507.
-    // 8192 truncava respostas EDNS grandes antes de checar o TC.
+    // Buffer per datagram and per upstream response. 65535 is the ceiling of a
+    // DNS message (2-byte length on TCP); on UDP the largest payload is 65507.
+    // 8192 truncated large EDNS responses before checking TC.
     public static final int MAX_PACKET_BYTES = 65535;
 
-    /** Tamanho máximo de uma mensagem DNS sobre TCP (2 bytes de tamanho, RFC 1035 §4.2.2). */
+    /** Maximum size of a DNS message over TCP (2-byte length, RFC 1035 §4.2.2). */
     public static final int MAX_TCP_MESSAGE_BYTES = 65535;
 
-    // Tempo que uma conexão TCP pode ficar aberta sem enviar a consulta.
-    // POR QUE: sem isso, uma conexão que abre e fica muda ocupa uma thread do
-    // pool para sempre — o próprio cliente do SiteLock viraria o vetor.
+    // How long a TCP connection may stay open without sending the query.
+    // WHY: without this, a connection that opens and stays silent occupies a
+    // pool thread forever — SiteLock's own client would become the vector.
     static final int TCP_READ_TIMEOUT_MS = 5000;
 
-    // Threads que atendem consultas UDP ao mesmo tempo.
-    // POR QUE: pool "cached" criaria milhares de threads numa rajada (app com
-    // retry agressivo, alguém na LAN); o excedente é descartado pela fila.
+    // Threads handling UDP queries at the same time.
+    // WHY: a "cached" pool would create thousands of threads in a burst (an app
+    // with aggressive retries, someone on the LAN); the excess is dropped by the queue.
     static final int UDP_POOL_SIZE = 16;
 
-    // Fila de consultas UDP à espera de thread.
+    // Queue of UDP queries waiting for a thread.
     static final int UDP_QUEUE_SIZE = 128;
 
-    // Sockets conectados ao upstream, reaproveitados entre consultas.
+    // Sockets connected to the upstream, reused across queries.
     static final int UPSTREAM_SOCKETS = 8;
 
-    // Threads que atendem conexões TCP ao mesmo tempo.
+    // Threads handling TCP connections at the same time.
     static final int TCP_POOL_SIZE = 8;
 
-    // Fila de conexões TCP à espera de thread.
+    // Queue of TCP connections waiting for a thread.
     static final int TCP_QUEUE_SIZE = 64;
 
     private final int port;
@@ -86,8 +86,8 @@ public class DnsServer {
     private volatile ExecutorService tcpPool;
     private volatile UpstreamClient upstreamClient;
 
-    // Última vez que cada origem recusada foi registrada (para não inundar o log).
-    private final Map<String, Long> ultimaRecusa = new ConcurrentHashMap<>();
+    // Last time each refused source was logged (so the log is not flooded).
+    private final Map<String, Long> lastRefusalAt = new ConcurrentHashMap<>();
 
     public DnsServer(int port, InetAddress upstream, BlockStore store, Clock clock) {
         this(port, upstream, DnsResolver.UPSTREAM_PORT, DEFAULT_UPSTREAM_TIMEOUT_MS,
@@ -101,8 +101,8 @@ public class DnsServer {
     }
 
     /**
-     * @param allowFrom origens liberadas além das locais (endereço ou CIDR,
-     *                  separados por vírgula)
+     * @param allowFrom sources allowed in addition to local ones (address or CIDR,
+     *                  comma-separated)
      */
     public DnsServer(int port, InetAddress upstream, BlockStore store, Clock clock,
                      List<String> allowFrom) {
@@ -111,8 +111,8 @@ public class DnsServer {
     }
 
     /**
-     * @param allowFrom origens liberadas além das locais (endereço ou CIDR,
-     *                  separados por vírgula)
+     * @param allowFrom sources allowed in addition to local ones (address or CIDR,
+     *                  comma-separated)
      */
     public DnsServer(int port, InetAddress upstream, int upstreamTimeoutMs,
                      BlockStore store, Clock clock, List<String> allowFrom) {
@@ -121,33 +121,33 @@ public class DnsServer {
     }
 
     /**
-     * @param upstreamPort porta do upstream (53 no DNS público)
-     * @param allowFrom    origens liberadas além das locais (endereço ou CIDR)
+     * @param upstreamPort upstream port (53 for public DNS)
+     * @param allowFrom    sources allowed in addition to local ones (address or CIDR)
      */
     public DnsServer(int port, InetAddress upstream, int upstreamPort, int upstreamTimeoutMs,
                      BlockStore store, Clock clock, List<String> allowFrom) {
         this(port, upstream, upstreamPort, upstreamTimeoutMs, store, clock,
-                SourcePolicy.padrao(allowFrom));
+                SourcePolicy.defaultPolicy(allowFrom));
     }
 
-    // Construtor com a política de origem já pronta (usado nos testes).
+    // Constructor with the source policy already built (used in tests).
     DnsServer(int port, InetAddress upstream, int upstreamTimeoutMs,
               BlockStore store, Clock clock, SourcePolicy policy) {
         this(port, upstream, DnsResolver.UPSTREAM_PORT, upstreamTimeoutMs,
                 store, clock, policy);
     }
 
-    // Construtor com a política de origem e a porta do upstream (usados nos testes).
+    // Constructor with the source policy and the upstream port (used in tests).
     DnsServer(int port, InetAddress upstream, int upstreamPort, int upstreamTimeoutMs,
               BlockStore store, Clock clock, SourcePolicy policy) {
         if (port < 1 || port > 65535) {
-            throw new IllegalArgumentException("porta inválida: " + port);
+            throw new IllegalArgumentException("invalid port: " + port);
         }
         if (upstream == null) {
-            throw new IllegalArgumentException("upstream nulo");
+            throw new IllegalArgumentException("upstream is null");
         }
         if (store == null || clock == null) {
-            throw new IllegalArgumentException("store/clock nulos");
+            throw new IllegalArgumentException("store/clock are null");
         }
         this.port = port;
         this.upstream = upstream;
@@ -167,77 +167,77 @@ public class DnsServer {
         return upstream;
     }
 
-    // ATENÇÃO: a validação acontece na CLI, antes de forkar — um erro de
-    // digitação no endereço não pode derrubar o daemon depois de subir.
+    // NOTE: validation happens in the CLI, before forking — a typo in the address
+    // must not bring the daemon down after it starts.
     /**
-     * Valida a lista de origens do {@code --allow-from} (separada por vírgula).
+     * Validates the {@code --allow-from} source list (comma-separated).
      *
-     * @throws IllegalArgumentException se alguma entrada não for IP ou CIDR válido
+     * @throws IllegalArgumentException if any entry is not a valid IP or CIDR
      */
-    public static List<String> parseAllowFrom(String texto) {
-        List<String> origens = new ArrayList<>();
-        if (texto == null || texto.isBlank()) {
-            return origens;
+    public static List<String> parseAllowFrom(String text) {
+        List<String> sources = new ArrayList<>();
+        if (text == null || text.isBlank()) {
+            return sources;
         }
-        for (String parte : texto.split(",")) {
-            String limpa = parte.trim();
-            if (limpa.isEmpty()) {
+        for (String part : text.split(",")) {
+            String clean = part.trim();
+            if (clean.isEmpty()) {
                 continue;
             }
-            Cidr.parse(limpa); // valida: lança com mensagem clara
-            origens.add(limpa);
+            Cidr.parse(clean); // validates the entry; throws with a clear message
+            sources.add(clean);
         }
-        return origens;
+        return sources;
     }
 
-    /** Registra hook de encerramento controlado (fecha socket + pool no SIGTERM/Ctrl+C). */
+    /** Registers a graceful shutdown hook (closes socket + pool on SIGTERM/Ctrl+C). */
     public void installShutdownHook() {
         Runtime.getRuntime().addShutdownHook(new Thread(this::stop, "sitelock-dns-shutdown"));
     }
 
     /**
-     * Loop de atendimento; retorna apenas quando {@link #stop()} for chamado.
+     * Serving loop; returns only when {@link #stop()} is called.
      *
-     * @throws DnsServerException com mensagem amigável se a porta não puder ser aberta
+     * @throws DnsServerException with a friendly message if the port cannot be opened
      */
     public void serveForever() {
         DatagramSocket ds = bind();
         this.socket = ds;
         ServerSocket tcp = null;
-        UpstreamClient cliente = null;
-        // ATENÇÃO: bindTcp e a criação do upstream também ficam dentro do try:
-        // se qualquer um falhar, o finally fecha o UDP — antes a falha do TCP
-        // vazava o socket UDP e o próximo start dizia que a porta estava em uso.
+        UpstreamClient client = null;
+        // NOTE: bindTcp and the upstream client creation are also inside the try:
+        // if either fails, the finally closes the UDP — previously a TCP failure
+        // leaked the UDP socket and the next start said the port was in use.
         try {
             tcp = bindTcp();
             this.tcpServer = tcp;
             try {
-                cliente = new UpstreamClient(upstream, upstreamPort, upstreamTimeoutMs,
+                client = new UpstreamClient(upstream, upstreamPort, upstreamTimeoutMs,
                         UPSTREAM_SOCKETS);
             } catch (IOException e) {
-                throw new DnsServerException("Falha ao abrir o socket do upstream "
+                throw new DnsServerException("Failed to open the upstream socket "
                         + upstream.getHostAddress() + ":" + upstreamPort + ": "
                         + e.getMessage(), e);
             }
-            this.upstreamClient = cliente;
+            this.upstreamClient = client;
             this.pool = newPool();
             this.tcpPool = newTcpPool();
             startTcpAcceptor(tcp);
-            log("ouvindo em 0.0.0.0:" + port + " (upstream " + upstream.getHostAddress()
-                    + ") — aceitando origens locais"
+            log("listening on 0.0.0.0:" + port + " (upstream " + upstream.getHostAddress()
+                    + ") — accepting local sources"
                     + (policy.extras().isEmpty() ? ""
                     : " + extras " + String.join(", ", policy.extras())));
             System.out.println("SITELOCK_DNS_LISTENING port=" + port);
             while (!stopRequested) {
                 try {
-                    aguardaEDespacha(ds);
+                    awaitAndDispatch(ds);
                 } catch (SocketException e) {
                     if (stopRequested || ds.isClosed()) {
-                        break; // stop() fechou o socket para destravar o receive
+                        break; // stop() closed the socket to unblock receive
                     }
-                    log("erro no socket de escuta: " + e.getMessage() + " (continuando)");
+                    log("socket error on listener: " + e.getMessage() + " (continuing)");
                 } catch (IOException e) {
-                    log("erro de I/O na escuta: " + e.getMessage() + " (continuando)");
+                    log("I/O error on listener: " + e.getMessage() + " (continuing)");
                 }
             }
         } finally {
@@ -245,20 +245,20 @@ public class DnsServer {
             if (tcp != null) {
                 closeQuietly(tcp);
             }
-            if (cliente != null) {
-                cliente.close();
+            if (client != null) {
+                client.close();
             }
-            // POR QUE: derruba o pool no finally — sem isso, uma queda no meio do
-            // loop deixaria o pool antigo órfão (threads daemon com keepalive de
-            // 60s) e o watchdog criaria outro pool por cima.
+            // WHY: tear down the pool in the finally — without this, a crash in the
+            // middle of the loop would orphan the old pool (daemon threads with a 60s
+            // keepalive) and the watchdog would create another pool on top.
             shutdown(pool);
             shutdown(tcpPool);
         }
     }
 
-    // Espera um pacote e despacha o atendimento para o pool.
-    // POR QUE: package-private para o teste poder simular a queda do loop.
-    void aguardaEDespacha(DatagramSocket ds) throws IOException {
+    // Waits for a packet and dispatches handling to the pool.
+    // WHY: package-private so the test can simulate the loop crashing.
+    void awaitAndDispatch(DatagramSocket ds) throws IOException {
         byte[] buf = new byte[MAX_PACKET_BYTES];
         DatagramPacket packet = new DatagramPacket(buf, buf.length);
         ds.receive(packet);
@@ -268,20 +268,20 @@ public class DnsServer {
         try {
             pool.execute(() -> handlePacket(data, client, clientPort));
         } catch (RejectedExecutionException e) {
-            // Pool cheio ou encerrando: descarta a consulta (o cliente retransmite).
+            // Pool full or shutting down: drop the query (the client retransmits).
         }
     }
 
-    // POR QUE: a primeira falha derruba o processo — antes o watchdog genérico
-    // dormia 1s e tentava de novo para sempre, e o `dns start` (que só olhava
-    // se o filho estava vivo) imprimia "Servidor DNS iniciado" sem escutar nada.
+    // WHY: the first failure takes the process down — previously the generic
+    // watchdog slept 1s and retried forever, and `dns start` (which only checked
+    // whether the child was alive) printed "DNS server started" while listening to nothing.
     /**
-     * Watchdog: se o loop de atendimento morrer por exceção inesperada, espera 1s
-     * e tenta de novo até {@link #stop()}. A primeira falha derruba o processo.
-     * Não cobre {@code kill -9}: o watchdog morre junto (ver README).
+     * Watchdog: if the serving loop dies from an unexpected exception, waits 1s and
+     * retries until {@link #stop()}. The first failure takes the process down.
+     * It does not cover {@code kill -9}: the watchdog dies with it (see README).
      */
     public void runWithWatchdog() {
-        boolean primeiraTentativa = true;
+        boolean firstAttempt = true;
         while (!stopRequested) {
             try {
                 serveForever();
@@ -289,21 +289,21 @@ public class DnsServer {
                 if (stopRequested) {
                     break;
                 }
-                if (primeiraTentativa) {
+                if (firstAttempt) {
                     throw e;
                 }
-                log("queda inesperada (" + e.getMessage() + "); reiniciando em 1s...");
+                log("unexpected crash (" + e.getMessage() + "); restarting in 1s...");
             } catch (RuntimeException e) {
                 if (stopRequested) {
                     break;
                 }
-                if (primeiraTentativa) {
-                    throw new DnsServerException("Falha inesperada no servidor DNS: "
+                if (firstAttempt) {
+                    throw new DnsServerException("Unexpected DNS server failure: "
                             + e.getMessage(), e);
                 }
-                log("erro inesperado (" + e.getMessage() + "); reiniciando em 1s...");
+                log("unexpected error (" + e.getMessage() + "); restarting in 1s...");
             }
-            primeiraTentativa = false;
+            firstAttempt = false;
             if (!stopRequested) {
                 try {
                     Thread.sleep(1000);
@@ -315,7 +315,7 @@ public class DnsServer {
         }
     }
 
-    /** Encerra: destrava o receive, fecha os sockets e desliga os pools. */
+    /** Stops the server: unblocks receive, closes sockets, and shuts down the pools. */
     public void stop() {
         stopRequested = true;
         DatagramSocket ds = socket;
@@ -326,14 +326,14 @@ public class DnsServer {
         if (tcp != null && !tcp.isClosed()) {
             closeQuietly(tcp);
         }
-        UpstreamClient cliente = upstreamClient;
-        if (cliente != null) {
-            cliente.close();
+        UpstreamClient client = upstreamClient;
+        if (client != null) {
+            client.close();
         }
         shutdown(pool);
         shutdown(tcpPool);
     }
-    // Desliga um pool, esperando as threads terminarem.
+    // Shuts down a pool, waiting for the threads to finish.
     private static void shutdown(ExecutorService p) {
         if (p == null) {
             return;
@@ -351,159 +351,159 @@ public class DnsServer {
 
     private void handlePacket(byte[] data, InetAddress client, int clientPort) {
         if (!policy.isAllowed(client)) {
-            registrarOrigemRecusada(client);
-            return; // silêncio: responder seria justamente amplificar
+            recordRefusedSource(client);
+            return; // silence: answering would be exactly the amplification
         }
-        byte[] response = montaResposta(data, client);
+        byte[] response = answerQuery(data, client);
         if (response != null) {
             send(response, client, clientPort);
         }
     }
 
-    // Decide e monta a resposta de uma consulta — o mesmo caminho para UDP e TCP.
-    // Devolve null quando a consulta foi ignorada.
-    private byte[] montaResposta(byte[] data, InetAddress client) {
+    // Decides and builds the response for a query — the same path for UDP and TCP.
+    // Returns null when the query was ignored.
+    private byte[] answerQuery(byte[] data, InetAddress client) {
         final DnsQuery query;
         try {
             query = DnsPacketParser.parse(data, data.length);
         } catch (DnsParseException e) {
-            // ATENÇÃO: pacote com OPCODE/QDCOUNT inesperado é malformado, e fica
-            // sem resposta de propósito — responder erro a lixo facilita
-            // reflexão/amplificação, e o cliente retransmite por conta própria.
-            log("ignorado pacote malformado de " + client.getHostAddress() + ": " + e.getMessage());
+            // NOTE: a packet with an unexpected OPCODE/QDCOUNT is malformed and is
+            // intentionally left unanswered — answering garbage with an error makes
+            // reflection/amplification easier, and the client retransmits on its own.
+            log("ignored malformed packet from " + client.getHostAddress() + ": " + e.getMessage());
             return null;
         }
 
-        // Cinturão e suspensórios: nenhum erro de uma consulta pode matar a worker
-        // thread sem resposta (o cliente ficaria esperando até o timeout). Erro aqui
-        // vira SERVFAIL; pacote malformado continua sendo ignorado (ver acima).
-        final DnsResolver.Resultado resultado;
+        // Belt and suspenders: no query error may kill the worker thread without a
+        // response (the client would wait until the timeout). An error here becomes
+        // SERVFAIL; a malformed packet is still ignored (see above).
+        final DnsResolver.Result result;
         try {
-            resultado = resolver.decideComEstado(query.name(), query.type());
+            result = resolver.decideWithState(query.name(), query.type());
         } catch (RuntimeException e) {
-            log("erro interno ao decidir " + query.name() + ": " + e + " (SERVFAIL)");
+            log("internal error deciding " + query.name() + ": " + e + " (SERVFAIL)");
             return DnsPacketBuilder.buildErrorResponse(query, 2);
         }
-        DnsResolver.Decision decision = resultado.decisao();
-        // POR QUE: isBlocked() cobre BLOCK e BLOCK_NODATA. Comparar só com BLOCK
-        // deixa o tipo ≠ A/AAAA cair no encaminhamento — o cliente receberia os
-        // dados REAIS do nome bloqueado e o provedor de DNS veria a consulta.
+        DnsResolver.Decision decision = result.decision();
+        // WHY: isBlocked() covers BLOCK and BLOCK_NODATA. Comparing only with BLOCK
+        // lets types other than A/AAAA fall through to forwarding — the client would
+        // receive the blocked name's REAL data and the DNS provider would see the query.
         if (decision.isBlocked()) {
-            log("BLOQUEADO " + query.name() + " (tipo " + query.type() + ") <- "
+            log("BLOCKED " + query.name() + " (type " + query.type() + ") <- "
                     + client.getHostAddress());
             return DnsPacketBuilder.buildResponse(query, decision);
         }
 
-        final byte[] resposta;
+        final byte[] response;
         try {
-            UpstreamClient cliente = upstreamClient;
-            if (cliente == null) {
-                resposta = DnsResolver.forwardRaw(data, data.length, upstream, upstreamPort, upstreamTimeoutMs);
+            UpstreamClient client2 = upstreamClient;
+            if (client2 == null) {
+                response = DnsResolver.forwardRaw(data, data.length, upstream, upstreamPort, upstreamTimeoutMs);
             } else {
-                resposta = cliente.encaminhar(data, data.length);
+                response = client2.forward(data, data.length);
             }
         } catch (SocketTimeoutException e) {
-            // Timeout vira SERVFAIL (RCODE 2): nunca espera o upstream indefinidamente.
-            log("timeout do upstream " + upstream.getHostAddress() + " para " + query.name()
+            // Timeout becomes SERVFAIL (RCODE 2): never wait for the upstream forever.
+            log("upstream timeout " + upstream.getHostAddress() + " for " + query.name()
                     + " (SERVFAIL)");
             return DnsPacketBuilder.buildErrorResponse(query, 2);
         } catch (IOException e) {
-            log("falha no upstream para " + query.name() + ": " + e.getMessage() + " (SERVFAIL)");
+            log("upstream failure for " + query.name() + ": " + e.getMessage() + " (SERVFAIL)");
             return DnsPacketBuilder.buildErrorResponse(query, 2);
         }
 
-        // Alias por CNAME: o nome consultado é livre, mas a cadeia devolvida pelo
-        // upstream pode apontar para um nome bloqueado — e vir com o IP real dele.
-        // Aí a resposta é descartada e o cliente recebe o sinkhole local.
-        final String aliasBloqueado;
+        // CNAME alias: the queried name is free, but the chain returned by the
+        // upstream may point at a blocked name — and carry its real IP.
+        // In that case the response is discarded and the client gets the local sinkhole.
+        final String blockedAlias;
         try {
-            aliasBloqueado = resolver.nomeBloqueadoNaCadeia(resposta, resultado.estado());
+            blockedAlias = resolver.blockedNameInChain(response, result.state());
         } catch (RuntimeException e) {
-            // Falha na checagem não pode derrubar a resposta nem o servidor:
-            // a rede do cliente continua funcionando (fail-open, como na leitura
-            // do estado). O log registra o problema.
-            log("erro ao checar a cadeia de alias de " + query.name() + ": " + e
-                    + " (resposta repassada)");
-            return resposta;
+            // A failed check must not take down the response or the server: the
+            // client's network keeps working (fail-open, as when reading state).
+            // The log records the problem.
+            log("error checking the alias chain for " + query.name() + ": " + e
+                    + " (response relayed)");
+            return response;
         }
-        if (aliasBloqueado != null) {
-            log("BLOQUEADO (alias) " + query.name() + " -> " + aliasBloqueado
-                    + " (tipo " + query.type() + ") <- " + client.getHostAddress());
+        if (blockedAlias != null) {
+            log("BLOCKED (alias) " + query.name() + " -> " + blockedAlias
+                    + " (type " + query.type() + ") <- " + client.getHostAddress());
             return DnsPacketBuilder.buildResponse(query,
-                    DnsResolver.decisaoDeBloqueio(query.type()));
+                    DnsResolver.blockingDecision(query.type()));
         }
-        return resposta;
+        return response;
     }
 
-    // Atende uma consulta vinda por TCP (RFC 1035 §4.2.2): o formato é o mesmo
-    // da consulta, precedido do tamanho em 2 bytes. A mesma política de origem
-    // e a mesma decisão do UDP valem aqui.
+    // Handles a query arriving over TCP (RFC 1035 §4.2.2): the format is the same
+    // as the query, preceded by its 2-byte length. The same source policy and the
+    // same decision as UDP apply here.
     private void handleTcp(Socket socket) {
         InetAddress client = socket.getInetAddress();
         try {
             if (!policy.isAllowed(client)) {
-                registrarOrigemRecusada(client);
-                return; // silêncio: responder seria justamente amplificar
+                recordRefusedSource(client);
+                return; // silence: answering would be exactly the amplification
             }
             socket.setSoTimeout(TCP_READ_TIMEOUT_MS);
             InputStream in = socket.getInputStream();
-            byte[] tamanho = leExatamente(in, 2);
-            if (tamanho == null) {
-                return; // conexão fechada sem consulta
+            byte[] size = readExactly(in, 2);
+            if (size == null) {
+                return; // connection closed without a query
             }
-            int length = ((tamanho[0] & 0xFF) << 8) | (tamanho[1] & 0xFF);
+            int length = ((size[0] & 0xFF) << 8) | (size[1] & 0xFF);
             if (length <= 0 || length > MAX_TCP_MESSAGE_BYTES) {
-                log("consulta TCP com tamanho inválido (" + length + ") de "
+                log("TCP query with invalid size (" + length + ") from "
                         + client.getHostAddress());
                 return;
             }
-            byte[] data = leExatamente(in, length);
+            byte[] data = readExactly(in, length);
             if (data == null) {
-                return; // conexão fechada no meio da consulta
+                return; // connection closed in the middle of the query
             }
-            byte[] response = montaResposta(data, client);
+            byte[] response = answerQuery(data, client);
             if (response == null) {
                 return;
             }
-            // ATENÇÃO: tamanho e corpo num buffer só. Escrever o tamanho em
-            // separado deixa o cliente receber a mensagem em duas partes, e
-            // quem lê "os 2 bytes do tamanho" num recv() só pega o primeiro.
-            byte[] mensagem = new byte[2 + response.length];
-            mensagem[0] = (byte) (response.length >>> 8);
-            mensagem[1] = (byte) response.length;
-            System.arraycopy(response, 0, mensagem, 2, response.length);
+            // NOTE: size and body in a single buffer. Writing the size separately
+            // lets the client receive the message in two parts, and a reader that
+            // asks for "the 2 size bytes" in one recv() gets only the first.
+            byte[] message = new byte[2 + response.length];
+            message[0] = (byte) (response.length >>> 8);
+            message[1] = (byte) response.length;
+            System.arraycopy(response, 0, message, 2, response.length);
             OutputStream out = socket.getOutputStream();
-            out.write(mensagem);
+            out.write(message);
             out.flush();
         } catch (SocketTimeoutException e) {
-            log("conexão TCP sem consulta completa de " + client.getHostAddress() + " (timeout)");
+            log("incomplete TCP query from " + client.getHostAddress() + " (timeout)");
         } catch (IOException e) {
-            log("falha na conexão TCP de " + client.getHostAddress() + ": " + e.getMessage());
+            log("TCP connection failure from " + client.getHostAddress() + ": " + e.getMessage());
         } finally {
             try {
                 socket.close();
             } catch (IOException ignored) {
-                // já fechando
+                // already closing
             }
         }
     }
 
-    // Lê exatamente n bytes; devolve null se o fluxo acabou antes.
-    private static byte[] leExatamente(InputStream in, int n) throws IOException {
+    // Reads exactly n bytes; returns null if the stream ended first.
+    private static byte[] readExactly(InputStream in, int n) throws IOException {
         byte[] buffer = new byte[n];
-        int lidos = 0;
-        while (lidos < n) {
-            int r = in.read(buffer, lidos, n - lidos);
+        int read = 0;
+        while (read < n) {
+            int r = in.read(buffer, read, n - read);
             if (r < 0) {
                 return null;
             }
-            lidos += r;
+            read += r;
         }
         return buffer;
     }
 
-    // POR QUE: as workers respondem pelo mesmo socket de escuta —
-    // DatagramSocket#send é thread-safe, então não precisa de lock.
+    // WHY: workers respond through the same listening socket —
+    // DatagramSocket#send is thread-safe, so no lock is needed.
     private void send(byte[] response, InetAddress client, int clientPort) {
         DatagramSocket ds = socket;
         if (ds == null || ds.isClosed()) {
@@ -512,7 +512,7 @@ public class DnsServer {
         try {
             ds.send(new DatagramPacket(response, response.length, client, clientPort));
         } catch (IOException e) {
-            log("falha ao responder " + client.getHostAddress() + ": " + e.getMessage());
+            log("failed to respond to " + client.getHostAddress() + ": " + e.getMessage());
         }
     }
 
@@ -522,7 +522,7 @@ public class DnsServer {
             ds = new DatagramSocket(null);
         } catch (SocketException e) {
             throw new DnsServerException(
-                    "Falha ao criar o socket UDP na porta " + port + ": " + e.getMessage(), e);
+                    "Failed to create the UDP socket on port " + port + ": " + e.getMessage(), e);
         }
         try {
             ds.setReuseAddress(true);
@@ -534,30 +534,30 @@ public class DnsServer {
         return ds;
     }
 
-    // Abre o listener TCP na MESMA porta do UDP: os dois protocolos não
-    // conflitam. Sem o listener TCP, uma resposta grande (TC=1) faz o cliente
-    // retransmitir por TCP (RFC 7766 §8) e a resolução falha com erro de DNS.
+    // Opens the TCP listener on the SAME port as UDP: the two protocols do not
+    // conflict. Without a TCP listener, a large response (TC=1) makes the client
+    // retry over TCP (RFC 7766 §8) and resolution fails with a DNS error.
     private ServerSocket bindTcp() {
         final ServerSocket server;
         try {
             server = new ServerSocket();
         } catch (IOException e) {
             throw new DnsServerException(
-                    "Falha ao criar o socket TCP na porta " + port + ": " + e.getMessage(), e);
+                    "Failed to create the TCP socket on port " + port + ": " + e.getMessage(), e);
         }
         try {
             server.setReuseAddress(true);
             server.bind(new InetSocketAddress(port));
-            server.setSoTimeout(1000); // o accept não pode prender o servidor para sempre
+            server.setSoTimeout(1000); // accept must not hold the server forever
         } catch (IOException e) {
             closeQuietly(server);
             throw new DnsServerException(
-                    "Falha ao abrir a porta TCP " + port + ": " + e.getMessage(), e);
+                    "Failed to open TCP port " + port + ": " + e.getMessage(), e);
         }
         return server;
     }
 
-    // Thread que aceita conexões TCP e entrega cada uma ao pool.
+    // Thread that accepts TCP connections and hands each one to the pool.
     private void startTcpAcceptor(ServerSocket tcp) {
         Thread acceptor = new Thread(() -> {
             while (!stopRequested) {
@@ -565,12 +565,12 @@ public class DnsServer {
                 try {
                     socket = tcp.accept();
                 } catch (SocketTimeoutException e) {
-                    continue; // só para reverificar a flag de parada
+                    continue; // just to recheck the stop flag
                 } catch (IOException e) {
                     if (stopRequested || tcp.isClosed()) {
                         break;
                     }
-                    log("erro ao aceitar conexão TCP: " + e.getMessage());
+                    log("error accepting TCP connection: " + e.getMessage());
                     continue;
                 }
                 ExecutorService p = tcpPool;
@@ -581,7 +581,7 @@ public class DnsServer {
                 try {
                     p.execute(() -> handleTcp(socket));
                 } catch (RejectedExecutionException e) {
-                    // Pool cheio: fecha a conexão (o cliente retransmite por conta própria).
+                    // Pool full: close the connection (the client retries on its own).
                     closeQuietly(socket);
                 }
             }
@@ -590,28 +590,28 @@ public class DnsServer {
         acceptor.start();
     }
 
-    // Troca exceções cruas de bind por mensagens acionáveis.
-    // A porta 53 é privilegiada no Linux: só root faz bind abaixo de 1024.
-    // Para testes locais sem sudo existe a flag --port (ex.: --port 5300).
+    // Turns raw bind exceptions into actionable messages.
+    // Port 53 is privileged on Linux: only root can bind below 1024.
+    // For local tests without sudo there is the --port flag (e.g. --port 5300).
     DnsServerException friendlyBindError(SocketException cause) {
         String msg = String.valueOf(cause.getMessage()).toLowerCase();
         if (cause instanceof BindException || msg.contains("already in use")
                 || msg.contains("address already in use")) {
             return new DnsServerException(
-                    "Porta UDP " + port + " já está em uso. Outro servidor DNS está rodando? "
-                            + "(Em muitas distros o systemd-resolved ocupa a 53 em 127.0.0.53.) "
-                            + "Libere a porta ou use outra: --port 5300.", cause);
+                    "UDP port " + port + " is already in use. Is another DNS server running? "
+                            + "(On many distributions systemd-resolved occupies 53 on 127.0.0.53.) "
+                            + "Free the port or use another one: --port 5300.", cause);
         }
         if (port < 1024 && (msg.contains("permission") || msg.contains("denied")
                 || msg.contains("access") || msg.contains("permiss"))) {
             return new DnsServerException(
-                    "Sem permissão para abrir a porta UDP " + port + ". Portas abaixo de 1024 são "
-                            + "privilegiadas no Linux e exigem root: rode com sudo "
-                            + "(ex.: sudo siteblock dns start). Para testar sem sudo, use uma "
-                            + "porta alta: siteblock dns start --port 5300.", cause);
+                    "No permission to open UDP port " + port + ". Ports below 1024 are "
+                            + "privileged on Linux and require root: run with sudo "
+                            + "(e.g. sudo siteblock dns start). To test without sudo, use a "
+                            + "high port: siteblock dns start --port 5300.", cause);
         }
         return new DnsServerException(
-                "Falha ao abrir a porta UDP " + port + ": " + cause.getMessage(), cause);
+                "Failed to open UDP port " + port + ": " + cause.getMessage(), cause);
     }
 
     private static ExecutorService newPool() {
@@ -622,108 +622,110 @@ public class DnsServer {
         return newPool(TCP_POOL_SIZE, TCP_QUEUE_SIZE, "sitelock-dns-tcp-");
     }
 
-    // Pool limitado: número fixo de threads, fila com teto e rejeição quando
-    // enche (o pacote é descartado — o cliente retransmite). É o que impede que
-    // uma consulta lenta no upstream trave as demais.
-    private static ExecutorService newPool(int threads, int fila, String nome) {
+    // Bounded pool: fixed number of threads, capped queue, and rejection when it
+    // fills (the packet is dropped — the client retransmits). This is what stops a
+    // slow upstream query from blocking the others.
+    private static ExecutorService newPool(int threads, int queueSize, String namePrefix) {
         ThreadFactory factory = new ThreadFactory() {
             private final AtomicInteger seq = new AtomicInteger();
 
             @Override
             public Thread newThread(Runnable r) {
-                Thread t = new Thread(r, nome + seq.incrementAndGet());
+                Thread t = new Thread(r, namePrefix + seq.incrementAndGet());
                 t.setDaemon(true);
                 return t;
             }
         };
         return new ThreadPoolExecutor(threads, threads, 60L, TimeUnit.SECONDS,
-                new ArrayBlockingQueue<>(fila), factory, new ThreadPoolExecutor.AbortPolicy());
+                new ArrayBlockingQueue<>(queueSize), factory, new ThreadPoolExecutor.AbortPolicy());
     }
 
-    // Registra a origem recusada, sem repetir a cada pacote.
-    // POR QUE: um log por pacote enche o disco numa varredura de porta. O nome
-    // consultado não aparece de propósito: o log não vira canal de consulta.
-    private void registrarOrigemRecusada(InetAddress client) {
+    // Records the refused source without repeating for every packet.
+    // WHY: one log line per packet fills the disk during a port scan. The queried
+    // name is intentionally absent: the log must not become a query channel.
+    private void recordRefusedSource(InetAddress client) {
         String ip = client.getHostAddress();
-        long agora = System.currentTimeMillis();
-        if (ultimaRecusa.size() > 1000) {
-            ultimaRecusa.clear();
+        long now = System.currentTimeMillis();
+        if (lastRefusalAt.size() > 1000) {
+            lastRefusalAt.clear();
         }
-        Long anterior = ultimaRecusa.put(ip, agora);
-        if (anterior == null || agora - anterior > 10_000) {
-            log("origem recusada " + ip + " (não é local e não está em --allow-from)");
+        Long previous = lastRefusalAt.put(ip, now);
+        if (previous == null || now - previous > 10_000) {
+            log("refused source " + ip + " (not local and not in --allow-from)");
         }
     }
 
-    // POR QUE: escutar em 0.0.0.0 sem olhar a origem transformaria a máquina
-    // num resolvedor aberto — qualquer um da internet a usaria como reflexo de
-    // DDoS (a resposta do upstream sai com o IP dela) e para ver o que a rede consulta.
+    // WHY: listening on 0.0.0.0 without checking the source would turn the machine
+    // into an open resolver — anyone on the internet would use it as a DDoS
+    // reflector (the upstream response leaves with its IP) and to see what the
+    // network queries.
     /**
-     * Quem pode consultar este servidor. O padrão aceita só origem local
-     * (loopback, link-local, RFC1918, IPv6 ULA e os próprios endereços da
-     * máquina) e recusa o resto <strong>em silêncio</strong>.
+     * Who may query this server. The default accepts only local sources
+     * (loopback, link-local, RFC1918, IPv6 ULA, and the machine's own addresses)
+     * and refuses the rest <strong>silently</strong>.
      */
     public static final class SourcePolicy {
 
-        // Redes liberadas por padrão: loopback, link-local, RFC1918 e ULA.
-        private static final List<String> REDES_PADRAO = List.of(
-                "127.0.0.0/8",     // loopback IPv4
-                "::1/128",         // loopback IPv6
-                "169.254.0.0/16",  // link-local IPv4 (hotspot, PPPoE)
-                "fe80::/10",       // link-local IPv6
+        // Networks allowed by default: loopback, link-local, RFC1918, and ULA.
+        private static final List<String> DEFAULT_NETWORKS = List.of(
+                "127.0.0.0/8",     // IPv4 loopback
+                "::1/128",         // IPv6 loopback
+                "169.254.0.0/16",  // IPv4 link-local (hotspot, PPPoE)
+                "fe80::/10",       // IPv6 link-local
                 "10.0.0.0/8",      // RFC1918
                 "172.16.0.0/12",   // RFC1918
                 "192.168.0.0/16",  // RFC1918
-                "fc00::/7");       // ULA IPv6 (equivalente do RFC1918)
+                "fc00::/7");       // IPv6 ULA (the RFC1918 equivalent)
 
-        private final List<Cidr> redes;
-        private final Set<InetAddress> exatos;
+        private final List<Cidr> networks;
+        private final Set<InetAddress> exactAddresses;
         private final List<String> extras;
 
-        private SourcePolicy(List<Cidr> redes, Set<InetAddress> exatos, List<String> extras) {
-            this.redes = List.copyOf(redes);
-            this.exatos = Set.copyOf(exatos);
+        private SourcePolicy(List<Cidr> networks, Set<InetAddress> exactAddresses,
+                             List<String> extras) {
+            this.networks = List.copyOf(networks);
+            this.exactAddresses = Set.copyOf(exactAddresses);
             this.extras = List.copyOf(extras);
         }
 
-        /** Política padrão: redes locais + endereços da máquina + --allow-from. */
-        public static SourcePolicy padrao(List<String> allowFrom) {
-            List<Cidr> redes = new ArrayList<>();
-            for (String rede : REDES_PADRAO) {
-                redes.add(Cidr.parse(rede));
+        /** Default policy: local networks + machine addresses + --allow-from. */
+        public static SourcePolicy defaultPolicy(List<String> allowFrom) {
+            List<Cidr> networks = new ArrayList<>();
+            for (String network : DEFAULT_NETWORKS) {
+                networks.add(Cidr.parse(network));
             }
             List<String> extras = new ArrayList<>();
             for (String extra : allowFrom) {
-                for (String parte : extra.split(",")) {
-                    if (!parte.isBlank()) {
-                        redes.add(Cidr.parse(parte));
-                        extras.add(parte.trim());
+                for (String part : extra.split(",")) {
+                    if (!part.isBlank()) {
+                        networks.add(Cidr.parse(part));
+                        extras.add(part.trim());
                     }
                 }
             }
-            return new SourcePolicy(redes, Set.copyOf(NetworkUtils.localAddresses()), extras);
+            return new SourcePolicy(networks, Set.copyOf(NetworkUtils.localAddresses()), extras);
         }
 
-        // Política que não aceita ninguém (usado nos testes).
-        static SourcePolicy nenhuma() {
+        // Policy that accepts nobody (used in tests).
+        static SourcePolicy none() {
             return new SourcePolicy(List.of(), Set.of(), List.of());
         }
 
-        /** Origens liberadas além das locais (para o log). */
+        /** Sources allowed in addition to local ones (for the log). */
         public List<String> extras() {
             return extras;
         }
 
-        /** true se a origem pode consultar este servidor. */
-        public boolean isAllowed(InetAddress origem) {
-            if (origem == null) {
+        /** True if the source may query this server. */
+        public boolean isAllowed(InetAddress source) {
+            if (source == null) {
                 return false;
             }
-            if (exatos.contains(origem)) {
-                return true; // endereço da própria máquina
+            if (exactAddresses.contains(source)) {
+                return true; // the machine's own address
             }
-            for (Cidr rede : redes) {
-                if (rede.matches(origem)) {
+            for (Cidr network : networks) {
+                if (network.matches(source)) {
                     return true;
                 }
             }
@@ -731,105 +733,105 @@ public class DnsServer {
         }
     }
 
-    // Uma rede em notação CIDR (ou um endereço único, tratado como /32 ou /128).
+    // A network in CIDR notation (or a single address, treated as /32 or /128).
     static final class Cidr {
 
-        private final byte[] rede;
+        private final byte[] network;
         private final int bits;
 
-        private Cidr(byte[] rede, int bits) {
-            this.rede = rede;
+        private Cidr(byte[] network, int bits) {
+            this.network = network;
             this.bits = bits;
         }
 
-        // Lança IllegalArgumentException se o texto não for um IP ou CIDR válido.
-        static Cidr parse(String texto) {
-            String limpo = texto == null ? "" : texto.trim();
-            if (limpo.isEmpty()) {
-                throw new IllegalArgumentException("endereço vazio em --allow-from");
+        // Throws IllegalArgumentException if the text is not a valid IP or CIDR.
+        static Cidr parse(String text) {
+            String clean = text == null ? "" : text.trim();
+            if (clean.isEmpty()) {
+                throw new IllegalArgumentException("empty address in --allow-from");
             }
-            int barra = limpo.indexOf('/');
-            String parteEndereco = barra < 0 ? limpo : limpo.substring(0, barra);
-            String parteBits = barra < 0 ? null : limpo.substring(barra + 1);
-            InetAddress endereco = enderecoLiteral(parteEndereco);
-            byte[] bytes = endereco.getAddress();
-            int maximo = bytes.length * 8;
-            int bits = maximo;
-            if (parteBits != null) {
+            int slash = clean.indexOf('/');
+            String addressPart = slash < 0 ? clean : clean.substring(0, slash);
+            String bitsPart = slash < 0 ? null : clean.substring(slash + 1);
+            InetAddress address = literalAddress(addressPart);
+            byte[] bytes = address.getAddress();
+            int maximum = bytes.length * 8;
+            int bits = maximum;
+            if (bitsPart != null) {
                 try {
-                    bits = Integer.parseInt(parteBits.trim());
+                    bits = Integer.parseInt(bitsPart.trim());
                 } catch (NumberFormatException e) {
-                    throw new IllegalArgumentException("máscara inválida em --allow-from: " + texto);
+                    throw new IllegalArgumentException("invalid mask in --allow-from: " + text);
                 }
-                if (bits < 0 || bits > maximo) {
-                    throw new IllegalArgumentException("máscara fora de faixa em --allow-from: " + texto);
+                if (bits < 0 || bits > maximum) {
+                    throw new IllegalArgumentException("mask out of range in --allow-from: " + text);
                 }
             }
             byte[] base = new byte[bytes.length];
             System.arraycopy(bytes, 0, base, 0, bytes.length);
             for (int i = 0; i < base.length; i++) {
-                int validos = Math.max(0, Math.min(8, bits - i * 8));
-                int mascara = validos == 0 ? 0xFF : (0xFF << (8 - validos)) & 0xFF;
-                base[i] = (byte) (base[i] & mascara);
+                int validBits = Math.max(0, Math.min(8, bits - i * 8));
+                int mask = validBits == 0 ? 0xFF : (0xFF << (8 - validBits)) & 0xFF;
+                base[i] = (byte) (base[i] & mask);
             }
             return new Cidr(base, bits);
         }
 
-        boolean matches(InetAddress endereco) {
-            byte[] bytes = endereco.getAddress();
-            if (bytes.length != rede.length) {
-                return false; // IPv4 não casa com rede IPv6 (e vice-versa)
+        boolean matches(InetAddress address) {
+            byte[] bytes = address.getAddress();
+            if (bytes.length != network.length) {
+                return false; // IPv4 does not match an IPv6 network (or vice versa)
             }
-            int bytesCheios = bits / 8;
-            int bitsSoltos = bits % 8;
-            for (int i = 0; i < bytesCheios; i++) {
-                if (bytes[i] != rede[i]) {
+            int fullBytes = bits / 8;
+            int remainingBits = bits % 8;
+            for (int i = 0; i < fullBytes; i++) {
+                if (bytes[i] != network[i]) {
                     return false;
                 }
             }
-            if (bitsSoltos > 0) {
-                int mascara = (0xFF << (8 - bitsSoltos)) & 0xFF;
-                if ((bytes[bytesCheios] & mascara) != (rede[bytesCheios] & mascara)) {
+            if (remainingBits > 0) {
+                int mask = (0xFF << (8 - remainingBits)) & 0xFF;
+                if ((bytes[fullBytes] & mask) != (network[fullBytes] & mask)) {
                     return false;
                 }
             }
             return true;
         }
 
-        // Converte o texto em endereço, sem nunca consultar o DNS.
-        // POR QUE: getByName resolve nomes, e um hostname esquecido travaria o
-        // servidor na primeira query (o DNS público pode estar bloqueado).
-        private static InetAddress enderecoLiteral(String texto) {
-            String t = texto.trim();
+        // Converts the text to an address without ever querying DNS.
+        // WHY: getByName resolves names, and a forgotten hostname would hang the
+        // server on the first query (the public DNS may be blocked).
+        private static InetAddress literalAddress(String text) {
+            String t = text.trim();
             if (t.indexOf(':') >= 0) {
                 try {
                     return InetAddress.getByName(t);
                 } catch (UnknownHostException e) {
-                    throw new IllegalArgumentException("endereço IPv6 inválido: " + texto);
+                    throw new IllegalArgumentException("invalid IPv6 address: " + text);
                 }
             }
-            String[] partes = t.split("\\.");
-            if (partes.length != 4) {
+            String[] parts = t.split("\\.");
+            if (parts.length != 4) {
                 throw new IllegalArgumentException(
-                        "endereço inválido em --allow-from (use IP ou CIDR, sem nome): " + texto);
+                        "invalid address in --allow-from (use an IP or CIDR, not a name): " + text);
             }
             byte[] bytes = new byte[4];
             for (int i = 0; i < 4; i++) {
-                int valor;
+                int value;
                 try {
-                    valor = Integer.parseInt(partes[i]);
+                    value = Integer.parseInt(parts[i]);
                 } catch (NumberFormatException e) {
-                    throw new IllegalArgumentException("endereço inválido em --allow-from: " + texto);
+                    throw new IllegalArgumentException("invalid address in --allow-from: " + text);
                 }
-                if (valor < 0 || valor > 255) {
-                    throw new IllegalArgumentException("endereço inválido em --allow-from: " + texto);
+                if (value < 0 || value > 255) {
+                    throw new IllegalArgumentException("invalid address in --allow-from: " + text);
                 }
-                bytes[i] = (byte) valor;
+                bytes[i] = (byte) value;
             }
             try {
                 return InetAddress.getByAddress(bytes);
             } catch (UnknownHostException e) {
-                throw new IllegalArgumentException("endereço inválido em --allow-from: " + texto);
+                throw new IllegalArgumentException("invalid address in --allow-from: " + text);
             }
         }
     }
@@ -845,7 +847,7 @@ public class DnsServer {
         try {
             server.close();
         } catch (IOException ignored) {
-            // já fechando
+            // already closing
         }
     }
 
@@ -853,7 +855,7 @@ public class DnsServer {
         try {
             socket.close();
         } catch (IOException ignored) {
-            // já fechando
+            // already closing
         }
     }
 

@@ -12,11 +12,11 @@ import java.util.Locale;
 import java.util.Optional;
 
 /**
- * Caminhos usados pelo SiteBlock.
+ * Paths used by SiteBlock.
  *
- * Sob sudo, user.home vira /root, então o estado usa a home do usuário
- * real (via SUDO_USER). SITELOCK_STATE_DIR / SITELOCK_HOSTS_FILE
- * sobrescrevem o padrão (útil para testes).
+ * Under sudo, user.home becomes /root, so the state uses the real user's
+ * home (via SUDO_USER). SITELOCK_STATE_DIR / SITELOCK_HOSTS_FILE
+ * override the defaults (useful for tests).
  */
 public final class SiteLockPaths {
 
@@ -47,16 +47,16 @@ public final class SiteLockPaths {
         return getStateDir().resolve(BACKUP_FILE_NAME);
     }
 
-    /** Arquivo de lock para serializar processos concorrentes. */
+    /** Lock file to serialize concurrent processes. */
     public static Path getStateLockFile() {
         return getStateDir().resolve(BLOCKS_FILE_NAME + ".lock");
     }
 
     /**
-     * Cria o diretório (e os pais) e devolve a posse ao usuário real.
+     * Creates the directory (and its parents) and hands ownership back to the real user.
      *
-     * <p>Criar {@code ~/.sitelock} como root sem este ajuste deixa o diretório
-     * inacessível para o próximo {@code status} rodando sem sudo.
+     * <p>Creating {@code ~/.sitelock} as root without this adjustment leaves the directory
+     * inaccessible to the next {@code status} running without sudo.
      */
     public static void createDirectories(Path dir) throws IOException {
         Files.createDirectories(dir);
@@ -72,12 +72,12 @@ public final class SiteLockPaths {
         if (env != null && !env.isBlank()) {
             return Paths.get(env);
         }
-        // Só o caminho varia por SO; a edição (HostsFileManager) é reutilizada.
-        // Windows usa %SystemRoot% (ver DefaultHostsFileLocator).
+        // Only the path varies per OS; the editing (HostsFileManager) is reused.
+        // Windows uses %SystemRoot% (see DefaultHostsFileLocator).
         return new DefaultHostsFileLocator().getHostsPath();
     }
 
-    /** Nome do usuário real sob sudo, vazio se não houver. */
+    /** Name of the real user under sudo, empty when there is none. */
     public static Optional<String> realUserName() {
         String sudoUser = System.getenv("SUDO_USER");
         if (sudoUser == null || sudoUser.isBlank()
@@ -88,9 +88,9 @@ public final class SiteLockPaths {
     }
 
     /**
-     * Devolve a posse do arquivo ao usuário real quando roda com sudo.
-     * Best-effort: ignora falhas silenciosamente.
-     * Nunca usar no /etc/hosts (deve continuar root).
+     * Hands file ownership back to the real user when running with sudo.
+     * Best-effort: silently ignores failures.
+     * Never use on /etc/hosts (it should stay root).
      */
     public static void chownToRealUserIfSudo(Path path) {
         Optional<String> realUser = realUserName();
@@ -101,14 +101,14 @@ public final class SiteLockPaths {
     }
 
     /**
-     * Devolve a posse ao usuário nomeado na property {@code sitelock.user},
-     * caindo no comportamento de sempre ({@code SUDO_USER}) quando ela não existir.
+     * Hands ownership back to the user named in the {@code sitelock.user} property,
+     * falling back to the usual behavior ({@code SUDO_USER}) when it does not exist.
      *
-     * <p>Existe porque o daemon de autostart roda como root <b>sem</b>
-     * {@code SUDO_USER}: um unit de sistema do systemd e uma LaunchDaemon não têm
-     * {@code User=}. Sem esta property, o primeiro sweep deixaria o
-     * {@code blocks.json} do root — a escrita atômica troca o inode — e o
-     * {@code status}, que roda sem elevação, passaria a depender de root para ler.
+     * <p>It exists because the autostart daemon runs as root <b>without</b>
+     * {@code SUDO_USER}: a systemd system unit and a LaunchDaemon have no
+     * {@code User=}. Without this property, the first sweep would leave the
+     * {@code blocks.json} owned by root — the atomic write swaps the inode — and
+     * {@code status}, which runs without elevation, would become dependent on root to read.
      */
     public static void chownToUserIfConfigured(Path path) {
         String configured = System.getProperty("sitelock.user");
@@ -119,7 +119,7 @@ public final class SiteLockPaths {
         chownToRealUserIfSudo(path);
     }
 
-    // Aplica posse e grupo ao usuário, best-effort.
+    // Applies owner and group to the user, best-effort.
     private static void chownTo(Path path, String user) {
         try {
             if (!Files.exists(path)) {
@@ -142,7 +142,7 @@ public final class SiteLockPaths {
         }
     }
 
-    /** Home do usuário real, mesmo sob sudo. */
+    /** Home of the real user, even under sudo. */
     public static Path getRealUserHome() {
         String sudoUser = System.getenv("SUDO_USER");
         if (sudoUser != null && !sudoUser.isBlank()

@@ -15,118 +15,118 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-// O registro do daemon DNS (dns-server.json). É lido pelo dns start, pelo dns
-// status e pelo dns stop: um registro quebrado tranca a máquina, e um registro
-// que aponta para o PID errado faz o stop mandar sinal num processo alheio.
+// The DNS daemon record (dns-server.json). It is read by dns start, dns status,
+// and dns stop: a broken record locks the machine out, and a record pointing at
+// the wrong PID makes stop signal an unrelated process.
 class DnsDaemonStateTest {
 
     @TempDir
     Path tmp;
 
-    private Path arquivo() {
+    private Path stateFile() {
         return DnsDaemonState.statePath(tmp);
     }
 
     @Test
-    void gravacaoELeituraRoundTrip() throws Exception {
-        Instant agora = Instant.parse("2026-01-01T12:00:00Z");
-        DnsDaemonState.write(tmp, new DnsDaemonState(4242, 5353, "1.1.1.1", agora, null));
+    void writeAndReadRoundTrip() throws Exception {
+        Instant now = Instant.parse("2026-01-01T12:00:00Z");
+        DnsDaemonState.write(tmp, new DnsDaemonState(4242, 5353, "1.1.1.1", now, null));
 
-        DnsDaemonState lido = DnsDaemonState.read(tmp).orElseThrow();
-        assertEquals(4242, lido.getPid());
-        assertEquals(5353, lido.getPort());
-        assertEquals("1.1.1.1", lido.getUpstream());
-        assertEquals(agora, lido.getStartedAt());
+        DnsDaemonState loaded = DnsDaemonState.read(tmp).orElseThrow();
+        assertEquals(4242, loaded.getPid());
+        assertEquals(5353, loaded.getPort());
+        assertEquals("1.1.1.1", loaded.getUpstream());
+        assertEquals(now, loaded.getStartedAt());
     }
 
-    // JSON pela metade não pode estourar: o registro viraria lixo órfão e o
-    // usuário nunca mais conseguiria subir o servidor DNS sem apagar o
-    // arquivo à mão.
+    // A half-written JSON must not blow up: the record would become orphaned
+    // garbage and the user could never start the DNS server again without
+    // deleting the file by hand.
     @Test
-    void jsonCorrompidoDevolveRegistroVazio() throws Exception {
+    void corruptedJsonReturnsEmptyRecord() throws Exception {
         Files.createDirectories(tmp);
-        Files.writeString(arquivo(), "{ \"pid\": 12, \"port\":", StandardCharsets.UTF_8);
+        Files.writeString(stateFile(), "{ \"pid\": 12, \"port\":", StandardCharsets.UTF_8);
 
         assertTrue(DnsDaemonState.read(tmp).isEmpty(),
-                "JSON inválido tem que virar registro órfão, não exceção");
+                "invalid JSON must become an empty record, not an exception");
     }
 
-    // A escrita é atômica: o arquivo trocado de inode, nunca meio escrito.
+    // The write is atomic: the file is swapped by inode, never half-written.
     @Test
-    void escritaEhAtomica() throws Exception {
-        Instant agora = Instant.parse("2026-01-01T12:00:00Z");
-        DnsDaemonState.write(tmp, new DnsDaemonState(1, 53, "1.1.1.1", agora, null));
-        Object chaveAntes = Files.readAttributes(arquivo(), BasicFileAttributes.class).fileKey();
-        assumeTrue(chaveAntes != null, "o FS não expõe fileKey");
+    void writeIsAtomic() throws Exception {
+        Instant now = Instant.parse("2026-01-01T12:00:00Z");
+        DnsDaemonState.write(tmp, new DnsDaemonState(1, 53, "1.1.1.1", now, null));
+        Object keyBefore = Files.readAttributes(stateFile(), BasicFileAttributes.class).fileKey();
+        assumeTrue(keyBefore != null, "the FS does not expose fileKey");
 
-        DnsDaemonState.write(tmp, new DnsDaemonState(2, 53, "1.1.1.1", agora, null));
-        Object chaveDepois = Files.readAttributes(arquivo(), BasicFileAttributes.class).fileKey();
+        DnsDaemonState.write(tmp, new DnsDaemonState(2, 53, "1.1.1.1", now, null));
+        Object keyAfter = Files.readAttributes(stateFile(), BasicFileAttributes.class).fileKey();
 
-        assertNotEquals(chaveAntes, chaveDepois,
-                "a escrita tem que passar por .tmp + rename (o inode muda)");
+        assertNotEquals(keyBefore, keyAfter,
+                "the write must go through .tmp + rename (the inode changes)");
         assertFalse(Files.exists(tmp.resolve("dns-server.json.tmp")),
-                "o arquivo temporário não pode sobrar");
+                "the temporary file must not be left behind");
     }
 
-    // O SO recicla PID: o número existir não prova que o processo é o
-    // daemon. O instante de início é a prova.
+    // The OS recycles PIDs: the number existing does not prove the process is the
+    // daemon. The start instant is the proof.
     @Test
-    void pidRecicladoNaoPassaPorDaemonVivo() throws Exception {
+    void recycledPidDoesNotCountAsLiveDaemon() throws Exception {
         Files.createDirectories(tmp);
-        Files.writeString(arquivo(), "{\"pid\":" + ProcessHandle.current().pid()
+        Files.writeString(stateFile(), "{\"pid\":" + ProcessHandle.current().pid()
                 + ",\"port\":53,\"upstream\":\"1.1.1.1\","
                 + "\"startedAt\":\"2026-01-01T12:00:00Z\",\"expiresAt\":null,"
                 + "\"processStartedAt\":\"2020-01-01T00:00:00Z\"}", StandardCharsets.UTF_8);
 
         DnsDaemonState state = DnsDaemonState.read(tmp).orElseThrow();
         assertFalse(DnsDaemonState.isAlive(state),
-                "PID de outro processo não é o daemon: o stop mandaria sinal no processo errado");
+                "another process's PID is not the daemon: stop would signal the wrong process");
     }
 
-    // Registro escrito por uma versão antiga (sem o instante) vale pelo PID.
+    // A record written by an older version (without the instant) is accepted by PID.
     @Test
-    void registroAntigoSemInstanteDeInicioContinuaValendoPeloPid() throws Exception {
+    void oldRecordWithoutStartInstantStillCountsByPid() throws Exception {
         Files.createDirectories(tmp);
-        Files.writeString(arquivo(), "{\"pid\":" + ProcessHandle.current().pid()
+        Files.writeString(stateFile(), "{\"pid\":" + ProcessHandle.current().pid()
                 + ",\"port\":53,\"upstream\":\"1.1.1.1\","
                 + "\"startedAt\":\"2026-01-01T12:00:00Z\",\"expiresAt\":null}", StandardCharsets.UTF_8);
 
         DnsDaemonState state = DnsDaemonState.read(tmp).orElseThrow();
         assertTrue(DnsDaemonState.isAlive(state),
-                "registro antigo (sem processStartedAt) continua válido pelo PID");
+                "an old record (without processStartedAt) is still valid by PID");
     }
 
-    // Quem escreve o registro guarda o instante de início do próprio processo.
+    // Whoever writes the record stores the process's own start instant.
     @Test
-    void gravacaoGuardaOInstanteDeInicioDoProcesso() throws Exception {
-        Instant agora = Instant.parse("2026-01-01T12:00:00Z");
+    void writeStoresTheProcessStartInstant() throws Exception {
+        Instant now = Instant.parse("2026-01-01T12:00:00Z");
         DnsDaemonState.write(tmp, new DnsDaemonState(
-                ProcessHandle.current().pid(), 53, "1.1.1.1", agora, null));
+                ProcessHandle.current().pid(), 53, "1.1.1.1", now, null));
 
-        DnsDaemonState lido = DnsDaemonState.read(tmp).orElseThrow();
-        assertTrue(DnsDaemonState.isAlive(lido),
-                "o registro do processo atual tem que ser reconhecido como vivo");
+        DnsDaemonState loaded = DnsDaemonState.read(tmp).orElseThrow();
+        assertTrue(DnsDaemonState.isAlive(loaded),
+                "the current process's record must be recognized as alive");
     }
 
     @Test
-    void deleteIfOwnedNaoApagaRegistroDeOutroPid() throws Exception {
-        Instant agora = Instant.parse("2026-01-01T12:00:00Z");
-        DnsDaemonState.write(tmp, new DnsDaemonState(111, 53, "1.1.1.1", agora, null));
+    void deleteIfOwnedDoesNotDeleteAnotherPidsRecord() throws Exception {
+        Instant now = Instant.parse("2026-01-01T12:00:00Z");
+        DnsDaemonState.write(tmp, new DnsDaemonState(111, 53, "1.1.1.1", now, null));
 
         DnsDaemonState.deleteIfOwned(tmp, 222);
 
         assertTrue(DnsDaemonState.read(tmp).isPresent(),
-                "o dns start que falhou não pode apagar o registro de outro daemon");
+                "a failed dns start must not delete another daemon's record");
     }
 
     @Test
-    void deleteIfOwnedApagaRegistroDoProprioPid() throws Exception {
-        Instant agora = Instant.parse("2026-01-01T12:00:00Z");
-        DnsDaemonState.write(tmp, new DnsDaemonState(111, 53, "1.1.1.1", agora, null));
+    void deleteIfOwnedDeletesItsOwnRecord() throws Exception {
+        Instant now = Instant.parse("2026-01-01T12:00:00Z");
+        DnsDaemonState.write(tmp, new DnsDaemonState(111, 53, "1.1.1.1", now, null));
 
         DnsDaemonState.deleteIfOwned(tmp, 111);
 
         assertTrue(DnsDaemonState.read(tmp).isEmpty(),
-                "o dono do registro tem que conseguir limpá-lo");
+                "the record owner must be able to clear it");
     }
 }

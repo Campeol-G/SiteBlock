@@ -19,13 +19,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * O log do daemon: um por execução, com tamanho controlado e legível pelo
- * usuário.
+ * The daemon log: one per run, with a controlled size and readable by the user.
  *
- * <p>O log é criado pelo pai do {@code daemon start}, que roda como root, e o
- * filho só ANEXA nele. Sem rotação, o arquivo cresce para sempre e o
- * {@code printLogTail} — que existe para mostrar o erro de AGORA — mostra a
- * cauda de uma execução antiga.
+ * <p>The log is created by the parent of {@code daemon start}, which runs as
+ * root, and the child only APPENDS to it. Without rotation, the file grows
+ * forever and {@code printLogTail} — which exists to show the error from NOW —
+ * shows the tail of an old run.
  */
 class DaemonLogRotationTest {
 
@@ -33,135 +32,136 @@ class DaemonLogRotationTest {
     Path tmp;
 
     @Test
-    void oLogRecomecaVazioParaOTailMostrarOErroDeAgora() throws Exception {
+    void theLogStartsEmptySoTheTailShowsTheCurrentError() throws Exception {
         Path log = ExpirationDaemonState.logPath(tmp);
-        Files.writeString(log, "texto de ajuda do picocli de uma execucao antiga\n".repeat(20),
+        Files.writeString(log, "picocli help text from an old run\n".repeat(20),
                 StandardCharsets.UTF_8);
 
-        DaemonStartCommand.prepararLog(log);
+        DaemonStartCommand.prepareLog(log);
 
         assertEquals("", Files.readString(log, StandardCharsets.UTF_8),
-                "o log tem que comecar vazio: o tail mostra o erro de AGORA, nao o de outro dia");
+                "the log must start empty: the tail shows the error from NOW, not from another day");
     }
 
     @Test
-    void aExecucaoAnteriorFicaNoLogRotacionado() throws Exception {
+    void thePreviousRunStaysInTheRotatedLog() throws Exception {
         Path log = ExpirationDaemonState.logPath(tmp);
-        Files.writeString(log, "erro antigo\n", StandardCharsets.UTF_8);
+        Files.writeString(log, "old error\n", StandardCharsets.UTF_8);
 
-        DaemonStartCommand.prepararLog(log);
+        DaemonStartCommand.prepareLog(log);
 
-        Path rotacionado = log.resolveSibling(log.getFileName() + ".1");
-        assertTrue(Files.exists(rotacionado), "o log anterior nao pode ser jogado fora");
-        assertTrue(Files.readString(rotacionado, StandardCharsets.UTF_8).contains("erro antigo"),
-                "o log anterior tem que ficar legivel no arquivo rotacionado");
+        Path rotated = log.resolveSibling(log.getFileName() + ".1");
+        assertTrue(Files.exists(rotated), "the previous log must not be thrown away");
+        assertTrue(Files.readString(rotated, StandardCharsets.UTF_8).contains("old error"),
+                "the previous log must remain readable in the rotated file");
     }
 
     @Test
-    void oLogRotacionadoTemTamanhoLimitado() throws Exception {
+    void theRotatedLogHasABoundedSize() throws Exception {
         Path log = ExpirationDaemonState.logPath(tmp);
         Files.writeString(log, "x".repeat((int) (DaemonStartCommand.LOG_MAX_BYTES * 3)),
                 StandardCharsets.UTF_8);
 
-        DaemonStartCommand.prepararLog(log);
+        DaemonStartCommand.prepareLog(log);
 
-        Path rotacionado = log.resolveSibling(log.getFileName() + ".1");
-        long tamanho = Files.size(rotacionado);
-        assertTrue(tamanho <= DaemonStartCommand.LOG_MAX_BYTES,
-                "o log anterior tem que caber no teto, mas ficou com " + tamanho + " bytes");
+        Path rotated = log.resolveSibling(log.getFileName() + ".1");
+        long size = Files.size(rotated);
+        assertTrue(size <= DaemonStartCommand.LOG_MAX_BYTES,
+                "the previous log must fit under the ceiling, but it has " + size + " bytes");
     }
 
     @Test
-    void aPosseDoLogVoltaParaOUsuarioReal() throws Exception {
-        // O daemon roda como root: sem chown, o log fica legivel so por ele —
-        // e a promessa de que o status funciona sem elevacao vai embora.
-        String usuario = System.getProperty("user.name", "");
+    void logOwnershipGoesBackToTheRealUser() throws Exception {
+        // The daemon runs as root: without chown, the log is readable only by it —
+        // and the promise that status works without elevation goes away.
+        String user = System.getProperty("user.name", "");
         UserPrincipalLookupService lookup = tmp.getFileSystem().getUserPrincipalLookupService();
-        GroupPrincipal esperado;
+        GroupPrincipal expected;
         try {
-            esperado = lookup.lookupPrincipalByGroupName(usuario);
+            expected = lookup.lookupPrincipalByGroupName(user);
         } catch (Exception e) {
-            esperado = null;
+            expected = null;
         }
-        Optional<String> outro = grupoSecundario(usuario);
-        Assumptions.assumeTrue(esperado != null && outro.isPresent(),
-                "precisa de um grupo com o nome do usuario e de um grupo secundario dele");
+        Optional<String> other = secondaryGroup(user);
+        Assumptions.assumeTrue(expected != null && other.isPresent(),
+                "requires a group named after the user and one of its secondary groups");
 
         Path log = ExpirationDaemonState.logPath(tmp);
-        Files.writeString(log, "conteudo\n", StandardCharsets.UTF_8);
+        Files.writeString(log, "content\n", StandardCharsets.UTF_8);
         PosixFileAttributeView view = Files.getFileAttributeView(log, PosixFileAttributeView.class);
-        view.setGroup(lookup.lookupPrincipalByGroupName(outro.get()));
+        view.setGroup(lookup.lookupPrincipalByGroupName(other.get()));
 
-        String salvo = System.getProperty("sitelock.user");
-        System.setProperty("sitelock.user", usuario);
+        String saved = System.getProperty("sitelock.user");
+        System.setProperty("sitelock.user", user);
         try {
-            DaemonStartCommand.prepararLog(log);
+            DaemonStartCommand.prepareLog(log);
         } finally {
-            if (salvo == null) {
+            if (saved == null) {
                 System.clearProperty("sitelock.user");
             } else {
-                System.setProperty("sitelock.user", salvo);
+                System.setProperty("sitelock.user", saved);
             }
         }
 
-        assertEquals(esperado.getName(), view.readAttributes().group().getName(),
-                "o log tem que voltar para o usuario real, como o daemon.json");
+        assertEquals(expected.getName(), view.readAttributes().group().getName(),
+                "the log must go back to the real user, like daemon.json");
     }
 
     /**
-     * O comando de verdade: o log que o filho escreve tem que ser o desta
-     * execução, e não a cauda da anterior.
+     * The real command: the log the child writes must be from this run, not the
+     * tail of the previous one.
      */
     @Test
-    void oStartDeVerdadeRotacionaOLog() throws Exception {
+    void theRealStartRotatesTheLog() throws Exception {
         Path hosts = tmp.resolve("hosts");
         Files.writeString(hosts, "127.0.0.1 localhost\n", StandardCharsets.UTF_8);
-        Path estado = tmp.resolve("estado");
-        Files.createDirectories(estado);
-        Path log = ExpirationDaemonState.logPath(estado);
-        Files.writeString(log, "erro de uma execucao antiga\n", StandardCharsets.UTF_8);
+        Path state = tmp.resolve("state");
+        Files.createDirectories(state);
+        Path log = ExpirationDaemonState.logPath(state);
+        Files.writeString(log, "error from an old run\n", StandardCharsets.UTF_8);
 
         int exit;
         try {
             exit = new DaemonStartCommand("60", hosts.toString(),
-                    estado.resolve("blocks.json").toString()).call();
+                    state.resolve("blocks.json").toString()).call();
         } finally {
-            matarDaemon(estado);
+            killDaemon(state);
         }
 
-        assertEquals(0, exit, "o daemon tinha que subir");
-        String conteudo = Files.readString(log, StandardCharsets.UTF_8);
-        assertFalse(conteudo.contains("execucao antiga"),
-                "o log ainda tem o texto da execução anterior:\n" + conteudo);
-        assertTrue(conteudo.contains("daemon de expiração no ar"),
-                "o log tem que ser o da execução de agora:\n" + conteudo);
+        assertEquals(0, exit, "the daemon had to come up");
+        String content = Files.readString(log, StandardCharsets.UTF_8);
+        assertFalse(content.contains("old run"),
+                "the log still has text from the previous run:\n" + content);
+        assertTrue(content.contains("expiration daemon up"),
+                "the log must be from the current run:\n" + content);
     }
 
-    // Mata o daemon que o start subiu, se ele tiver subido.
-    private static void matarDaemon(Path estado) {
+    // Kills the daemon that start brought up, if it came up.
+    private static void killDaemon(Path state) {
         try {
-            ExpirationDaemonState.read(estado).ifPresent(state -> {
-                ProcessHandle.of(state.getPid()).ifPresent(ProcessosDeTeste::matar);
+            ExpirationDaemonState.read(state).ifPresent(snapshot -> {
+                ProcessHandle.of(snapshot.getPid()).ifPresent(TestProcesses::kill);
             });
         } catch (IOException e) {
-            // o teste que importa é o da rotação
+            // the test that matters is the rotation one
         }
     }
 
-    // Um grupo do qual o usuario participa e que nao e o principal dele.
-    private static Optional<String> grupoSecundario(String usuario) {        Path etc = Path.of("/etc/group");
+    // A group the user belongs to that is not their primary group.
+    private static Optional<String> secondaryGroup(String user) {
+        Path etc = Path.of("/etc/group");
         if (!Files.isReadable(etc)) {
             return Optional.empty();
         }
         try {
-            for (String linha : Files.readAllLines(etc, StandardCharsets.UTF_8)) {
-                String[] partes = linha.split(":");
-                if (partes.length < 4 || partes[0].equals(usuario)) {
+            for (String line : Files.readAllLines(etc, StandardCharsets.UTF_8)) {
+                String[] parts = line.split(":");
+                if (parts.length < 4 || parts[0].equals(user)) {
                     continue;
                 }
-                for (String membro : partes[3].split(",")) {
-                    if (membro.equals(usuario)) {
-                        return Optional.of(partes[0]);
+                for (String member : parts[3].split(",")) {
+                    if (member.equals(user)) {
+                        return Optional.of(parts[0]);
                     }
                 }
             }

@@ -14,38 +14,37 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-// Apoio comum aos testes de socket: porta livre, consulta UDP, espera pelo
-// servidor no ar e arquivo de bloqueios temporário. Nada aqui toca na internet
-// nem em arquivo do usuário: tudo vive em diretório temporário e em loopback.
+// Shared support for the socket tests: a free port, a UDP query, waiting for the
+// server to be up, and a temporary blocks file. Nothing here touches the internet
+// or user files: everything lives in a temporary directory and on loopback.
 final class DnsTestSupport {
 
-    private static final int PORTA_BASE = 15300;
+    private static final int BASE_PORT = 15300;
 
     private DnsTestSupport() {
     }
 
-    // Porta livre nos dois espaços de protocolo (UDP e TCP). O servidor usa a
-    // mesma porta nos dois: por isso ela precisa estar livre nos dois lados ao
-    // mesmo tempo.
-    static int portaLivre() {
+    // A port free in both protocol spaces (UDP and TCP). The server uses the same
+    // port for both, so it must be free on both sides at the same time.
+    static int freePort() {
         for (int i = 0; i < 200; i++) {
-            int porta = PORTA_BASE + (i * 7) % 2000;
-            try (DatagramSocket udp = new DatagramSocket(porta);
-                 ServerSocket tcp = new ServerSocket(porta)) {
-                return porta;
+            int port = BASE_PORT + (i * 7) % 2000;
+            try (DatagramSocket udp = new DatagramSocket(port);
+                 ServerSocket tcp = new ServerSocket(port)) {
+                return port;
             } catch (IOException e) {
-                // ocupada: tenta a próxima
+                // in use: try the next one
             }
         }
-        throw new IllegalStateException("não achou porta livre para o teste");
+        throw new IllegalStateException("could not find a free port for the test");
     }
 
-    // Envia uma consulta UDP ao servidor e devolve a resposta (ou null).
-    static byte[] consultar(int porta, byte[] consulta, int timeoutMs) throws IOException {
+    // Sends a UDP query to the server and returns the response (or null).
+    static byte[] query(int port, byte[] query, int timeoutMs) throws IOException {
         try (DatagramSocket s = new DatagramSocket()) {
             s.setSoTimeout(timeoutMs);
-            s.send(new DatagramPacket(consulta, consulta.length,
-                    InetAddress.getLoopbackAddress(), porta));
+            s.send(new DatagramPacket(query, query.length,
+                    InetAddress.getLoopbackAddress(), port));
             byte[] buf = new byte[8192];
             DatagramPacket p = new DatagramPacket(buf, buf.length);
             s.receive(p);
@@ -53,59 +52,59 @@ final class DnsTestSupport {
         }
     }
 
-    // Espera o servidor responder (usa um nome bloqueado: resposta local e rápida).
-    static void esperaEscuta(int porta, String nomeBloqueado, int timeoutMs) throws Exception {
-        long fim = System.currentTimeMillis() + timeoutMs;
-        byte[] probe = DnsWire.query(0x4242, nomeBloqueado, DnsQuery.TYPE_A);
-        while (System.currentTimeMillis() < fim) {
+    // Waits for the server to respond (uses a blocked name: local, fast response).
+    static void awaitListening(int port, String blockedName, int timeoutMs) throws Exception {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        byte[] probe = DnsWire.query(0x4242, blockedName, DnsQuery.TYPE_A);
+        while (System.currentTimeMillis() < deadline) {
             try {
-                if (consultar(porta, probe, 500) != null) {
+                if (query(port, probe, 500) != null) {
                     return;
                 }
             } catch (IOException ignored) {
-                // ainda não está no ar
+                // not up yet
             }
             Thread.sleep(50);
         }
-        throw new IllegalStateException("o servidor não respondeu na porta " + porta);
+        throw new IllegalStateException("the server did not respond on port " + port);
     }
 
-    // Espera o log do servidor mostrar a marca pedida.
-    static void esperaMarca(ByteArrayOutputStream log, String marca, long timeoutMs)
+    // Waits for the server log to show the requested marker.
+    static void awaitMarker(ByteArrayOutputStream log, String marker, long timeoutMs)
             throws InterruptedException {
-        long fim = System.currentTimeMillis() + timeoutMs;
-        while (System.currentTimeMillis() < fim) {
-            if (log.toString(StandardCharsets.UTF_8).contains(marca)) {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            if (log.toString(StandardCharsets.UTF_8).contains(marker)) {
                 return;
             }
             Thread.sleep(25);
         }
-        throw new IllegalStateException("a marca '" + marca + "' não apareceu no log");
+        throw new IllegalStateException("marker '" + marker + "' did not appear in the log");
     }
 
-    // Cria um blocks.json com os domínios dados.
-    static Path arquivoDeBloqueios(Path dir, String... dominios) throws IOException {
+    // Creates a blocks.json with the given domains.
+    static Path blocksFile(Path dir, String... domains) throws IOException {
         Files.createDirectories(dir);
-        Path arquivo = dir.resolve("blocks.json");
+        Path file = dir.resolve("blocks.json");
         StringBuilder json = new StringBuilder("{");
-        Instant criado = Instant.parse("2026-01-01T00:00:00Z");
-        for (int i = 0; i < dominios.length; i++) {
+        Instant created = Instant.parse("2026-01-01T00:00:00Z");
+        for (int i = 0; i < domains.length; i++) {
             if (i > 0) {
                 json.append(',');
             }
-            json.append('"').append(dominios[i]).append("\":{\"domain\":\"")
-                    .append(dominios[i]).append("\",\"createdAt\":\"")
-                    .append(criado).append("\",\"expiresAt\":null}");
+            json.append('"').append(domains[i]).append("\":{\"domain\":\"")
+                    .append(domains[i]).append("\",\"createdAt\":\"")
+                    .append(created).append("\",\"expiresAt\":null}");
         }
         json.append('}');
-        Files.writeString(arquivo, json.toString(), StandardCharsets.UTF_8);
-        return arquivo;
+        Files.writeString(file, json.toString(), StandardCharsets.UTF_8);
+        return file;
     }
 
-    // Nomes de arquivo temporários usados nos testes.
-    static List<String> nomes(List<String> base, String... extras) {
-        List<String> todos = new ArrayList<>(base);
-        todos.addAll(Arrays.asList(extras));
-        return todos;
+    // Temporary file names used in tests.
+    static List<String> names(List<String> base, String... extras) {
+        List<String> all = new ArrayList<>(base);
+        all.addAll(Arrays.asList(extras));
+        return all;
     }
 }

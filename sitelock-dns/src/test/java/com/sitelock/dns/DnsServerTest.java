@@ -28,219 +28,220 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-// O servidor DNS de verdade, em socket de verdade (loopback, porta alta). Antes
-// a decisão era testada e o transporte não: estes testes usam um upstream no
-// escuro (127.0.0.1:53) ou um upstream falso local — nunca a internet.
+// The real DNS server, on real sockets (loopback, high port). Previously the
+// decision was tested but the transport was not: these tests use a dark upstream
+// (127.0.0.1:53) or a local fake upstream — never the internet.
 class DnsServerTest {
 
     @TempDir
     Path tmp;
 
-    // Sobe o servidor. Com upstream nulo, o upstream fica no escuro (127.0.0.1:53,
-    // onde não escuta ninguém) — um encaminhamento acaba em SERVFAIL, que é o
-    // sintoma do defeito de bloqueio.
-    private DnsServer subirServidor(String... bloqueados) throws Exception {
-        return subirServidor(null, bloqueados);
+    // Starts the server. With a null upstream, the upstream stays dark
+    // (127.0.0.1:53, where nobody listens) — a forward ends in SERVFAIL, which is
+    // the symptom of the blocking defect.
+    private DnsServer startServer(String... blocked) throws Exception {
+        return startServer(null, blocked);
     }
 
-    private DnsServer subirServidor(FakeUpstream upstream, String... bloqueados) throws Exception {
-        return subirServidor(upstream, 2000, bloqueados);
+    private DnsServer startServer(FakeUpstream upstream, String... blocked) throws Exception {
+        return startServer(upstream, 2000, blocked);
     }
 
-    private DnsServer subirServidor(FakeUpstream upstream, int timeoutUpstreamMs,
-                                    String... bloqueados) throws Exception {
-        Path estado = DnsTestSupport.arquivoDeBloqueios(tmp, bloqueados);
-        int porta = DnsTestSupport.portaLivre();
-        InetAddress enderecoUpstream = upstream == null
-                ? InetAddress.getLoopbackAddress() : upstream.endereco();
-        int portaUpstream = upstream == null ? 53 : upstream.porta();
-        DnsServer server = new DnsServer(porta, enderecoUpstream, portaUpstream, timeoutUpstreamMs,
-                new BlockStore(estado), Clock.systemUTC(), List.of());
-        Thread t = new Thread(server::serveForever, "servidor-de-teste");
+    private DnsServer startServer(FakeUpstream upstream, int upstreamTimeoutMs,
+                                  String... blocked) throws Exception {
+        Path state = DnsTestSupport.blocksFile(tmp, blocked);
+        int port = DnsTestSupport.freePort();
+        InetAddress upstreamAddress = upstream == null
+                ? InetAddress.getLoopbackAddress() : upstream.address();
+        int upstreamPort = upstream == null ? 53 : upstream.port();
+        DnsServer server = new DnsServer(port, upstreamAddress, upstreamPort, upstreamTimeoutMs,
+                new BlockStore(state), Clock.systemUTC(), List.of());
+        Thread t = new Thread(server::serveForever, "test-server");
         t.setDaemon(true);
         t.start();
-        DnsTestSupport.esperaEscuta(porta, bloqueados[0], 5000);
+        DnsTestSupport.awaitListening(port, blocked[0], 5000);
         return server;
     }
 
     @Test
-    void nomeBloqueadoComTipoNaoAaaaRespondeNodataSemConsultarUpstream() throws Exception {
-        DnsServer server = subirServidor("youtube.com");
+    void blockedNameWithNonAaaaTypeAnswersNodataWithoutQueryingUpstream() throws Exception {
+        DnsServer server = startServer("youtube.com");
         try {
-            byte[] bruto = DnsTestSupport.consultar(server.getPort(),
+            byte[] raw = DnsTestSupport.query(server.getPort(),
                     DnsWire.query(0x1234, "youtube.com", 16 /*TXT*/), 3000);
-            assertNotNull(bruto, "o servidor não respondeu");
-            DnsWire.Resposta r = DnsWire.parse(bruto);
+            assertNotNull(raw, "the server did not respond");
+            DnsWire.Response r = DnsWire.parse(raw);
             assertEquals(0, r.rcode(),
-                    "nome bloqueado não pode dar SERVFAIL: foi encaminhado ao upstream");
+                    "a blocked name must not produce SERVFAIL: it was forwarded upstream");
             assertEquals(0, r.anCount(),
-                    "NODATA: nenhum answer para tipo diferente de A/AAAA");
-            assertEquals(0x1234, r.id(), "a resposta precisa ecoar o ID do cliente");
+                    "NODATA: no answer for a type other than A/AAAA");
+            assertEquals(0x1234, r.id(), "the response must echo the client ID");
         } finally {
             server.stop();
         }
     }
 
     @Test
-    void nomeBloqueadoTipoARespondeSinkhole() throws Exception {
-        DnsServer server = subirServidor("youtube.com");
+    void blockedNameTypeAAnswersSinkhole() throws Exception {
+        DnsServer server = startServer("youtube.com");
         try {
-            byte[] bruto = DnsTestSupport.consultar(server.getPort(),
+            byte[] raw = DnsTestSupport.query(server.getPort(),
                     DnsWire.query(0x2222, "youtube.com", 1 /*A*/), 3000);
-            assertNotNull(bruto, "o servidor não respondeu");
-            DnsWire.Resposta r = DnsWire.parse(bruto);
+            assertNotNull(raw, "the server did not respond");
+            DnsWire.Response r = DnsWire.parse(raw);
             assertEquals(0, r.rcode());
-            assertEquals(1, r.anCount(), "A/AAAA bloqueado leva o sinkhole");
-            assertArrayEquals(new byte[]{0, 0, 0, 0}, r.primeiroRdata(),
-                    "sinkhole IPv4 é 0.0.0.0");
+            assertEquals(1, r.anCount(), "a blocked A/AAAA gets the sinkhole");
+            assertArrayEquals(new byte[]{0, 0, 0, 0}, r.firstRdata(),
+                    "the IPv4 sinkhole is 0.0.0.0");
         } finally {
             server.stop();
         }
     }
 
-    // O mesmo servidor precisa atender por TCP: quando a resposta não cabe no
-    // UDP, o cliente retransmite por TCP (RFC 7766 §8) e, sem listener, a
-    // resolução falha com erro de DNS.
+    // The same server must answer over TCP: when the response does not fit in UDP,
+    // the client retries over TCP (RFC 7766 §8) and, without a listener, resolution
+    // fails with a DNS error.
     @Test
-    void tcpRespondeConsultaBloqueada() throws Exception {
-        DnsServer server = subirServidor("youtube.com");
+    void tcpAnswersBlockedQuery() throws Exception {
+        DnsServer server = startServer("youtube.com");
         try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), server.getPort())) {
             socket.setSoTimeout(5000);
-            byte[] consulta = DnsWire.query(0x4444, "youtube.com", 1 /*A*/);
+            byte[] query = DnsWire.query(0x4444, "youtube.com", 1 /*A*/);
             OutputStream out = socket.getOutputStream();
-            out.write((consulta.length >>> 8) & 0xFF);
-            out.write(consulta.length & 0xFF);
-            out.write(consulta);
+            out.write((query.length >>> 8) & 0xFF);
+            out.write(query.length & 0xFF);
+            out.write(query);
             out.flush();
 
-            byte[] tamanho = lerExatamente(socket.getInputStream(), 2);
-            assertNotNull(tamanho, "o servidor não respondeu no TCP");
-            int length = ((tamanho[0] & 0xFF) << 8) | (tamanho[1] & 0xFF);
-            byte[] resposta = lerExatamente(socket.getInputStream(), length);
-            assertNotNull(resposta, "resposta TCP truncada");
+            byte[] size = readExactly(socket.getInputStream(), 2);
+            assertNotNull(size, "the server did not respond over TCP");
+            int length = ((size[0] & 0xFF) << 8) | (size[1] & 0xFF);
+            byte[] response = readExactly(socket.getInputStream(), length);
+            assertNotNull(response, "truncated TCP response");
 
-            DnsWire.Resposta r = DnsWire.parse(resposta);
-            assertEquals(0x4444, r.id(), "a resposta TCP precisa ecoar o ID do cliente");
+            DnsWire.Response r = DnsWire.parse(response);
+            assertEquals(0x4444, r.id(), "the TCP response must echo the client ID");
             assertEquals(0, r.rcode());
-            assertEquals(1, r.anCount(), "A/AAAA bloqueado leva o sinkhole");
-            assertArrayEquals(new byte[]{0, 0, 0, 0}, r.primeiroRdata(),
-                    "sinkhole IPv4 é 0.0.0.0");
+            assertEquals(1, r.anCount(), "a blocked A/AAAA gets the sinkhole");
+            assertArrayEquals(new byte[]{0, 0, 0, 0}, r.firstRdata(),
+                    "the IPv4 sinkhole is 0.0.0.0");
         } finally {
             server.stop();
         }
     }
 
     @Test
-    void tcpRespondeNodataParaTipoNaoAaaa() throws Exception {
-        DnsServer server = subirServidor("youtube.com");
+    void tcpAnswersNodataForNonAaaaType() throws Exception {
+        DnsServer server = startServer("youtube.com");
         try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), server.getPort())) {
             socket.setSoTimeout(5000);
-            byte[] consulta = DnsWire.query(0x5555, "youtube.com", 16 /*TXT*/);
+            byte[] query = DnsWire.query(0x5555, "youtube.com", 16 /*TXT*/);
             OutputStream out = socket.getOutputStream();
-            out.write((consulta.length >>> 8) & 0xFF);
-            out.write(consulta.length & 0xFF);
-            out.write(consulta);
+            out.write((query.length >>> 8) & 0xFF);
+            out.write(query.length & 0xFF);
+            out.write(query);
             out.flush();
 
-            byte[] tamanho = lerExatamente(socket.getInputStream(), 2);
-            assertNotNull(tamanho, "o servidor não respondeu no TCP");
-            int length = ((tamanho[0] & 0xFF) << 8) | (tamanho[1] & 0xFF);
-            byte[] resposta = lerExatamente(socket.getInputStream(), length);
-            assertNotNull(resposta, "resposta TCP truncada");
+            byte[] size = readExactly(socket.getInputStream(), 2);
+            assertNotNull(size, "the server did not respond over TCP");
+            int length = ((size[0] & 0xFF) << 8) | (size[1] & 0xFF);
+            byte[] response = readExactly(socket.getInputStream(), length);
+            assertNotNull(response, "truncated TCP response");
 
-            DnsWire.Resposta r = DnsWire.parse(resposta);
+            DnsWire.Response r = DnsWire.parse(response);
             assertEquals(0, r.rcode());
-            assertEquals(0, r.anCount(), "NODATA no TCP também");
+            assertEquals(0, r.anCount(), "NODATA over TCP too");
         } finally {
             server.stop();
         }
     }
 
-    // Conexão que abre e não manda nada não pode prender o servidor.
+    // A connection that opens and sends nothing must not hold the server.
     @Test
-    void conexaoTcpOciosaNaoPrendeOServidor() throws Exception {
-        DnsServer server = subirServidor("youtube.com");
+    void idleTcpConnectionDoesNotHoldTheServer() throws Exception {
+        DnsServer server = startServer("youtube.com");
         try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), server.getPort())) {
             socket.setSoTimeout(15000);
             assertEquals(-1, socket.getInputStream().read(),
-                    "o servidor precisa fechar a conexão que não enviou consulta");
+                    "the server must close a connection that sent no query");
         } finally {
             server.stop();
         }
     }
 
-    private static byte[] lerExatamente(InputStream in, int n) throws IOException {
+    private static byte[] readExactly(InputStream in, int n) throws IOException {
         byte[] buffer = new byte[n];
-        int lidos = 0;
-        while (lidos < n) {
-            int r = in.read(buffer, lidos, n - lidos);
+        int read = 0;
+        while (read < n) {
+            int r = in.read(buffer, read, n - read);
             if (r < 0) {
                 return null;
             }
-            lidos += r;
+            read += r;
         }
         return buffer;
     }
 
-    // O ID do cliente não pode trafegar em claro até o upstream: quem escuta o
-    // caminho passa a poder forjar a resposta. O upstream recebe um ID próprio, e
-    // o cliente recebe a resposta com o ID dele.
+    // The client ID must not travel in cleartext to the upstream: anyone listening
+    // on the path could then forge the response. The upstream receives its own ID,
+    // and the client receives the response with its own ID.
     @Test
-    void upstreamRecebeIdDiferenteDoCliente() throws Exception {
+    void upstreamReceivesIdDifferentFromClient() throws Exception {
         FakeUpstream upstream = new FakeUpstream();
         upstream.start();
-        DnsServer server = subirServidor(upstream, "youtube.com");
+        DnsServer server = startServer(upstream, "youtube.com");
         try {
-            byte[] bruto = DnsTestSupport.consultar(server.getPort(),
-                    DnsWire.query(0x6789, "exemplo.com", 1), 3000);
-            assertNotNull(bruto, "o servidor não respondeu");
-            DnsWire.Resposta r = DnsWire.parse(bruto);
-            assertEquals(0x6789, r.id(), "o cliente precisa ver o próprio ID");
-            assertEquals(1, r.anCount(), "a resposta do upstream tem que ser repassada");
+            byte[] raw = DnsTestSupport.query(server.getPort(),
+                    DnsWire.query(0x6789, "example.com", 1), 3000);
+            assertNotNull(raw, "the server did not respond");
+            DnsWire.Response r = DnsWire.parse(raw);
+            assertEquals(0x6789, r.id(), "the client must see its own ID");
+            assertEquals(1, r.anCount(), "the upstream response must be relayed");
 
-            List<byte[]> vistas = upstream.consultasRecebidas();
-            assertEquals(1, vistas.size(), "o upstream deve receber uma consulta");
-            assertNotEquals(0x6789, DnsWire.u16(vistas.get(0), 0),
-                    "o ID do cliente não pode ir para o upstream em claro");
+            List<byte[]> seen = upstream.receivedQueries();
+            assertEquals(1, seen.size(), "the upstream should receive one query");
+            assertNotEquals(0x6789, DnsWire.u16(seen.get(0), 0),
+                    "the client ID must not go to the upstream in cleartext");
         } finally {
             server.stop();
             upstream.close();
         }
     }
 
-    // Resposta com ID trocado é de outra transação: vira SERVFAIL, não dado falso.
+    // A response with a swapped ID belongs to another transaction: it becomes
+    // SERVFAIL, never fake data.
     @Test
-    void respostaComIdErradoNaoChegaAoCliente() throws Exception {
+    void responseWithWrongIdDoesNotReachClient() throws Exception {
         FakeUpstream upstream = new FakeUpstream();
-        upstream.modo(FakeUpstream.Modo.ID_ERRADO);
+        upstream.mode(FakeUpstream.Mode.WRONG_ID);
         upstream.start();
-        DnsServer server = subirServidor(upstream, "youtube.com");
+        DnsServer server = startServer(upstream, "youtube.com");
         try {
-            byte[] bruto = DnsTestSupport.consultar(server.getPort(),
-                    DnsWire.query(0x1111, "exemplo.com", 1), 3000);
-            assertNotNull(bruto, "o servidor não respondeu");
-            DnsWire.Resposta r = DnsWire.parse(bruto);
-            assertEquals(2, r.rcode(), "resposta inválida tem que virar SERVFAIL");
-            assertEquals(0, r.anCount(), "nenhum dado de resposta inválida pode vazar");
+            byte[] raw = DnsTestSupport.query(server.getPort(),
+                    DnsWire.query(0x1111, "example.com", 1), 3000);
+            assertNotNull(raw, "the server did not respond");
+            DnsWire.Response r = DnsWire.parse(raw);
+            assertEquals(2, r.rcode(), "an invalid response must become SERVFAIL");
+            assertEquals(0, r.anCount(), "no data from an invalid response may leak");
         } finally {
             server.stop();
             upstream.close();
         }
     }
 
-    // Pacote que não é resposta (QR=0) também é descartado.
+    // A packet that is not a response (QR=0) is also discarded.
     @Test
-    void pacoteQueNaoERespostaNaoChegaAoCliente() throws Exception {
+    void packetThatIsNotAResponseDoesNotReachClient() throws Exception {
         FakeUpstream upstream = new FakeUpstream();
-        upstream.modo(FakeUpstream.Modo.SEM_QR);
+        upstream.mode(FakeUpstream.Mode.NO_QR);
         upstream.start();
-        DnsServer server = subirServidor(upstream, "youtube.com");
+        DnsServer server = startServer(upstream, "youtube.com");
         try {
-            byte[] bruto = DnsTestSupport.consultar(server.getPort(),
-                    DnsWire.query(0x2222, "exemplo.com", 1), 3000);
-            assertNotNull(bruto, "o servidor não respondeu");
-            DnsWire.Resposta r = DnsWire.parse(bruto);
-            assertEquals(2, r.rcode(), "pacote que não é resposta tem que virar SERVFAIL");
+            byte[] raw = DnsTestSupport.query(server.getPort(),
+                    DnsWire.query(0x2222, "example.com", 1), 3000);
+            assertNotNull(raw, "the server did not respond");
+            DnsWire.Response r = DnsWire.parse(raw);
+            assertEquals(2, r.rcode(), "a packet that is not a response must become SERVFAIL");
             assertEquals(0, r.anCount());
         } finally {
             server.stop();
@@ -248,42 +249,42 @@ class DnsServerTest {
         }
     }
 
-    // Uma rajada de consultas não pode criar uma thread por consulta nem um socket
-    // por consulta: o pool antigo ("cached") crescia sem teto e cada encaminhamento
-    // abria um socket novo — uma rajada esgota as portas efêmeras do SO.
+    // A burst of queries must not create one thread per query or one socket per
+    // query: the old ("cached") pool grew without a cap and each forward opened a
+    // new socket — a burst exhausts the OS ephemeral ports.
     @Test
-    void rajadaNaoCriaUmaThreadNemUmSocketPorConsulta() throws Exception {
+    void burstDoesNotCreateOneThreadOrSocketPerQuery() throws Exception {
         FakeUpstream upstream = new FakeUpstream();
-        upstream.modo(FakeUpstream.Modo.SILENCIO); // segura cada consulta até o timeout
+        upstream.mode(FakeUpstream.Mode.SILENCE); // holds each query until the timeout
         upstream.start();
-        DnsServer server = subirServidor(upstream, 300, "youtube.com");
+        DnsServer server = startServer(upstream, 300, "youtube.com");
         try {
-            int antes = contaThreadsDoPool();
-            byte[] consulta = DnsWire.query(0x9999, "exemplo.com", 1);
-            try (DatagramSocket cliente = new DatagramSocket()) {
+            int before = countPoolThreads();
+            byte[] query = DnsWire.query(0x9999, "example.com", 1);
+            try (DatagramSocket client = new DatagramSocket()) {
                 for (int i = 0; i < 40; i++) {
-                    cliente.send(new DatagramPacket(consulta, consulta.length,
+                    client.send(new DatagramPacket(query, query.length,
                             InetAddress.getLoopbackAddress(), server.getPort()));
                 }
             }
             Thread.sleep(1000);
 
-            int novas = contaThreadsDoPool() - antes;
-            assertTrue(novas <= 16,
-                    "o pool tem que ser limitado (16 threads), mas criou " + novas);
+            int newThreads = countPoolThreads() - before;
+            assertTrue(newThreads <= 16,
+                    "the pool must be bounded (16 threads), but it created " + newThreads);
 
-            Set<Integer> portas = upstream.portasDeOrigem();
-            assertTrue(portas.size() <= 8,
-                    "o socket do upstream tem que ser reaproveitado (8 sockets), mas foram "
-                            + portas.size() + " portas diferentes");
+            Set<Integer> ports = upstream.sourcePorts();
+            assertTrue(ports.size() <= 8,
+                    "the upstream socket must be reused (8 sockets), but there were "
+                            + ports.size() + " different ports");
         } finally {
             server.stop();
             upstream.close();
         }
     }
 
-    // Threads do pool de UDP (o de TCP tem outro prefixo).
-    private static int contaThreadsDoPool() {
+    // UDP pool threads (the TCP pool has another prefix).
+    private static int countPoolThreads() {
         int total = 0;
         for (Thread t : Thread.getAllStackTraces().keySet()) {
             if (t.getName().matches("sitelock-dns-\\d+")) {
@@ -293,33 +294,33 @@ class DnsServerTest {
         return total;
     }
 
-    // Origem de fora não recebe nada: responder seria amplificar a consulta para
-    // a vítima e revelaria o que a rede consulta.
+    // An outside source gets nothing: answering would amplify the query toward the
+    // victim and reveal what the network queries.
     @Test
-    void origemRecusadaNaoRecebeResposta() throws Exception {
-        Path estado = DnsTestSupport.arquivoDeBloqueios(tmp, "youtube.com");
-        int porta = DnsTestSupport.portaLivre();
-        DnsServer server = new DnsServer(porta, InetAddress.getLoopbackAddress(), 500,
-                new BlockStore(estado), Clock.systemUTC(), DnsServer.SourcePolicy.nenhuma());
+    void refusedSourceGetsNoResponse() throws Exception {
+        Path state = DnsTestSupport.blocksFile(tmp, "youtube.com");
+        int port = DnsTestSupport.freePort();
+        DnsServer server = new DnsServer(port, InetAddress.getLoopbackAddress(), 500,
+                new BlockStore(state), Clock.systemUTC(), DnsServer.SourcePolicy.none());
 
         ByteArrayOutputStream log = new ByteArrayOutputStream();
         PrintStream original = System.out;
         System.setOut(new PrintStream(log, true, StandardCharsets.UTF_8));
         try {
-            Thread t = new Thread(server::serveForever, "servidor-de-teste");
+            Thread t = new Thread(server::serveForever, "test-server");
             t.setDaemon(true);
             t.start();
-            DnsTestSupport.esperaMarca(log, "SITELOCK_DNS_LISTENING", 5000);
+            DnsTestSupport.awaitMarker(log, "SITELOCK_DNS_LISTENING", 5000);
 
-            assertThrows(SocketTimeoutException.class, () -> DnsTestSupport.consultar(porta,
+            assertThrows(SocketTimeoutException.class, () -> DnsTestSupport.query(port,
                     DnsWire.query(0x3333, "youtube.com", 1), 1000),
-                    "origem recusada não pode receber resposta");
+                    "a refused source must not receive a response");
 
-            String texto = log.toString(StandardCharsets.UTF_8);
-            assertTrue(texto.contains("origem recusada"),
-                    "o log precisa registrar a recusa: " + texto);
-            assertFalse(texto.contains("BLOQUEADO"),
-                    "consulta recusada não pode ser atendida: " + texto);
+            String text = log.toString(StandardCharsets.UTF_8);
+            assertTrue(text.contains("refused source"),
+                    "the log must record the refusal: " + text);
+            assertFalse(text.contains("BLOCKED"),
+                    "a refused query must not be served: " + text);
         } finally {
             System.setOut(original);
             server.stop();

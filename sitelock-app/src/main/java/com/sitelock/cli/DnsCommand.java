@@ -6,11 +6,11 @@ import picocli.CommandLine;
 import java.util.concurrent.Callable;
 
 /**
- * siteblock dns ... — servidor DNS local para bloquear domínios em todos os
- * dispositivos da rede (celulares, notebooks) que apontarem seu DNS para esta máquina.
+ * siteblock dns ... — local DNS server to block domains on every device on the
+ * network (phones, laptops) that points its DNS at this machine.
  */
 @Command(name = "dns",
-        description = "Servidor DNS local: bloqueia dominios em todos os dispositivos da rede.",
+        description = "Local DNS server: blocks domains on every device on the network.",
         mixinStandardHelpOptions = true,
         subcommands = {
                 DnsStartCommand.class,

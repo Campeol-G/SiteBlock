@@ -3,33 +3,33 @@ package com.sitelock.core;
 import java.nio.file.Path;
 
 /**
- * Mensagens de elevação de privilégio específicas por SO, num único ponto.
+ * Per-OS privilege elevation messages, in a single place.
  *
- * <p>Antes, {@code CliSupport.sudoHint} dizia sempre "rode com sudo", o que é
- * errado no Windows (sem sudo nativo confiável). Agora os comandos CLI pedem o
- * texto aqui, passando o caminho real do hosts e um exemplo de subcomando —
- * nada de strings de permissão espalhadas pelo código.
+ * <p>Before, {@code CliSupport.sudoHint} always said "run with sudo", which is
+ * wrong on Windows (no reliable native sudo). Now the CLI commands ask for the
+ * text here, passing the real hosts path and a subcommand example —
+ * no permission strings scattered through the code.
  *
  * <ul>
- *   <li>Linux/macOS: instruir a rodar novamente com {@code sudo}.</li>
- *   <li>Windows: instruir a reabrir o terminal como Administrador.</li>
+ *   <li>Linux/macOS: instruct to run again with {@code sudo}.</li>
+ *   <li>Windows: instruct to reopen the terminal as Administrator.</li>
  * </ul>
  */
 public final class PermissionAdvisor {
 
     private final OsType osType;
 
-    /** Usa o SO real da JVM. */
+    /** Uses the JVM's real OS. */
     public PermissionAdvisor() {
         this(OsType.detect());
     }
 
-    /** Injeta o SO (para testes e reuso interno). */
+    /** Injects the OS (for tests and internal reuse). */
     public PermissionAdvisor(OsType osType) {
         this.osType = osType == null ? OsType.UNKNOWN : osType;
     }
 
-    /** Injeta o valor de {@code os.name} (para testes dos três ramos). */
+    /** Injects the {@code os.name} value (for tests of the three branches). */
     public PermissionAdvisor(String osName) {
         this(OsType.detect(osName));
     }
@@ -39,53 +39,53 @@ public final class PermissionAdvisor {
     }
 
     /**
-     * Dica de elevação quando falta escrita no hosts.
+     * Elevation hint when write permission on the hosts file is missing.
      *
-     * @param hostsPath caminho real do hosts (já resolvido por SO).
-     * @param subcommandExample ex.: "block tiktok.com --for 1h" (sem o binário).
+     * @param hostsPath real hosts path (already resolved per OS).
+     * @param subcommandExample e.g. "block tiktok.com --for 1h" (without the binary).
      */
     public String elevationHint(Path hostsPath, String subcommandExample) {
         String args = subcommandExample == null || subcommandExample.isBlank()
                 ? ""
                 : " " + subcommandExample.strip();
         if (osType.isWindows()) {
-            return "Sem permissão de escrita em " + hostsPath
-                    + ". Feche o terminal atual e reabra como Administrador "
-                    + "(Iniciar → cmd/PowerShell → \"Executar como administrador\") "
-                    + "e rode novamente: siteblock" + args + ".";
+            return "No write permission on " + hostsPath
+                    + ". Close the current terminal and reopen it as Administrator "
+                    + "(Start → cmd/PowerShell → \"Run as administrator\") "
+                    + "and run again: siteblock" + args + ".";
         }
-        // Linux, macOS e UNKNOWN: sudo.
-        return "Sem permissão de escrita em " + hostsPath
-                + ". Rode novamente com sudo, ex.: sudo siteblock" + args + ".";
+        // Linux, macOS and UNKNOWN: sudo.
+        return "No write permission on " + hostsPath
+                + ". Run again with sudo, e.g.: sudo siteblock" + args + ".";
     }
 
     /**
-     * Dica para porta privilegiada (&lt; 1024 exige elevação nos três SOs).
-     * Reutiliza o mesmo vocabulário de elevação do {@link #elevationHint}.
+     * Hint for privileged ports (&lt; 1024 require elevation on all three OSes).
+     * Reuses the same elevation vocabulary as {@link #elevationHint}.
      *
-     * @param retryExample exemplo de repetição, ex.: "dns start" ou "dns start --for 2h".
+     * @param retryExample retry example, e.g. "dns start" or "dns start --for 2h".
      */
     public String privilegedPortHint(int port, String retryExample) {
         String args = retryExample == null || retryExample.isBlank() ? "" : " " + retryExample.strip();
         if (osType.isWindows()) {
-            return "A porta " + port + " é privilegiada no Windows (portas < 1024 exigem "
-                    + "Administrador). Feche o terminal e reabra como Administrador "
-                    + "(Iniciar → cmd/PowerShell → \"Executar como administrador\") "
-                    + "e rode novamente: siteblock" + args + ". "
-                    + "Para testar sem elevação, use uma porta alta: siteblock dns start --port 5300.";
+            return "Port " + port + " is privileged on Windows (ports < 1024 require "
+                    + "Administrator privileges). Close the terminal and reopen it as Administrator "
+                    + "(Start → cmd/PowerShell → \"Run as administrator\") "
+                    + "and run again: siteblock" + args + ". "
+                    + "To test without elevation, use a high port: siteblock dns start --port 5300.";
         }
         String osLabel = osType.isMac() ? "macOS" : "Linux";
-        return "A porta " + port + " é privilegiada no " + osLabel + " (só root abre "
-                + "portas < 1024). Rode com sudo, ex.: sudo siteblock" + args + ". "
-                + "Para testar sem sudo, use uma porta alta: siteblock dns start --port 5300.";
+        return "Port " + port + " is privileged on " + osLabel + " (only root opens "
+                + "ports < 1024). Run with sudo, e.g.: sudo siteblock" + args + ". "
+                + "To test without sudo, use a high port: siteblock dns start --port 5300.";
     }
 
     /**
-     * Aviso best-effort quando o flush de DNS falha: o bloqueio já foi salvo,
-     * só o cache pode estar desatualizado.
+     * Best-effort warning when the DNS flush fails: the block was already saved,
+     * only the cache may be stale.
      */
     public static String dnsFlushFailureWarning() {
-        return "bloqueio salvo, mas não foi possível limpar o cache de DNS automaticamente; "
-                + "considere reiniciar o navegador.";
+        return "block saved, but the DNS cache could not be cleared automatically; "
+                + "consider restarting your browser.";
     }
 }

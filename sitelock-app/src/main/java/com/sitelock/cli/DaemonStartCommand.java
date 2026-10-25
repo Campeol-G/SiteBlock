@@ -22,19 +22,19 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
 /**
- * siteblock daemon start [--interval &lt;s&gt;] — sobe o daemon em background.
+ * siteblock daemon start [<interval>] — brings up the daemon in the background.
  *
- * <p>Não é preciso para o SiteBlock funcionar; sem ele, o prazo só é cumprido
- * quando você roda outro comando do siteblock. {@code daemon enable} é o que
- * faz isso acontecer sozinho a cada boot.
+ * <p>It is not required for SiteBlock to work; without it, a deadline is only honored
+ * when you run another siteblock command. {@code daemon enable} is what
+ * makes that happen on its own at every boot.
  */
 @Command(name = "start",
-        description = "Sobe o daemon de expiracao em background.",
+        description = "Starts the expiration daemon in the background.",
         mixinStandardHelpOptions = true)
 public class DaemonStartCommand implements Callable<Integer> {
 
-    @Option(names = "--interval", defaultValue = "60", paramLabel = "<segundos>",
-            description = "Teto do sono entre varreduras (padrao 60).")
+    @Option(names = "--interval", defaultValue = "60", paramLabel = "<seconds>",
+            description = "Sleep ceiling between sweeps (default 60).")
     String intervalSeconds;
 
     @Option(names = "--hosts-file", hidden = true) String hostsFileOverride;
@@ -53,29 +53,29 @@ public class DaemonStartCommand implements Callable<Integer> {
     public Integer call() {
         var service = CliSupport.newService(hostsFileOverride, stateFileOverride);
         if (!service.isHostsWritable()) {
-            // Recusa ANTES de forkar. Um filho que não escreve no hosts é um
-            // daemon que sobe, varre, não remove nada, e ninguém percebe.
-            System.err.println("Erro: " + CliSupport.elevationHint("daemon start"));
+            // Refuses BEFORE forking. A child that does not write the hosts file is a
+            // daemon that comes up, sweeps, removes nothing, and nobody notices.
+            System.err.println("Error: " + CliSupport.elevationHint("daemon start"));
             return 1;
         }
 
         Path stateDir = CliSupport.stateDirFor(stateFileOverride);
-        Optional<ExpirationDaemonState> existente;
+        Optional<ExpirationDaemonState> existing;
         try {
-            existente = ExpirationDaemonState.read(stateDir);
+            existing = ExpirationDaemonState.read(stateDir);
         } catch (IOException e) {
-            System.err.println("Erro ao ler o estado do daemon: " + e.getMessage());
+            System.err.println("Error reading the daemon state: " + e.getMessage());
             return 1;
         }
-        if (existente.isPresent() && ExpirationDaemonState.isAlive(existente.get())) {
-            System.err.println("Já existe um daemon rodando (pid " + existente.get().getPid()
-                    + "). Use 'siteblock daemon status' para ver, ou 'daemon stop' para encerrar.");
+        if (existing.isPresent() && ExpirationDaemonState.isAlive(existing.get())) {
+            System.err.println("A daemon is already running (pid " + existing.get().getPid()
+                    + "). Use 'siteblock daemon status' to see it, or 'daemon stop' to stop it.");
             return 1;
         }
         try {
-            descartarRegistroOrfao(stateDir);
+            discardOrphanRecord(stateDir);
         } catch (IOException e) {
-            System.err.println("Aviso: não consegui limpar o registro antigo do daemon: "
+            System.err.println("Warning: could not clean up the daemon's old record: "
                     + e.getMessage());
         }
 
@@ -84,10 +84,10 @@ public class DaemonStartCommand implements Callable<Integer> {
         final Process process;
         try {
             Files.createDirectories(stateDir);
-            // O log é do filho, mas nasce do pai: rotacionar aqui é o que
-            // garante que o tail mostre o erro desta execução, e não o da
-            // última.
-            prepararLog(logFile);
+            // The log belongs to the child but is born from the parent: rotating here is what
+            // guarantees the tail shows the error of THIS run, and not of
+            // the previous one.
+            prepareLog(logFile);
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
             pb.redirectErrorStream(true);
@@ -97,15 +97,15 @@ public class DaemonStartCommand implements Callable<Integer> {
             } catch (IOException ignored) {
             }
         } catch (IOException e) {
-            System.err.println("Erro ao iniciar o daemon: " + e.getMessage());
+            System.err.println("Error starting the daemon: " + e.getMessage());
             return 1;
         }
 
         long pid = process.pid();
 
-        // Quem escreve o daemon.json é o FILHO. O pai só espera ele aparecer e
-        // confirmar que o PID registrado é o do processo vivo.
-        boolean registrado = false;
+        // The one who writes daemon.json is the CHILD. The parent only waits for it to appear and
+        // confirms that the recorded PID belongs to the live process.
+        boolean registered = false;
         for (int i = 0; i < 40; i++) {
             try {
                 Thread.sleep(100);
@@ -117,11 +117,11 @@ public class DaemonStartCommand implements Callable<Integer> {
             try {
                 state = ExpirationDaemonState.read(stateDir);
             } catch (IOException e) {
-                System.err.println("Erro ao ler o registro do daemon: " + e.getMessage());
+                System.err.println("Error reading the daemon record: " + e.getMessage());
                 return 1;
             }
             if (state.isPresent() && state.get().getPid() == pid) {
-                registrado = true;
+                registered = true;
                 break;
             }
             if (!process.isAlive()) {
@@ -129,39 +129,39 @@ public class DaemonStartCommand implements Callable<Integer> {
             }
         }
 
-        if (!registrado) {
+        if (!registered) {
             process.destroyForcibly();
-            System.err.println("Erro: o daemon não subiu (pid " + pid + " encerrou).");
-            System.out.println("Últimas linhas do log:");
+            System.err.println("Error: the daemon did not come up (pid " + pid + " exited).");
+            System.out.println("Last log lines:");
             printLogTail(logFile);
             return 1;
         }
 
-        System.out.println("Daemon de expiração iniciado (pid " + pid
-                + ", teto de " + intervalSeconds + "s).");
-        System.out.println("Bloqueios temporários agora vencem sozinhos. Log em: " + logFile);
-        String aviso = caminhoGravavelPeloUsuario();
-        if (aviso != null) {
-            System.out.println(aviso);
+        System.out.println("Expiration daemon started (pid " + pid
+                + ", ceiling of " + intervalSeconds + "s).");
+        System.out.println("Temporary blocks now expire on their own. Log at: " + logFile);
+        String warning = userWritablePathWarning();
+        if (warning != null) {
+            System.out.println(warning);
         }
         return 0;
     }
 
-    // POR QUE: as duas properties de caminho são repassadas ao filho — sem elas
-    // o start e o enable leriam arquivos diferentes. A linha sai da mesma fonte
-    // (DaemonCommandLine): a JVM que executa o daemon é a mesma nos dois casos.
+    // WHY: the two path properties are passed on to the child — without them
+    // start and enable would read different files. The line comes from the same source
+    // (DaemonCommandLine): the JVM that runs the daemon is the same in both cases.
 
-    // ATENÇÃO: quando as duas linhas eram montadas à mão, o enable deixava o
-    // nome da classe depois do -jar e o start deixava as properties: nenhuma das
-    // duas invocações subia, e nenhuma dizia por quê.
+    // NOTE: when both lines were assembled by hand, the enable left the
+    // class name after the -jar and the start left the properties: neither
+    // invocation came up, and neither said why.
     List<String> buildChildCommand(Path stateDir, Path hostsPath) {
         String javaHome = System.getProperty("java.home", "");
         Path javaBin = Paths.get(javaHome, "bin", "java");
         String javaCmd = Files.isExecutable(javaBin) ? javaBin.toString() : "java";
 
         List<String> properties = new ArrayList<>();
-        // O log do filho é lido como UTF-8 pelo tail e pelos testes; sem isto o
-        // Windows grava na codepage nativa e a leitura quebra.
+        // The child's log is read as UTF-8 by the tail and by the tests; without this
+        // Windows writes in the native code page and reading breaks.
         properties.add("-Dstdout.encoding=UTF-8");
         properties.add("-Dstderr.encoding=UTF-8");
         String binProp = System.getProperty("siteblock.bin");
@@ -170,9 +170,9 @@ public class DaemonStartCommand implements Callable<Integer> {
         }
         properties.add("-Dsitelock.stateDir=" + stateDir.toAbsolutePath());
         properties.add("-Dsitelock.hostsFile=" + hostsPath.toAbsolutePath());
-        // O filho herda o SUDO_USER do pai, mas e se o pai roda como root sem
-        // sudo (su, container)? Aí ninguém saberia a quem devolver a posse dos
-        // arquivos que o daemon escreve — e o status passaria a pedir elevação.
+        // The child inherits the parent's SUDO_USER, but what if the parent runs as root without
+        // su (su, container)? Then nobody would know to whom to hand back ownership of the
+        // files the daemon writes — and status would start asking for elevation.
         SiteLockPaths.realUserName().ifPresent(u -> properties.add("-Dsitelock.user=" + u));
 
         List<String> appArgs = new ArrayList<>(
@@ -186,61 +186,61 @@ public class DaemonStartCommand implements Callable<Integer> {
                 System.getProperty("java.class.path", "."), properties, appArgs);
     }
 
-    // Teto de cada geração do log do daemon.
+    // Ceiling for each generation of the daemon log.
     static final long LOG_MAX_BYTES = 64 * 1024;
 
-    // POR QUE: sem isto o log só cresce — o appendTo do filho mantém o que já
-    // estava, e o printLogTail mostraria a cauda de uma execução antiga. O
-    // anterior vai para daemon.log.1, aparado no teto, e o daemon.log recomeça.
+    // WHY: without this the log only grows — the child's appendTo keeps what was
+    // already there, and printLogTail would show the tail of an old run. The
+    // previous one goes to daemon.log.1, capped at the ceiling, and daemon.log starts over.
 
-    // A posse volta para o usuário real: o pai roda como root, e um log que só
-    // o root lê quebra a promessa de que o daemon status funciona sem elevação.
-    static void prepararLog(Path logFile) throws IOException {
-        Path anterior = logFile.resolveSibling(logFile.getFileName() + ".1");
+    // Ownership goes back to the real user: the parent runs as root, and a log that only
+    // root reads breaks the promise that daemon status works without elevation.
+    static void prepareLog(Path logFile) throws IOException {
+        Path previous = logFile.resolveSibling(logFile.getFileName() + ".1");
         if (Files.exists(logFile) && Files.size(logFile) > 0) {
-            guardarGeracaoAnterior(logFile, anterior);
+            preservePreviousGeneration(logFile, previous);
         }
-        Path pai = logFile.getParent();
-        if (pai != null) {
-            Files.createDirectories(pai);
+        Path parent = logFile.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
         }
-        // TRUNCATE_EXISTING no mesmo inode: o arquivo continua sendo o mesmo
-        // (com a mesma posse e permissões) — só o conteúdo é zerado.
+        // TRUNCATE_EXISTING on the same inode: the file stays the same file
+        // (with the same ownership and permissions) — only the content is zeroed.
         Files.writeString(logFile, "", StandardCharsets.UTF_8,
                 StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING,
                 StandardOpenOption.WRITE);
         SiteLockPaths.chownToUserIfConfigured(logFile);
-        SiteLockPaths.chownToUserIfConfigured(anterior);
+        SiteLockPaths.chownToUserIfConfigured(previous);
     }
 
-    // Guarda só a cauda do log anterior no arquivo rotacionado.
-    private static void guardarGeracaoAnterior(Path origem, Path destino) throws IOException {
-        byte[] cauda = lerCauda(origem, LOG_MAX_BYTES);
-        Files.write(destino, cauda, StandardOpenOption.CREATE,
+    // Keeps only the tail of the previous log in the rotated file.
+    private static void preservePreviousGeneration(Path source, Path destination) throws IOException {
+        byte[] tail = readTail(source, LOG_MAX_BYTES);
+        Files.write(destination, tail, StandardOpenOption.CREATE,
                 StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
     }
 
-    // Os últimos max bytes do arquivo, sem a linha cortada no meio.
-    private static byte[] lerCauda(Path arquivo, long max) throws IOException {
-        try (SeekableByteChannel canal = Files.newByteChannel(arquivo, StandardOpenOption.READ)) {
-            long tamanho = canal.size();
-            long inicio = Math.max(0, tamanho - max);
-            canal.position(inicio);
-            ByteBuffer buffer = ByteBuffer.allocate((int) (tamanho - inicio));
-            while (buffer.hasRemaining() && canal.read(buffer) > 0) {
+    // The last max bytes of the file, without the line cut in the middle.
+    private static byte[] readTail(Path file, long max) throws IOException {
+        try (SeekableByteChannel channel = Files.newByteChannel(file, StandardOpenOption.READ)) {
+            long size = channel.size();
+            long start = Math.max(0, size - max);
+            channel.position(start);
+            ByteBuffer buffer = ByteBuffer.allocate((int) (size - start));
+            while (buffer.hasRemaining() && channel.read(buffer) > 0) {
             }
-            byte[] cauda = buffer.array();
-            if (inicio == 0) {
-                return cauda; // o arquivo inteiro coube: nada foi cortado
+            byte[] tail = buffer.array();
+            if (start == 0) {
+                return tail; // the whole file fit: nothing was cut
             }
-            // A cauda começa no meio de uma linha: ela vai fora.
-            int quebra = primeiraLinha(cauda);
-            return quebra < 0 ? cauda : Arrays.copyOfRange(cauda, quebra + 1, cauda.length);
+            // The tail starts in the middle of a line: that line goes out.
+            int brk = firstLine(tail);
+            return brk < 0 ? tail : Arrays.copyOfRange(tail, brk + 1, tail.length);
         }
     }
 
-    // Índice da primeira quebra de linha, ou -1.
-    private static int primeiraLinha(byte[] bytes) {
+    // Index of the first line break, or -1.
+    private static int firstLine(byte[] bytes) {
         for (int i = 0; i < bytes.length; i++) {
             if (bytes[i] == '\n') {
                 return i;
@@ -249,33 +249,33 @@ public class DaemonStartCommand implements Callable<Integer> {
         return -1;
     }
 
-    // ATENÇÃO: registro órfão trava o daemon start para sempre (não há --force)
-    // e o daemon stop mandaria sinal para um processo alheio. Devolve true só
-    // quando havia um órfão e ele foi removido.
+    // NOTE: an orphan record blocks daemon start forever (there is no --force)
+    // and daemon stop would send a signal to an unrelated process. Returns true only
+    // when there was an orphan and it was removed.
     /**
-     * A checagem de identidade não é só "o PID está vivo": o registro guarda o
-     * instante de início do processo, e é ele que prova que o PID vivo ainda é
-     * o nosso — o SO recicla números de PID. Registro antigo, sem o instante,
-     * ainda vale pelo PID.
+     * The identity check is not just "the PID is alive": the record stores the
+     * process start instant, and that is what proves the live PID is still
+     * ours — the OS recycles PID numbers. An old record, without the instant,
+     * is still trusted on the PID.
      */
-    static boolean descartarRegistroOrfao(Path stateDir) throws IOException {
-        Optional<ExpirationDaemonState> existente = ExpirationDaemonState.read(stateDir);
-        if (existente.isEmpty() || ExpirationDaemonState.isAlive(existente.get())) {
+    static boolean discardOrphanRecord(Path stateDir) throws IOException {
+        Optional<ExpirationDaemonState> existing = ExpirationDaemonState.read(stateDir);
+        if (existing.isEmpty() || ExpirationDaemonState.isAlive(existing.get())) {
             return false;
         }
         ExpirationDaemonState.delete(stateDir);
-        System.out.println("Registro de daemon antigo (pid " + existente.get().getPid()
-                + ") descartado: o processo não está mais rodando.");
+        System.out.println("Old daemon record (pid " + existing.get().getPid()
+                + ") discarded: the process is no longer running.");
         return true;
     }
 
-    // O daemon start executa o jar de onde ele está — normalmente o do build,
-    // num diretório que o usuário pode trocar. É aviso, nunca recusa: o alvo é
-    // o usuário distraído, não o atacante.
+    // daemon start runs the jar from where it is — normally the build's,
+    // in a directory the user can swap. It is a warning, never a refusal: the target is
+    // the distracted user, not the attacker.
 
-    // A correção já existe e é um comando: o daemon enable instala uma cópia
-    // do jar num diretório do root e aponta a inicialização para lá.
-    private String caminhoGravavelPeloUsuario() {
+    // The correction already exists and is a command: daemon enable installs a copy
+    // of the jar in a root-owned directory and points the initialization there.
+    private String userWritablePathWarning() {
         String jar = System.getProperty("siteblock.jar");
         if (jar == null || jar.isBlank()) {
             return null;
@@ -286,25 +286,25 @@ public class DaemonStartCommand implements Callable<Integer> {
         } catch (RuntimeException e) {
             return null;
         }
-        return "Aviso: o daemon roda como root e executa o jar em " + p
-                + ", que você pode trocar. Para evitar isso, rode: "
+        return "Warning: the daemon runs as root and executes the jar at " + p
+                + ", which you can swap. To prevent that, run: "
                 + CliSupport.elevatedCommand("daemon enable");
     }
 
     private static void printLogTail(Path logFile) {
         try {
-            List<String> linhas = Files.readAllLines(logFile);
-            for (int i = Math.max(0, linhas.size() - 10); i < linhas.size(); i++) {
-                System.err.println("  " + linhas.get(i));
+            List<String> lines = Files.readAllLines(logFile);
+            for (int i = Math.max(0, lines.size() - 10); i < lines.size(); i++) {
+                System.err.println("  " + lines.get(i));
             }
         } catch (IOException ignored) {
         }
     }
 
-    // Espera o processo terminar; usado pelo daemon stop.
-    static boolean esperarAte(Process process, long segundos) {
+    // Waits for the process to finish; used by daemon stop.
+    static boolean waitForExit(Process process, long seconds) {
         try {
-            return process.waitFor(segundos, TimeUnit.SECONDS);
+            return process.waitFor(seconds, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return false;

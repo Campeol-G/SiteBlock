@@ -9,9 +9,9 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.Callable;
 
-/** siteblock profile list — nomes e tamanho de cada perfil salvo. */
+/** siteblock profile list — names and size of each saved profile. */
 @Command(name = "list",
-        description = "Lista os perfis salvos.",
+        description = "Lists the saved profiles.",
         mixinStandardHelpOptions = true)
 public class ProfileListCommand implements Callable<Integer> {
 
@@ -30,18 +30,18 @@ public class ProfileListCommand implements Callable<Integer> {
         try {
             profiles = new ProfileStore(CliSupport.resolveProfilesFile(stateFileOverride)).load();
         } catch (IOException e) {
-            System.err.println("Erro ao ler perfis: " + e.getMessage());
+            System.err.println("Error reading profiles: " + e.getMessage());
             return 1;
         }
 
         if (profiles.isEmpty()) {
-            System.out.println("Nenhum perfil salvo. Crie um com: siteblock save profile <nome>");
+            System.out.println("No profiles saved. Create one with: siteblock save profile <name>");
             return 0;
         }
 
-        System.out.println("Perfis salvos (" + profiles.size() + "):");
+        System.out.println("Saved profiles (" + profiles.size() + "):");
         for (Map.Entry<String, Profile> e : profiles.entrySet()) {
-            System.out.println("  " + e.getKey() + " — " + e.getValue().size() + " domínio(s)");
+            System.out.println("  " + e.getKey() + " — " + e.getValue().size() + " domain(s)");
         }
         return 0;
     }

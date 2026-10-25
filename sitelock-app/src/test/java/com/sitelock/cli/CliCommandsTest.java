@@ -10,7 +10,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Integração CLI com arquivos temporários. */
+/** CLI integration with temporary files. */
 class CliCommandsTest {
 
     @TempDir
@@ -36,8 +36,8 @@ class CliCommandsTest {
         String content = Files.readString(h, StandardCharsets.UTF_8);
         for (String d : List.of("tiktok.com", "www.tiktok.com",
                 "vm.tiktok.com", "www.vm.tiktok.com")) {
-            assertTrue(content.contains("127.0.0.1 " + d), "falta 127.0.0.1 " + d);
-            assertTrue(content.contains("::1 " + d), "falta ::1 " + d);
+            assertTrue(content.contains("127.0.0.1 " + d), "missing 127.0.0.1 " + d);
+            assertTrue(content.contains("::1 " + d), "missing ::1 " + d);
         }
         assertEquals(0, new BlockCommand(List.of("tiktok.com"), null, h.toString(), state()).call());
         String again = Files.readString(h, StandardCharsets.UTF_8);
@@ -59,7 +59,7 @@ class CliCommandsTest {
                 h.toString(), state()).call();
         assertEquals(2, exit);
         assertFalse(Files.readString(h, StandardCharsets.UTF_8).contains("tiktok.com"));
-        assertFalse(Files.exists(Path.of(state())), "nada pode ser gravado com duração inválida");
+        assertFalse(Files.exists(Path.of(state())), "nothing may be stored with an invalid duration");
     }
 
     @Test
@@ -83,20 +83,20 @@ class CliCommandsTest {
         assertTrue(content.contains("127.0.0.1 b.com"));
     }
 
-    // ATENÇÃO: um Scanner novo por pergunta lia o stdin num buffer de 1 KB e
-    // consumia as duas linhas digitadas de uma vez — a pessoa confirmava
-    // duas vezes e o comando dizia que não desbloqueou.
+    // WARNING: a new Scanner per question read stdin into a 1 KB buffer and
+    // consumed both typed lines at once — the person confirmed twice and the
+    // command reported that it did not unblock.
     /**
-     * As confirmações digitadas não podem se perder entre si.
+     * Typed confirmations must not be lost between each other.
      */
     @Test
-    void unblockForceAceitaAsDuasConfirmacoes() throws Exception {
+    void unblockForceAcceptsBothConfirmations() throws Exception {
         Path h = hosts();
         assertEquals(0, new BlockCommand(List.of("a.com", "b.com"), "1h",
                 h.toString(), state()).call());
 
         java.io.InputStream originalIn = System.in;
-        System.setIn(new java.io.ByteArrayInputStream("SIM\nSIM\n".getBytes(StandardCharsets.UTF_8)));
+        System.setIn(new java.io.ByteArrayInputStream("YES\nYES\n".getBytes(StandardCharsets.UTF_8)));
         int exit;
         try {
             exit = new UnblockCommand(List.of("a.com", "b.com"), true,
@@ -105,7 +105,7 @@ class CliCommandsTest {
             System.setIn(originalIn);
         }
 
-        assertEquals(0, exit, "as duas confirmações digitadas têm que valer");
+        assertEquals(0, exit, "both typed confirmations must count");
         String content = Files.readString(h, StandardCharsets.UTF_8);
         assertFalse(content.contains("127.0.0.1 a.com"), content);
         assertFalse(content.contains("127.0.0.1 b.com"), content);

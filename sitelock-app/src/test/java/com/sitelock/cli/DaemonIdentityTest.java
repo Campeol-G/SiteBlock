@@ -15,12 +15,12 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * A identidade do daemon, vista de fora.
+ * The daemon identity, seen from the outside.
  *
- * <p>O registro é escrito pelo próprio daemon, num processo diferente do que
- * lê. Para o {@code daemon status} dizer "rodando" e para o {@code daemon
- * stop} achar o processo certo, o registro tem que carregar o instante de
- * início do processo — e ele tem que bater com o que o SO responde.
+ * <p>The record is written by the daemon itself, in a different process from the
+ * one that reads it. For {@code daemon status} to say "running" and for {@code
+ * daemon stop} to find the right process, the record must carry the process
+ * start instant — and it must match what the OS reports.
  */
 class DaemonIdentityTest {
 
@@ -28,39 +28,39 @@ class DaemonIdentityTest {
     Path tmp;
 
     @Test
-    void oRegistroEscritoPorOutroProcessoProvaAIdentidade() throws Exception {
+    void recordWrittenByAnotherProcessProvesIdentity() throws Exception {
         Path hosts = tmp.resolve("hosts");
         Files.writeString(hosts, "127.0.0.1 localhost\n", StandardCharsets.UTF_8);
-        Path estado = tmp.resolve("estado");
-        Files.createDirectories(estado);
+        Path state = tmp.resolve("state");
+        Files.createDirectories(state);
 
-        Process daemon = new ProcessBuilder(comandoDoDaemon(estado, hosts))
+        Process daemon = new ProcessBuilder(daemonCommand(state, hosts))
                 .redirectErrorStream(true)
                 .redirectOutput(ProcessBuilder.Redirect.DISCARD)
                 .start();
         try {
-            Path registro = estado.resolve("daemon.json");
-            for (int i = 0; i < 150 && !Files.exists(registro); i++) {
+            Path record = state.resolve("daemon.json");
+            for (int i = 0; i < 150 && !Files.exists(record); i++) {
                 Thread.sleep(100);
             }
 
-            ExpirationDaemonState state = ExpirationDaemonState.read(estado).orElseThrow();
-            assertNotNull(state.getProcessStartedAt(),
-                    "o registro tem que guardar o instante de início do processo que o escreveu");
-            assertTrue(ExpirationDaemonState.isAlive(state),
-                    "quem lê de outro processo tem que reconhecer o daemon como vivo");
+            ExpirationDaemonState snapshot = ExpirationDaemonState.read(state).orElseThrow();
+            assertNotNull(snapshot.getProcessStartedAt(),
+                    "the record must store the start instant of the process that wrote it");
+            assertTrue(ExpirationDaemonState.isAlive(snapshot),
+                    "a reader in another process must recognize the daemon as alive");
         } finally {
-            ProcessosDeTeste.matar(daemon);
+            TestProcesses.kill(daemon);
             daemon.waitFor();
         }
     }
 
-    private List<String> comandoDoDaemon(Path estado, Path hosts) {
+    private List<String> daemonCommand(Path state, Path hosts) {
         List<String> cmd = new ArrayList<>();
         cmd.add(Paths.get(System.getProperty("java.home"), "bin", "java").toString());
         cmd.add("-cp");
         cmd.add(System.getProperty("java.class.path"));
-        cmd.add("-Dsitelock.stateDir=" + estado.toAbsolutePath());
+        cmd.add("-Dsitelock.stateDir=" + state.toAbsolutePath());
         cmd.add("-Dsitelock.hostsFile=" + hosts.toAbsolutePath());
         cmd.add("com.sitelock.SiteLockApplication");
         cmd.add("daemon");

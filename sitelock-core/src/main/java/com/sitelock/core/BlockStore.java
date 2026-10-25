@@ -21,8 +21,8 @@ import java.util.Map;
 import java.util.TreeMap;
 
 /**
- * Persistência do blocks.json com escrita atômica e lock entre processos.
- * JSON ilegível vira {@link CorruptedStateException} sem apagar nada.
+ * Persistence for blocks.json with atomic writes and a cross-process lock.
+ * Unreadable JSON becomes a {@link CorruptedStateException} without deleting anything.
  */
 public class BlockStore {
 
@@ -40,7 +40,7 @@ public class BlockStore {
         this.mapper = defaultMapper();
     }
 
-    /** Construtor padrão usando {@link SiteLockPaths}. */
+    /** Default constructor using {@link SiteLockPaths}. */
     public BlockStore() {
         this(SiteLockPaths.getStateFile());
     }
@@ -57,20 +57,20 @@ public class BlockStore {
         return stateFile;
     }
 
-    /** Arquivo inexistente vira mapa vazio. Cai para leitura direta se o lock falhar. */
+    /** Missing file becomes an empty map. Falls back to a direct read if the lock fails. */
     public Map<String, BlockEntry> load() throws IOException {
         if (!Files.exists(stateFile)) {
             return new TreeMap<>();
         }
-        // Tenta lock compartilhado somente-leitura; cai para leitura direta.
+        // Tries a shared read-only lock; falls back to a direct read.
         if (Files.exists(lockFile)) {
             try (FileChannel channel = FileChannel.open(lockFile, StandardOpenOption.READ);
                  FileLock ignored = channel.tryLock(0L, Long.MAX_VALUE, true)) {
                 return readAndParse();
             } catch (IOException | UnsupportedOperationException | OverlappingFileLockException e) {
-                // Lock inacessível (root-owned sem sudo), FS sem lock, ou outra thread
-                // da mesma JVM com lock (locks são por JVM: tryLock concorrente lança
-                // OverlappingFileLockException). Ler o snapshot atômico direto é seguro.
+                // Inaccessible lock (root-owned without sudo), FS without locks, or another thread
+                // in the SAME JVM holding the lock (locks are per JVM: a concurrent tryLock throws
+                // OverlappingFileLockException). Reading the atomic snapshot directly is safe.
                 return readAndParse();
             }
         }
@@ -82,52 +82,52 @@ public class BlockStore {
             try {
                 bytes = Files.readAllBytes(stateFile);
             } catch (IOException e) {
-                throw new IOException("Falha ao ler " + stateFile + ": " + e.getMessage(), e);
+                throw new IOException("Failed to read " + stateFile + ": " + e.getMessage(), e);
             }
             String text = new String(bytes, StandardCharsets.UTF_8).trim();
             if (text.isEmpty()) {
                 throw new CorruptedStateException(
-                        "Arquivo de estado vazio/corrompido: " + stateFile, null);
+                        "State file empty/corrupted: " + stateFile, null);
             }
             final Map<String, BlockEntry> parsed;
             try {
                 parsed = mapper.readValue(text, MAP_TYPE);
             } catch (JsonProcessingException e) {
                 throw new CorruptedStateException(
-                        "Arquivo de estado corrompido: " + stateFile, e);
+                        "State file corrupted: " + stateFile, e);
             }
             if (parsed == null) {
                 throw new CorruptedStateException(
-                        "Arquivo de estado corrompido (conteúdo nulo): " + stateFile, null);
+                        "State file corrupted (null content): " + stateFile, null);
             }
             Map<String, BlockEntry> result = new TreeMap<>();
             for (Map.Entry<String, BlockEntry> e : parsed.entrySet()) {
                 BlockEntry entry = e.getValue();
                 if (entry == null || entry.getDomain() == null || entry.getDomain().isBlank()) {
                     throw new CorruptedStateException(
-                            "Arquivo de estado corrompido (entrada sem domínio): " + stateFile, null);
+                            "State file corrupted (entry without domain): " + stateFile, null);
                 }
                 result.put(entry.getDomain(), entry);
             }
             return result;
     }
 
-    // POR QUE: load → transforma → save solto é read-modify-write sem proteção
-    // (o save trava, o load é antes e fora): com o daemon a cada minuto, a
-    // janela entre os dois está sempre aberta.
+    // WHY: load → transform → standalone save is an unprotected read-modify-write:
+    // the save takes the lock, but the load happened earlier and outside it. With
+    // the daemon running every minute, the window between the two is always open.
 
-    // O caso: o daemon lê o estado, outro terminal roda block, e o daemon grava
-    // o estado antigo — o bloqueio some do JSON e continua no hosts, que o
-    // sweep (que varre o JSON) nunca limpa, e o status diz que não está bloqueado.
+    // The case: the daemon reads the state, another terminal runs block, and the daemon writes
+    // the stale state — the block disappears from the JSON but stays in the hosts file, which the
+    // sweep (that walks the JSON) never cleans, and status says it is not blocked.
 
-    // A gravação é um delta sobre o disco, não cega: quem não espera a trava
-    // (outra versão da ferramenta, script, edição manual) não é apagado. É a
-    // mesma verificação otimista que o HostsFileManager.modifyHosts já faz.
+    // The write is a delta over what is on disk, not blind: whatever did not wait for the lock
+    // (another version of the tool, a script, a manual edit) is not erased. It is the
+    // same optimistic check that HostsFileManager.modifyHosts already does.
     /**
-     * Executa uma modificação do estado inteiro sob a trava do arquivo.
+     * Runs a modification of the whole state under the file lock.
      *
-     * @param body recebe acesso ao estado já carregado e um {@code save} que não
-     *             trava de novo
+     * @param body receives access to the already loaded state and a {@code save} that does not
+     *             lock again
      */
     public <R> R inTransaction(TransactionBody<R> body) throws IOException {
         ensureParentExists(stateFile);
@@ -139,25 +139,25 @@ public class BlockStore {
             SiteLockPaths.chownToUserIfConfigured(lockFile);
             return body.apply(new LockedState());
         } catch (OverlappingFileLockException e) {
-            // Outra thread da MESMA JVM. Não é erro de dado: o chamador decide.
-            throw new IOException("Outro processo/thread está escrevendo o estado agora; "
-                    + "tente de novo.", e);
+            // Another thread in the SAME JVM. Not a data error: the caller decides.
+            throw new IOException("Another process/thread is writing the state right now; "
+                    + "try again.", e);
         }
     }
 
-    // POR QUE: o save de dentro da transação não pode ser uma escrita cega — o
-    // que está no disco pode ter mudado desde o load (por outro escritor que não
-    // espera a trava), e apagar isso é o lost update que a transação impede.
+    // WHY: the save inside the transaction cannot be a blind write — what is
+    // on disk may have changed since the load (by another writer that did not
+    // wait for the lock), and erasing it is the lost update the transaction prevents.
     private final class LockedState implements Transaction {
 
-        // O que foi gravado por último: a base do delta da próxima gravação.
+        // What was written last: the base of the delta for the next write.
         private Map<String, BlockEntry> lastWritten = new TreeMap<>();
 
         @Override
         public Map<String, BlockEntry> load() throws IOException {
-            // Mesma guarda de load(): arquivo inexistente é estado vazio,
-            // não erro. Sem ela o primeiro `block` de uma máquina nova
-            // falharia, porque ainda não há arquivo para ler.
+            // Same guard as load(): a missing file is empty state,
+            // not an error. Without it the first `block` on a fresh machine
+            // would fail, because there is still no file to read.
             Map<String, BlockEntry> state = Files.exists(stateFile)
                     ? readAndParse()
                     : new TreeMap<>();
@@ -171,8 +171,8 @@ public class BlockStore {
             lastWritten = new TreeMap<>(blocks);
         }
 
-        // Aplica o delta entre o que foi gravado por último e o que se quer
-        // gravar sobre o que está no disco agora.
+        // Applies the delta between what was written last and what we want to
+        // write, on top of what is on disk right now.
         private Map<String, BlockEntry> mergeIntoDisk(Map<String, BlockEntry> blocks)
                 throws IOException {
             Map<String, BlockEntry> onDisk = Files.exists(stateFile)
@@ -195,7 +195,7 @@ public class BlockStore {
         }
     }
 
-    /** O que se pode fazer dentro de uma transação. */
+    /** What can be done inside a transaction. */
     public interface Transaction {
         Map<String, BlockEntry> load() throws IOException;
 
@@ -207,7 +207,7 @@ public class BlockStore {
         R apply(Transaction tx) throws IOException;
     }
 
-    // Escrita atômica sem travar de novo — só válida dentro de uma transação.
+    // Atomic write without locking again — only valid inside a transaction.
     private void writeAtomically(Map<String, BlockEntry> blocks) throws IOException {
         Path tmp = stateFile.resolveSibling(stateFile.getFileName() + ".tmp");
         String json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(blocks);
@@ -224,7 +224,7 @@ public class BlockStore {
         SiteLockPaths.chownToUserIfConfigured(lockFile);
     }
 
-    /** Salva o estado de forma atômica. */
+    /** Saves the state atomically. */
     public void save(Map<String, BlockEntry> blocks) throws IOException {
         ensureParentExists(stateFile);
         ensureParentExists(lockFile);
@@ -234,12 +234,12 @@ public class BlockStore {
              FileLock ignored = channel.lock()) {
             writeAtomically(blocks);
         } catch (OverlappingFileLockException e) {
-            throw new IOException("Outro processo/thread está escrevendo o estado agora; "
-                    + "tente de novo.", e);
+            throw new IOException("Another process/thread is writing the state right now; "
+                    + "try again.", e);
         }
     }
 
-    /** Apaga o estado. Não toca no /etc/hosts. */
+    /** Deletes the state. Does not touch /etc/hosts. */
     public void clear() throws IOException {
         save(new TreeMap<>());
     }

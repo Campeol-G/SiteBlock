@@ -12,7 +12,7 @@
 
   <artifactId>sitelock-dns</artifactId>
   <name>SiteLock DNS</name>
-  <description>Servidor DNS local (UDP) com sinkhole para domínios bloqueados e proxy para upstream.</description>
+  <description>Local DNS server (UDP) with a sinkhole for blocked domains and an upstream proxy.</description>
 
   <dependencies>
     <dependency>

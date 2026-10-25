@@ -11,18 +11,19 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Descoberta do IP local da máquina para imprimir no terminal ao iniciar o
- * servidor: o usuário aponta o DNS do celular/PC para esse IP.
+ * Discovers the machine's local IP to print in the terminal when the server
+ * starts: the user points the phone/PC DNS at that IP.
  */
 public final class NetworkUtils {
 
     private NetworkUtils() {
     }
 
-    // POR QUE: as site-local (192.168/10/172.16-31) vêm primeiro — com várias
-    // interfaces (Wi-Fi + Ethernet + VPN + Docker), é a alcançável pela rede
-    // local. Filtrar o essencial (ativa, não-loopback, não virtual) dispensa lógica por SO.
-    /** Todas as IPv4 locais não-loopback (site-locais primeiro). */
+    // WHY: site-local addresses (192.168/10/172.16-31) come first — with several
+    // interfaces (Wi-Fi + Ethernet + VPN + Docker), that is the one reachable from
+    // the local network. Filtering the essentials (up, non-loopback, non-virtual)
+    // avoids per-OS logic.
+    /** All local non-loopback IPv4 addresses (site-local first). */
     public static List<String> localIPv4Addresses() {
         List<String> siteLocal = new ArrayList<>();
         List<String> others = new ArrayList<>();
@@ -40,7 +41,7 @@ public final class NetworkUtils {
                     continue;
                 }
                 for (InetAddress addr : Collections.list(iface.getInetAddresses())) {
-                    if (!serveParaApontarDns(addr)) {
+                    if (!isUsableAsDnsAddress(addr)) {
                         continue;
                     }
                     String ip = addr.getHostAddress();
@@ -63,10 +64,10 @@ public final class NetworkUtils {
         return List.copyOf(all);
     }
 
-    // true se o endereço serve para configurar o DNS de um dispositivo da rede.
-    // POR QUE: link-local (169.254/16 — hotspot, PPPoE) não é roteável — o
-    // celular apontado para ele não resolve nada; 0.0.0.0 e loopback também não.
-    static boolean serveParaApontarDns(InetAddress addr) {
+    // True if the address can be used to configure a network device's DNS.
+    // WHY: link-local (169.254/16 — hotspot, PPPoE) is not routable — a phone
+    // pointed at it resolves nothing; 0.0.0.0 and loopback do not work either.
+    static boolean isUsableAsDnsAddress(InetAddress addr) {
         if (addr == null || !(addr instanceof Inet4Address)) {
             return false;
         }
@@ -76,22 +77,21 @@ public final class NetworkUtils {
         return !addr.isMulticastAddress();
     }
 
-    /** IP principal para configurar nos dispositivos (ou 127.0.0.1 como fallback). */
+    /** Primary IP to configure on devices (or 127.0.0.1 as a fallback). */
     public static String primaryLocalIp() {
         List<String> ips = localIPv4Addresses();
-        // Fallback honesto: 127.0.0.1 só alcança a própria máquina, e a
-        // mensagem de inicialização diz isso — melhor do que um endereço que
-        // não funciona.
+        // Honest fallback: 127.0.0.1 only reaches the machine itself, and the
+        // startup message says so — better than an address that does not work.
         return ips.isEmpty() ? "127.0.0.1" : ips.get(0);
     }
 
     /**
-     * Todos os endereços (IPv4 e IPv6) das interfaces da máquina. Usado pela
-     * política de origem: uma consulta vinda do próprio endereço da máquina é
-     * local por definição, mesmo sem cair em rede privada (VPS com IP público).
+     * All addresses (IPv4 and IPv6) of the machine's interfaces. Used by the
+     * source policy: a query from the machine's own address is local by
+     * definition, even outside a private range (a VPS with a public IP).
      */
     public static Set<InetAddress> localAddresses() {
-        Set<InetAddress> enderecos = new LinkedHashSet<>();
+        Set<InetAddress> addresses = new LinkedHashSet<>();
         try {
             Enumeration<NetworkInterface> ifaces = NetworkInterface.getNetworkInterfaces();
             if (ifaces == null) {
@@ -105,26 +105,26 @@ public final class NetworkUtils {
                 } catch (Exception e) {
                     continue;
                 }
-                enderecos.addAll(Collections.list(iface.getInetAddresses()));
+                addresses.addAll(Collections.list(iface.getInetAddresses()));
             }
         } catch (Exception e) {
             return Set.of();
         }
-        return Set.copyOf(enderecos);
+        return Set.copyOf(addresses);
     }
 
-    /** Imprime o bloco de ajuda de configuração ao subir o servidor. */
+    /** Prints the configuration help block when the server starts. */
     public static void printStartupInfo(int port, String upstream) {
         List<String> ips = localIPv4Addresses();
-        System.out.println("SiteLock DNS ativo.");
+        System.out.println("SiteLock DNS is running.");
         if (ips.isEmpty()) {
-            System.out.println("IP local: não detectado (usando 127.0.0.1 — só esta máquina alcança).");
+            System.out.println("Local IP: not detected (using 127.0.0.1 — only this machine can reach it).");
         } else {
-            System.out.println("IP local desta máquina (aponte o DNS dos dispositivos para ele): "
+            System.out.println("Local IP of this machine (point device DNS at it): "
                     + String.join(", ", ips));
         }
-        System.out.println("Porta: " + port + " | Upstream: " + upstream);
-        System.out.println("No celular/PC, configure o DNS manualmente para "
-                + primaryLocalIp() + " (veja o README para o passo a passo).");
+        System.out.println("Port: " + port + " | Upstream: " + upstream);
+        System.out.println("On your phone/PC, set DNS manually to "
+                + primaryLocalIp() + " (see the README for step-by-step instructions).");
     }
 }

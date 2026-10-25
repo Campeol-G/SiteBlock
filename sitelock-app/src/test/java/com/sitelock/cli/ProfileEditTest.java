@@ -19,16 +19,16 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Editar a receita de um perfil que já existe:
- * {@code siteblock profile <nome> add <dominio>} e
- * {@code siteblock profile <nome> remove <dominio>}.
+ * Editing the recipe of an existing profile:
+ * {@code siteblock profile <name> add <domain>} and
+ * {@code siteblock profile <name> remove <domain>}.
  *
- * <p>Os testes rodam pela CLI de verdade — {@code CommandLine.execute} — e não
- * por construção direta do comando. A forma escolhida põe o nome do perfil
- * <b>antes</b> do subcomando, e isso só funciona se o picocli acoplar o
- * posicional do pai com o subcomodo certo. Um teste que chamasse
- * {@code new ProfileAddCommand(...).call()} passaria com o parsing todo
- * quebrado.
+ * <p>The tests run through the real CLI — {@code CommandLine.execute} — and not
+ * by directly constructing the command. The chosen shape puts the profile name
+ * <b>before</b> the subcommand, and that only works if picocli couples the
+ * parent positional with the right subcommand. A test that called
+ * {@code new ProfileAddCommand(...).call()} would pass with all the parsing
+ * broken.
  */
 class ProfileEditTest {
 
@@ -53,23 +53,23 @@ class ProfileEditTest {
         return tmp.resolve("state/profiles.json");
     }
 
-    // Roda a CLI de verdade, com o --state-file apontando para o temporário.
+    // Runs the real CLI, with --state-file pointing at the temporary directory.
     private int run(String... args) {
-        List<String> todos = new java.util.ArrayList<>(List.of(args));
-        todos.add("--state-file");
-        todos.add(state());
-        return new picocli.CommandLine(new SiteLockApplication()).execute(todos.toArray(new String[0]));
+        List<String> all = new java.util.ArrayList<>(List.of(args));
+        all.add("--state-file");
+        all.add(state());
+        return new picocli.CommandLine(new SiteLockApplication()).execute(all.toArray(new String[0]));
     }
 
     private void block(String... domains) throws Exception {
         assertEquals(0, new BlockCommand(List.of(domains), "4h", hosts().toString(), state()).call());
     }
 
-    private void salvar(String nome) throws Exception {
-        assertEquals(0, new ProfileSaveCommand(nome, false, hosts().toString(), state()).call());
+    private void saveProfile(String name) throws Exception {
+        assertEquals(0, new ProfileSaveCommand(name, false, hosts().toString(), state()).call());
     }
 
-    private String perfil() throws Exception {
+    private String profile() throws Exception {
         return Files.readString(profilesFile(), StandardCharsets.UTF_8);
     }
 
@@ -78,78 +78,78 @@ class ProfileEditTest {
     @Test
     void addPutsTheDomainInTheProfile() throws Exception {
         block("tiktok.com");
-        salvar("trabalho");
+        saveProfile("work");
 
-        assertEquals(0, run("profile", "trabalho", "add", "youtube.com"));
+        assertEquals(0, run("profile", "work", "add", "youtube.com"));
 
-        String json = perfil();
+        String json = profile();
         assertTrue(json.contains("youtube.com"), json);
-        assertTrue(json.contains("tiktok.com"), "o que já estava tem que continuar: " + json);
+        assertTrue(json.contains("tiktok.com"), "what was already there must remain: " + json);
     }
 
     @Test
     void addWithoutDurationIsPermanent() throws Exception {
         block("tiktok.com");
-        salvar("trabalho");
+        saveProfile("work");
 
-        assertEquals(0, run("profile", "trabalho", "add", "youtube.com"));
+        assertEquals(0, run("profile", "work", "add", "youtube.com"));
 
-        assertTrue(perfil().contains("\"youtube.com\""), perfil());
-        assertEquals(-1L, duracaoDe(perfil(), "youtube.com"),
-                "sem --for o domínio entra permanente: " + perfil());
+        assertTrue(profile().contains("\"youtube.com\""), profile());
+        assertEquals(-1L, durationOf(profile(), "youtube.com"),
+                "without --for the domain enters as permanent: " + profile());
     }
 
     @Test
     void addWithDurationStoresIt() throws Exception {
         block("tiktok.com");
-        salvar("trabalho");
+        saveProfile("work");
 
-        assertEquals(0, run("profile", "trabalho", "add", "youtube.com", "--for", "4h"));
+        assertEquals(0, run("profile", "work", "add", "youtube.com", "--for", "4h"));
 
-        long ms = duracaoDe(perfil(), "youtube.com");
-        assertTrue(ms > 0, "tem que guardar a duração: " + ms);
-        assertTrue(ms <= 4 * 3600_000L, "não pode estourar as 4h: " + ms);
+        long ms = durationOf(profile(), "youtube.com");
+        assertTrue(ms > 0, "it must store the duration: " + ms);
+        assertTrue(ms <= 4 * 3600_000L, "it must not exceed 4h: " + ms);
     }
 
     @Test
     void addFailsWhenTheProfileDoesNotExist() {
-        assertEquals(1, run("profile", "nao-existe", "add", "youtube.com"));
-        assertFalse(Files.exists(profilesFile()), "não pode criar perfil no caminho do add");
+        assertEquals(1, run("profile", "missing", "add", "youtube.com"));
+        assertFalse(Files.exists(profilesFile()), "add must not create a profile along the way");
     }
 
     @Test
     void addRejectsInvalidDomain() throws Exception {
         block("tiktok.com");
-        salvar("trabalho");
-        String antes = perfil();
+        saveProfile("work");
+        String before = profile();
 
-        assertEquals(1, run("profile", "trabalho", "add", "nao e um dominio"));
+        assertEquals(1, run("profile", "work", "add", "not a domain"));
 
-        assertEquals(antes, perfil(), "um domínio inválido não pode mudar nada");
+        assertEquals(before, profile(), "an invalid domain must not change anything");
     }
 
     @Test
     void addReplacesTheEntryWhenTheDomainIsAlreadyThere() throws Exception {
         block("tiktok.com");
-        salvar("trabalho");
-        // tiktok.com entra permanente (o block foi de 4h, mas o save grava o
-        // que resta); adicionar de novo sem --for mantém permanente.
-        assertEquals(0, run("profile", "trabalho", "add", "tiktok.com", "--for", "10m"));
-        assertEquals(0, run("profile", "trabalho", "add", "tiktok.com"));
+        saveProfile("work");
+        // tiktok.com enters as permanent (the block was 4h, but save stores what
+        // remains); adding it again without --for keeps it permanent.
+        assertEquals(0, run("profile", "work", "add", "tiktok.com", "--for", "10m"));
+        assertEquals(0, run("profile", "work", "add", "tiktok.com"));
 
-        assertEquals(-1L, duracaoDe(perfil(), "tiktok.com"),
-                "a receita tem que guardar o último pedido, não acumular: " + perfil());
+        assertEquals(-1L, durationOf(profile(), "tiktok.com"),
+                "the recipe must store the latest request, not accumulate: " + profile());
     }
 
     @Test
     void addNormalizesTheDomain() throws Exception {
         block("tiktok.com");
-        salvar("trabalho");
+        saveProfile("work");
 
-        assertEquals(0, run("profile", "trabalho", "add", "www.youtube.com"));
+        assertEquals(0, run("profile", "work", "add", "www.youtube.com"));
 
-        assertTrue(perfil().contains("\"youtube.com\""), "tem que normalizar: " + perfil());
-        assertFalse(perfil().contains("www.youtube.com"), perfil());
+        assertTrue(profile().contains("\"youtube.com\""), "it must normalize: " + profile());
+        assertFalse(profile().contains("www.youtube.com"), profile());
     }
 
     // ---- remove ----
@@ -157,82 +157,82 @@ class ProfileEditTest {
     @Test
     void removeTakesTheDomainOutOfTheProfile() throws Exception {
         block("tiktok.com", "youtube.com");
-        salvar("trabalho");
+        saveProfile("work");
 
-        assertEquals(0, run("profile", "trabalho", "remove", "youtube.com"));
+        assertEquals(0, run("profile", "work", "remove", "youtube.com"));
 
-        String json = perfil();
+        String json = profile();
         assertFalse(json.contains("youtube.com"), json);
-        assertTrue(json.contains("tiktok.com"), "o resto tem que continuar: " + json);
+        assertTrue(json.contains("tiktok.com"), "the rest must remain: " + json);
     }
 
     @Test
     void removeWarnsWhenTheDomainIsStillBlocked() throws Exception {
         block("tiktok.com");
-        salvar("trabalho");
+        saveProfile("work");
 
-        String saida = capture(() -> run("profile", "trabalho", "remove", "tiktok.com"));
+        String output = capture(() -> run("profile", "work", "remove", "tiktok.com"));
 
-        assertTrue(saida.contains("tiktok.com"), saida);
-        assertTrue(saida.toLowerCase().contains("continua bloqueado"),
-                "tem que avisar que o bloqueio continua: " + saida);
+        assertTrue(output.contains("tiktok.com"), output);
+        assertTrue(output.toLowerCase().contains("stays blocked"),
+                "it must warn that the block remains: " + output);
     }
 
     @Test
     void removeFailsWhenTheDomainIsNotInTheProfile() throws Exception {
         block("tiktok.com");
-        salvar("trabalho");
-        String antes = perfil();
+        saveProfile("work");
+        String before = profile();
 
-        assertEquals(1, run("profile", "trabalho", "remove", "youtube.com"));
+        assertEquals(1, run("profile", "work", "remove", "youtube.com"));
 
-        assertEquals(antes, perfil());
+        assertEquals(before, profile());
     }
 
-    // ---- a forma do comando não pode quebrar os outros ----
+    // ---- the shape of the command must not break the others ----
 
     @Test
     void theOtherProfileCommandsStillWork() throws Exception {
         block("tiktok.com");
-        salvar("trabalho");
+        saveProfile("work");
 
         assertEquals(0, run("profile", "list"));
-        assertEquals(0, run("profile", "show", "trabalho"));
-        assertEquals(0, run("profile", "apply", "trabalho", "--hosts-file", hosts().toString()));
+        assertEquals(0, run("profile", "show", "work"));
+        assertEquals(0, run("profile", "apply", "work", "--hosts-file", hosts().toString()));
     }
 
     /**
-     * O nome do perfil virou posicional do comando {@code profile}. O perigo
-     * concreto é o picocli passar a engolir o nome dos subcomandos que já o
-     * tinham como posicional próprio — {@code save profile trabalho} tem que
-     * continuar funcionando, senão o comando inteiro quebra.
+     * The profile name became a positional of the {@code profile} command. The
+     * concrete danger is picocli starting to swallow the name of subcommands that
+     * already had it as their own positional — {@code save profile work} must keep
+     * working, otherwise the whole command breaks.
      */
     @Test
     void saveAndDeleteStillTakeTheirOwnName() throws Exception {
         block("tiktok.com");
 
-        assertEquals(0, run("save", "profile", "trabalho"));
-        assertTrue(perfil().contains("tiktok.com"), perfil());
+        assertEquals(0, run("save", "profile", "work"));
+        assertTrue(profile().contains("tiktok.com"), profile());
 
-        // O delete pede confirmação digitada lendo o System.in.
+        // delete asks for a typed confirmation by reading System.in.
         java.io.InputStream originalIn = System.in;
-        System.setIn(new java.io.ByteArrayInputStream("SIM\n".getBytes(StandardCharsets.UTF_8)));
+        System.setIn(new java.io.ByteArrayInputStream("YES\n".getBytes(StandardCharsets.UTF_8)));
         try {
-            assertEquals(0, run("delete", "profile", "trabalho"));
+            assertEquals(0, run("delete", "profile", "work"));
         } finally {
             System.setIn(originalIn);
         }
-        // O delete esvazia o profiles.json; o que tem que sumir é o perfil.
-        assertFalse(perfil().contains("trabalho"), "o perfil tem que ter sumido: " + perfil());
-        assertEquals(1, run("profile", "show", "trabalho"));
+        // delete empties profiles.json; what must be gone is the profile.
+        assertFalse(profile().contains("work"), "the profile must be gone: " + profile());
+        assertEquals(1, run("profile", "show", "work"));
     }
 
     @Test
     void addWithoutANameSaysHowToCallIt() {
-        String saida = capture(() -> run("profile", "add", "youtube.com"));
+        String output = capture(() -> run("profile", "add", "youtube.com"));
 
-        assertTrue(saida.contains("siteblock profile <nome> add <dominio>"),
-                "a mensagem tem que mostrar a forma inteira: " + saida);
+        assertTrue(output.contains("siteblock profile <name> add <domain>"),
+                "the message must show the full form: " + output);
     }
 
     @Test
@@ -240,90 +240,90 @@ class ProfileEditTest {
         assertEquals(1, run("profile", "../evil", "add", "youtube.com"));
     }
 
-    // ---- o relógio é injetável ----
+    // ---- the clock is injectable ----
 
     /**
-     * O {@code add} e o {@code remove} usavam {@code Instant.now()} direto,
-     * enquanto o resto do projeto injeta {@link java.time.Clock}. Com o
-     * relógio cru não dá para testar com tempo controlado — e o que se grava
-     * depende do instante.
+     * {@code add} and {@code remove} used {@code Instant.now()} directly, while
+     * the rest of the project injects {@link java.time.Clock}. With the raw clock
+     * there is no way to test with controlled time — and what gets stored depends
+     * on the instant.
      */
     @Test
-    void addGravaComOInstanteInjetado() throws Exception {
+    void addWritesWithTheInjectedInstant() throws Exception {
         block("tiktok.com");
-        salvar("trabalho");
-        Instant fixo = Instant.parse("2020-01-02T03:04:05Z");
+        saveProfile("work");
+        Instant fixed = Instant.parse("2020-01-02T03:04:05Z");
 
         ProfileCommand parent = new ProfileCommand();
-        parent.name = "trabalho";
+        parent.name = "work";
         ProfileAddCommand cmd = new ProfileAddCommand();
         cmd.parent = parent;
         cmd.domainsRaw = List.of("youtube.com");
         cmd.stateFileOverride = state();
-        cmd.clockOverride = Clock.fixed(fixo, ZoneOffset.UTC);
+        cmd.clockOverride = Clock.fixed(fixed, ZoneOffset.UTC);
 
         assertEquals(0, cmd.call());
 
-        assertTrue(perfil().contains("2020-01-02T03:04:05Z"),
-                "o updatedAt tem que sair do relógio injetado: " + perfil());
+        assertTrue(profile().contains("2020-01-02T03:04:05Z"),
+                "updatedAt must come from the injected clock: " + profile());
     }
 
     @Test
-    void removeGravaComOInstanteInjetado() throws Exception {
+    void removeWritesWithTheInjectedInstant() throws Exception {
         block("tiktok.com", "youtube.com");
-        salvar("trabalho");
-        Instant fixo = Instant.parse("2020-01-02T03:04:05Z");
+        saveProfile("work");
+        Instant fixed = Instant.parse("2020-01-02T03:04:05Z");
 
         ProfileCommand parent = new ProfileCommand();
-        parent.name = "trabalho";
+        parent.name = "work";
         ProfileRemoveCommand cmd = new ProfileRemoveCommand();
         cmd.parent = parent;
         cmd.domainsRaw = List.of("youtube.com");
         cmd.stateFileOverride = state();
-        cmd.clockOverride = Clock.fixed(fixo, ZoneOffset.UTC);
+        cmd.clockOverride = Clock.fixed(fixed, ZoneOffset.UTC);
 
         assertEquals(0, cmd.call());
 
-        assertTrue(perfil().contains("2020-01-02T03:04:05Z"),
-                "o updatedAt tem que sair do relógio injetado: " + perfil());
+        assertTrue(profile().contains("2020-01-02T03:04:05Z"),
+                "updatedAt must come from the injected clock: " + profile());
     }
 
     /**
-     * O aviso de "continua bloqueado" também depende do relógio: com o
-     * bloqueio já vencido, não há o que avisar.
+     * The "stays blocked" warning also depends on the clock: with the block
+     * already expired, there is nothing to warn about.
      */
     @Test
-    void removeUsaOInjetadoParaSaberOQueContinuaBloqueado() throws Exception {
+    void removeUsesTheInjectedClockToKnowWhatStaysBlocked() throws Exception {
         block("tiktok.com");
-        salvar("trabalho");
+        saveProfile("work");
 
         ProfileCommand parent = new ProfileCommand();
-        parent.name = "trabalho";
+        parent.name = "work";
         ProfileRemoveCommand cmd = new ProfileRemoveCommand();
         cmd.parent = parent;
         cmd.domainsRaw = List.of("tiktok.com");
         cmd.stateFileOverride = state();
-        // O bloqueio de 4h já venceu nesse instante.
+        // The 4h block has already expired at this instant.
         cmd.clockOverride = Clock.fixed(Instant.now().plusSeconds(10 * 3600), ZoneOffset.UTC);
 
-        String saida = capture(() -> cmd.call());
+        String output = capture(() -> cmd.call());
 
-        assertFalse(saida.toLowerCase().contains("continua bloqueado"),
-                "bloqueio vencido não pode gerar aviso: " + saida);
+        assertFalse(output.toLowerCase().contains("stays blocked"),
+                "an expired block must not generate a warning: " + output);
     }
 
     // ---- helpers ----
 
-    private static long duracaoDe(String json, String domain) {
+    private static long durationOf(String json, String domain) {
         int i = json.indexOf("\"" + domain + "\"");
-        assertTrue(i >= 0, "domínio ausente do JSON: " + json);
+        assertTrue(i >= 0, "domain missing from the JSON: " + json);
         int j = json.indexOf("durationMillis", i);
-        assertTrue(j > 0, "durationMillis ausente: " + json);
-        String resto = json.substring(j);
-        int abre = resto.indexOf(':');
-        int fecha = resto.indexOf('\n', abre);
-        String num = resto.substring(abre + 1, fecha).replace(",", "").replace(" ", "").trim();
-        return "null".equals(num) ? -1L : Long.parseLong(num);
+        assertTrue(j > 0, "durationMillis missing: " + json);
+        String rest = json.substring(j);
+        int open = rest.indexOf(':');
+        int close = rest.indexOf('\n', open);
+        String number = rest.substring(open + 1, close).replace(",", "").replace(" ", "").trim();
+        return "null".equals(number) ? -1L : Long.parseLong(number);
     }
 
     private static String capture(Runnable r) {

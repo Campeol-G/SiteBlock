@@ -15,20 +15,20 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * O delta do {@link ProfileStore}.
+ * The {@link ProfileStore} delta.
  *
- * <p>O store grava um delta sobre o que está no disco, e não o arquivo inteiro:
- * uma escrita concorrente de quem não espera a trava não pode ser apagada. Para
- * isso a comparação precisa ser por valor — por identidade, um perfil devolvido
- * sem alteração parecia mudado, e a gravação apagava a versão de outro escritor.
+ * <p>The store writes a delta over what is on disk, not the whole file:
+ * a concurrent write from someone who did not wait for the lock must not be erased. For
+ * that the comparison has to be by value — by identity, a profile returned
+ * unchanged looked modified, and the write erased another writer's version.
  */
 class ProfileDeltaTest {
 
     @TempDir
     Path tmp;
 
-    private static final Instant CRIADO = Instant.parse("2026-10-15T12:00:00Z");
-    private static final Instant AGORA = Instant.parse("2026-10-15T18:30:00Z");
+    private static final Instant CREATED = Instant.parse("2026-10-15T12:00:00Z");
+    private static final Instant NOW = Instant.parse("2026-10-15T18:30:00Z");
 
     private Path file() {
         return tmp.resolve("profiles.json");
@@ -38,77 +38,77 @@ class ProfileDeltaTest {
         return new ProfileStore(file());
     }
 
-    private static Profile perfil(Long duracao) {
-        Map<String, ProfileEntry> entradas = new TreeMap<>();
-        entradas.put("x.com", new ProfileEntry(duracao));
-        return new Profile(CRIADO, AGORA, entradas);
+    private static Profile profile(Long duration) {
+        Map<String, ProfileEntry> entries = new TreeMap<>();
+        entries.put("x.com", new ProfileEntry(duration));
+        return new Profile(CREATED, NOW, entries);
     }
 
-    // Grava o arquivo por fora da trava, como um escritor que não a respeita.
-    private void escreverPorForaDaTrava(Map<String, Profile> perfis) throws IOException {
+    // Writes the file outside the lock, like a writer that does not respect it.
+    private void writeOutsideTheLock(Map<String, Profile> profiles) throws IOException {
         Files.writeString(file(), ProfileStore.defaultMapper()
                 .writerWithDefaultPrettyPrinter()
-                .writeValueAsString(new ProfileDocument(ProfileDocument.CURRENT_VERSION, perfis)),
+                .writeValueAsString(new ProfileDocument(ProfileDocument.CURRENT_VERSION, profiles)),
                 StandardCharsets.UTF_8);
     }
 
     @Test
-    void umPerfilAlteradoTemQueSerGravado() throws Exception {
+    void changedProfileMustBeSaved() throws Exception {
         ProfileStore store = store();
-        store.save(Map.of("x", perfil(1000L)));
+        store.save(Map.of("x", profile(1000L)));
 
         store.inTransaction(tx -> {
-            Map<String, Profile> perfis = tx.load();
-            Map<String, ProfileEntry> entradas = new TreeMap<>(perfis.get("x").getEntries());
-            entradas.put("y.com", new ProfileEntry(2000L));
-            perfis.put("x", new Profile(CRIADO, AGORA.plusSeconds(60), entradas));
-            tx.save(perfis);
+            Map<String, Profile> profiles = tx.load();
+            Map<String, ProfileEntry> entries = new TreeMap<>(profiles.get("x").getEntries());
+            entries.put("y.com", new ProfileEntry(2000L));
+            profiles.put("x", new Profile(CREATED, NOW.plusSeconds(60), entries));
+            tx.save(profiles);
             return null;
         });
 
         Map<String, ProfileEntry> entries = store.load().get("x").getEntries();
         assertTrue(entries.containsKey("y.com"),
-                "a entrada nova tem que estar no disco: " + entries.keySet());
+                "the new entry has to be on disk: " + entries.keySet());
     }
 
     @Test
-    void umPerfilQueNaoMudouNaoPodeApagarAVersaoDeOutroEscritor() throws Exception {
+    void unchangedProfileMustNotEraseAnotherWritersVersion() throws Exception {
         ProfileStore store = store();
-        store.save(Map.of("x", perfil(1000L)));
+        store.save(Map.of("x", profile(1000L)));
 
         store.inTransaction(tx -> {
-            Map<String, Profile> perfis = tx.load();
-            // A transação devolve o perfil sem mexer nele — mas como um objeto
-            // novo, do jeito que um comando que remonte a receita devolveria.
-            perfis.put("x", new Profile(CRIADO, AGORA, new TreeMap<>(
-                    perfis.get("x").getEntries())));
-            // Nesse meio-tempo, outro escritor muda o mesmo perfil no disco.
-            escreverPorForaDaTrava(Map.of("x", perfil(9999L)));
-            tx.save(perfis);
+            Map<String, Profile> profiles = tx.load();
+            // The transaction returns the profile without touching it — but as a new
+            // object, the way a command that rebuilds the recipe would return it.
+            profiles.put("x", new Profile(CREATED, NOW, new TreeMap<>(
+                    profiles.get("x").getEntries())));
+            // Meanwhile, another writer changes the same profile on disk.
+            writeOutsideTheLock(Map.of("x", profile(9999L)));
+            tx.save(profiles);
             return null;
         });
 
         assertEquals(Long.valueOf(9999L),
                 store.load().get("x").getEntries().get("x.com").getDurationMillis(),
-                "um perfil que não mudou não pode sobrescrever a versão de outro escritor");
+                "a profile that did not change must not overwrite another writer's version");
     }
 
     @Test
-    void umPerfilAlteradoNoLugarTemQueSerGravado() throws Exception {
+    void aProfileChangedInPlaceMustBeSaved() throws Exception {
         ProfileStore store = store();
-        store.save(Map.of("x", perfil(1000L)));
+        store.save(Map.of("x", profile(1000L)));
 
         store.inTransaction(tx -> {
-            Map<String, Profile> perfis = tx.load();
-            // A alteração acontece no próprio perfil carregado, e não num
-            // objeto novo: o delta tem que enxergar a mudança.
-            perfis.get("x").getEntries().put("y.com", new ProfileEntry(2000L));
-            tx.save(perfis);
+            Map<String, Profile> profiles = tx.load();
+            // The change happens on the loaded profile itself, not on a
+            // new object: the delta has to see the change.
+            profiles.get("x").getEntries().put("y.com", new ProfileEntry(2000L));
+            tx.save(profiles);
             return null;
         });
 
         Map<String, ProfileEntry> entries = store.load().get("x").getEntries();
         assertTrue(entries.containsKey("y.com"),
-                "a alteração no lugar tem que chegar ao disco: " + entries.keySet());
+                "an in-place change has to reach the disk: " + entries.keySet());
     }
 }

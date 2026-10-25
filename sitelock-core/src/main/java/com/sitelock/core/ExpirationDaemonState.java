@@ -22,22 +22,22 @@ import java.util.Optional;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Estado do daemon de expiração em {@code ~/.sitelock/daemon.json}.
+ * State of the expiration daemon in {@code ~/.sitelock/daemon.json}.
  *
- * <p><b>Quem escreve:</b> o próprio daemon, no início da vida dele: sob
- * autostart (systemd, launchd, Task Scheduler) ele é executado direto, sem
- * pai nenhum, então quem escreve não é o pai do {@code daemon start}.
+ * <p><b>Who writes it:</b> the daemon itself, early in its life: under
+ * autostart (systemd, launchd, Task Scheduler) it is executed directly, with no
+ * parent at all, so the writer is not the parent of {@code daemon start}.
  *
- * <p>Sem esse registro não existiria PID depois de um boot, e o {@code daemon
- * status} diria "parado" com o processo rodando, enquanto o {@code daemon stop}
- * não teria o que matar.
+ * <p>Without this record there would be no PID after a boot, and {@code daemon
+ * status} would say "stopped" with the process running, while {@code daemon stop}
+ * would have nothing to kill.
  *
- * <p><b>{@code lastSweepAt} só é escrito quando o sweep removeu algo.</b>
- * Reescrever a cada iteração seria uma escrita de root no diretório do usuário,
- * o dia inteiro, para um campo que ninguém lê com essa frequência.
+ * <p><b>{@code lastSweepAt} is only written when the sweep removed something.</b>
+ * Rewriting it on every iteration would be a root write into the user's directory,
+ * all day long, for a field nobody reads that often.
  *
- * <p>O arquivo registra assim o que a pessoa quer saber: quando foi a última
- * vez que algo expirou sozinha.
+ * <p>The file thus records what the person actually wants to know: when something
+ * last expired on its own.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ExpirationDaemonState {
@@ -47,12 +47,12 @@ public class ExpirationDaemonState {
     private String stateDir;
     private Instant lastSweepAt;
 
-    // Instante de início do PROCESSO registrado.
-    // POR QUE: é o que prova a identidade do PID, porque o SO recicla números.
-    // Nulo = registro escrito por uma versão antiga, que não tinha o campo.
+    // Start instant of the RECORDED process.
+    // WHY: it is what proves the PID's identity, because the OS recycles numbers.
+    // Null = record written by an old version that did not have the field.
     private Instant processStartedAt;
 
-    /** Construtor para o Jackson. */
+    /** Constructor for Jackson. */
     @JsonCreator
     public ExpirationDaemonState(
             @JsonProperty(value = "pid", required = true) long pid,
@@ -98,7 +98,7 @@ public class ExpirationDaemonState {
         this.stateDir = stateDir;
     }
 
-    /** Nulo = ainda não expirou nada desde que o daemon subiu. */
+    /** Null = nothing has expired since the daemon came up. */
     public Instant getLastSweepAt() {
         return lastSweepAt;
     }
@@ -107,7 +107,7 @@ public class ExpirationDaemonState {
         this.lastSweepAt = lastSweepAt;
     }
 
-    /** Instante de início do processo que o registro descreve. */
+    /** Start instant of the process the record describes. */
     public Instant getProcessStartedAt() {
         return processStartedAt;
     }
@@ -116,16 +116,16 @@ public class ExpirationDaemonState {
         this.processStartedAt = processStartedAt;
     }
 
-    // ---- arquivos ----
+    // ---- files ----
 
     public static final String STATE_FILE_NAME = "daemon.json";
     public static final String LOG_FILE_NAME = "daemon.log";
     public static final String LOCK_FILE_NAME = "daemon.json.lock";
 
-    // Serializa as escritas dentro da MESMA JVM.
-    // POR QUE: lock de arquivo é por JVM, não por canal, e um segundo lock() na
-    // mesma JVM estoura; o lock de arquivo serializa contra os OUTROS processos.
-    private static final ReentrantLock TRAVA_DA_JVM = new ReentrantLock();
+    // Serializes writes within the SAME JVM.
+    // WHY: a file lock is per JVM, not per channel, and a second lock() in the
+    // same JVM throws; the file lock serializes against the OTHER processes.
+    private static final ReentrantLock JVM_LOCK = new ReentrantLock();
 
     public static Path statePath(Path stateDir) {
         return stateDir.resolve(STATE_FILE_NAME);
@@ -148,16 +148,16 @@ public class ExpirationDaemonState {
     }
 
     public static void write(Path stateDir, ExpirationDaemonState state) throws IOException {
-        comTrava(stateDir, () -> escreverRegistro(stateDir, state));
+        withLock(stateDir, () -> writeRecord(stateDir, state));
     }
 
-    // A escrita do registro em si, sem a trava: só válida dentro da trava.
-    private static void escreverRegistro(Path stateDir, ExpirationDaemonState state)
+    // Writing the record itself, without the lock: only valid inside the lock.
+    private static void writeRecord(Path stateDir, ExpirationDaemonState state)
             throws IOException {
         SiteLockPaths.createDirectories(stateDir);
         Path target = statePath(stateDir);
         Path tmp = target.resolveSibling(target.getFileName() + ".tmp");
-        registrarInstanteDoProcesso(state);
+        recordProcessStartInstant(state);
         Files.writeString(tmp, mapper().writerWithDefaultPrettyPrinter().writeValueAsString(state),
                 StandardCharsets.UTF_8, StandardOpenOption.CREATE,
                 StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
@@ -170,39 +170,39 @@ public class ExpirationDaemonState {
         SiteLockPaths.chownToUserIfConfigured(lockPath(stateDir));
     }
 
-    // Executa a ação com o registro travado contra os outros processos.
-    private static void comTrava(Path stateDir, Acao acao) throws IOException {
+    // Runs the action with the record locked against other processes.
+    private static void withLock(Path stateDir, Action action) throws IOException {
         SiteLockPaths.createDirectories(stateDir);
-        TRAVA_DA_JVM.lock();
-        try (FileChannel canal = FileChannel.open(lockPath(stateDir),
+        JVM_LOCK.lock();
+        try (FileChannel channel = FileChannel.open(lockPath(stateDir),
                 StandardOpenOption.CREATE, StandardOpenOption.WRITE);
-             FileLock ignorado = canal.lock()) {
-            acao.executar();
+             FileLock ignored = channel.lock()) {
+            action.run();
         } finally {
-            TRAVA_DA_JVM.unlock();
+            JVM_LOCK.unlock();
         }
     }
 
-    // Uma ação que pode falhar com IOException.
-    private interface Acao {
-        void executar() throws IOException;
+    // An action that can fail with IOException.
+    private interface Action {
+        void run() throws IOException;
     }
 
-    // Grava o instante de início quando o registro é sobre este processo.
-    // POR QUE: só o processo sabe o próprio instante, e é ele que prova, depois,
-    // que o PID ainda é o nosso. Registro de versão antiga é completado aqui.
-    private static void registrarInstanteDoProcesso(ExpirationDaemonState state) {
+    // Records the start instant when the record is about this process.
+    // WHY: only the process knows its own instant, and that is what proves, later,
+    // that the PID is still ours. A record from an old version is completed here.
+    private static void recordProcessStartInstant(ExpirationDaemonState state) {
         if (state.getProcessStartedAt() != null || state.getPid() != ProcessHandle.current().pid()) {
             return;
         }
-        Optional<Instant> inicio = ProcessHandle.current().info().startInstant();
-        if (inicio.isEmpty()) {
+        Optional<Instant> start = ProcessHandle.current().info().startInstant();
+        if (start.isEmpty()) {
             return;
         }
-        state.setProcessStartedAt(inicio.get());
-        // O "Subiu em:" tem que ser o instante em que o processo subiu, e não
-        // o instante em que o registro foi escrito.
-        state.setStartedAt(inicio.get());
+        state.setProcessStartedAt(start.get());
+        // The "Started at:" has to be the instant the process came up, not
+        // the instant the record was written.
+        state.setStartedAt(start.get());
     }
 
     public static Optional<ExpirationDaemonState> read(Path stateDir) throws IOException {
@@ -217,9 +217,9 @@ public class ExpirationDaemonState {
         try {
             return Optional.of(mapper().readValue(text, ExpirationDaemonState.class));
         } catch (IOException e) {
-            // Um daemon.json meio escrito não pode derrubar o `daemon status`:
-            // o pior sintoma seria um status que não diz nada justamente quando
-            // há algo errado.
+            // A half-written daemon.json must not take down `daemon status`:
+            // the worst symptom would be a status that says nothing precisely when
+            // something is wrong.
             return Optional.empty();
         }
     }
@@ -229,33 +229,33 @@ public class ExpirationDaemonState {
     }
 
     /**
-     * Atualiza só o último sweep, preservando o resto do registro.
+     * Updates only the last sweep, preserving the rest of the record.
      *
-     * <p>Read-modify-write: sem a trava, outra escrita grava o PID novo durante
-     * a leitura, e o update devolve o registro velho por cima — o PID do daemon
-     * some e o {@code daemon status} diz que não há daemon rodando.
+     * <p>Read-modify-write: without the lock, another write saves the new PID during
+     * the read, and the update puts the old record back on top — the daemon's PID
+     * disappears and {@code daemon status} says there is no daemon running.
      */
     public static void updateLastSweep(Path stateDir, Instant at) throws IOException {
-        comTrava(stateDir, () -> {
+        withLock(stateDir, () -> {
             Optional<ExpirationDaemonState> current = read(stateDir);
             if (current.isEmpty()) {
                 return;
             }
             ExpirationDaemonState state = current.get();
             state.setLastSweepAt(at);
-            escreverRegistro(stateDir, state);
+            writeRecord(stateDir, state);
         });
     }
 
     /**
-     * true se o PID registrado ainda for o processo que o registro descreve.
+     * True if the recorded PID is still the process the record describes.
      *
-     * <p>O SO recicla PID: o número do daemon morto vai para outro processo, e o
-     * {@code daemon stop} manda SIGTERM em quem não é o SiteLock. A prova é o
-     * instante de início: dois processos não começam no mesmo instante.
+     * <p>The OS recycles PIDs: the dead daemon's number goes to another process, and
+     * {@code daemon stop} sends SIGTERM to someone who is not SiteLock. The proof is the
+     * start instant: two processes do not start at the same instant.
      *
-     * <p>Registro sem o instante de início (escrito por uma versão antiga)
-     * continua valendo pelo PID.
+     * <p>A record without the start instant (written by an old version)
+     * is still trusted on the PID.
      */
     public static boolean isAlive(ExpirationDaemonState state) {
         if (state == null || state.getPid() <= 0) {
@@ -265,11 +265,11 @@ public class ExpirationDaemonState {
         if (handle.isEmpty() || !handle.get().isAlive()) {
             return false;
         }
-        Instant registrado = state.getProcessStartedAt();
-        if (registrado == null) {
+        Instant recorded = state.getProcessStartedAt();
+        if (recorded == null) {
             return true;
         }
-        Optional<Instant> inicio = handle.get().info().startInstant();
-        return inicio.isPresent() && inicio.get().equals(registrado);
+        Optional<Instant> start = handle.get().info().startInstant();
+        return start.isPresent() && start.get().equals(recorded);
     }
 }

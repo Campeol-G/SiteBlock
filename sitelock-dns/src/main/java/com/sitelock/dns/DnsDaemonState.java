@@ -19,13 +19,12 @@ import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.Optional;
 
-// POR QUE: o arquivo fica no state dir do usuário real (mesmo sob sudo, via
-// SiteLockPaths) para que o daemon iniciado com sudo e o `dns stop` enxerguem
-// o mesmo arquivo.
+// WHY: the file lives in the real user's state dir (even under sudo, through
+// SiteLockPaths) so the daemon started with sudo and `dns stop` see the same file.
 /**
- * Estado do daemon DNS em {@code ~/.sitelock/dns-server.json}: quem está rodando,
- * em qual porta/upstream e até quando (--for). Lido por {@code dns stop/status}
- * para sinalizar o processo certo e para aplicar a regra de --force.
+ * State of the DNS daemon in {@code ~/.sitelock/dns-server.json}: what is running,
+ * on which port/upstream, and until when (--for). Read by {@code dns stop/status}
+ * to signal the right process and to apply the --force rule.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class DnsDaemonState {
@@ -36,12 +35,12 @@ public class DnsDaemonState {
   private Instant startedAt;
   private Instant expiresAt;
 
-  // Instante de início do PROCESSO registrado: é o que prova a identidade do
-  // PID (o SO recicla números, e um PID vivo não é necessariamente o daemon
-  // DNS). Nulo = registro escrito por uma versão antiga, que não tinha o campo.
+  // Start instant of the recorded PROCESS: it is what proves the PID's identity
+  // (the OS recycles numbers, and a live PID is not necessarily the DNS daemon).
+  // Null = record written by an older version that lacked the field.
   private Instant processStartedAt;
 
-  /** Construtor para o Jackson. */
+  /** Constructor for Jackson. */
   @JsonCreator
   public DnsDaemonState(
       @JsonProperty(value = "pid", required = true) long pid,
@@ -98,7 +97,7 @@ public class DnsDaemonState {
     this.startedAt = startedAt;
   }
 
-  /** Nulo = permanente (sem expiração). */
+  /** Null = permanent (no expiration). */
   public Instant getExpiresAt() {
     return expiresAt;
   }
@@ -107,7 +106,7 @@ public class DnsDaemonState {
     this.expiresAt = expiresAt;
   }
 
-  /** Instante de início do processo que o registro descreve. */
+  /** Start instant of the process the record describes. */
   public Instant getProcessStartedAt() {
     return processStartedAt;
   }
@@ -116,21 +115,21 @@ public class DnsDaemonState {
     this.processStartedAt = processStartedAt;
   }
 
-  /** true se temporário (--for) e ainda dentro do prazo. */
+  /** True if temporary (--for) and still within its deadline. */
   public boolean isTemporaryAndActive(Instant now) {
     return expiresAt != null && now.isBefore(expiresAt);
   }
 
-  // ---- arquivos ----
+  // ---- files ----
 
   public static final String STATE_FILE_NAME = "dns-server.json";
   public static final String LOG_FILE_NAME = "dns-server.log";
 
-  /** Diretório de estado levando em conta o override de --state-file da CLI. */
+  /** State directory, taking the CLI's --state-file override into account. */
   public static Path stateDirFor(String stateFileOverride) {
     if (stateFileOverride != null && !stateFileOverride.isBlank()) {
-      Path sf = Path.of(stateFileOverride);
-      Path parent = sf.getParent();
+      Path stateFile = Path.of(stateFileOverride);
+      Path parent = stateFile.getParent();
       return parent != null ? parent : Path.of(".");
     }
     return SiteLockPaths.getStateDir();
@@ -156,10 +155,10 @@ public class DnsDaemonState {
     SiteLockPaths.createDirectories(stateDir);
     Path target = statePath(stateDir);
     Path tmp = target.resolveSibling(target.getFileName() + ".tmp");
-    registrarInstanteDoProcesso(state);
-    // ATENÇÃO: escrever direto no destino deixaria o arquivo meio escrito se o
-    // processo morresse no meio — e o registro quebrado tranca a máquina
-    // (o `dns start` não conseguia mais ler o estado).
+    recordProcessStartInstant(state);
+    // NOTE: writing straight to the destination would leave a half-written file if
+    // the process died mid-write — and a broken record locks the machine out
+    // (`dns start` could no longer read the state).
     Files.writeString(tmp, mapper().writerWithDefaultPrettyPrinter().writeValueAsString(state),
         StandardCharsets.UTF_8, StandardOpenOption.CREATE,
         StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
@@ -171,19 +170,19 @@ public class DnsDaemonState {
     SiteLockPaths.chownToUserIfConfigured(target);
   }
 
-  // Grava o instante de início do processo, quando o registro é sobre este
-  // processo: só quem é o processo sabe o próprio instante de início — e é
-  // esse instante que prova, depois, que o PID ainda é o nosso.
-  private static void registrarInstanteDoProcesso(DnsDaemonState state) {
+  // Records the process start instant when the record describes this process:
+  // only the process itself knows its own start instant — and that instant is
+  // what later proves the PID is still ours.
+  private static void recordProcessStartInstant(DnsDaemonState state) {
     if (state.getProcessStartedAt() != null || state.getPid() != ProcessHandle.current().pid()) {
       return;
     }
-    Optional<Instant> inicio = ProcessHandle.current().info().startInstant();
-    if (inicio.isEmpty()) {
+    Optional<Instant> start = ProcessHandle.current().info().startInstant();
+    if (start.isEmpty()) {
       return;
     }
-    state.setProcessStartedAt(inicio.get());
-    state.setStartedAt(inicio.get());
+    state.setProcessStartedAt(start.get());
+    state.setStartedAt(start.get());
   }
 
   public static Optional<DnsDaemonState> read(Path stateDir) throws IOException {
@@ -198,8 +197,8 @@ public class DnsDaemonState {
     try {
       return Optional.of(mapper().readValue(text, DnsDaemonState.class));
     } catch (IOException e) {
-      // Um registro meio escrito não pode trancar a máquina: o pior sintoma
-      // seria o `dns start` recusando subir o servidor DNS para sempre.
+      // A half-written record must not lock the machine out: the worst symptom
+      // would be `dns start` refusing to start the DNS server forever.
       return Optional.empty();
     }
   }
@@ -209,25 +208,25 @@ public class DnsDaemonState {
   }
 
   /**
-   * Apaga o registro somente se ele ainda descrever o processo informado.
+   * Deletes the record only if it still describes the given process.
    *
-   * <p>Um `dns start` que falha não pode apagar o registro de outro daemon que
-   * subiu no meio do caminho; o dono do PID é a única prova local barata.
+   * <p>A failed `dns start` must not delete another daemon's record if that daemon
+   * started in the meantime; PID ownership is the only cheap local proof.
    */
   public static void deleteIfOwned(Path stateDir, long pid) throws IOException {
-    Optional<DnsDaemonState> atual = read(stateDir);
-    if (atual.isPresent() && atual.get().getPid() == pid) {
+    Optional<DnsDaemonState> current = read(stateDir);
+    if (current.isPresent() && current.get().getPid() == pid) {
       delete(stateDir);
     }
   }
 
-  // POR QUE: o SO recicla PID, então "o PID existe" mente — o `dns stop`
-  // mandaria SIGTERM num processo que não é o SiteLock. A prova de identidade é
-  // o instante de início do processo: dois processos não começam no mesmo instante.
+  // WHY: the OS recycles PIDs, so "the PID exists" lies — `dns stop` would send
+  // SIGTERM to a process that is not SiteLock. The identity proof is the process
+  // start instant: two processes do not start at the same instant.
   /**
-   * true se o PID registrado ainda for o processo que o registro descreve.
+   * True if the recorded PID is still the process the record describes.
    *
-   * <p>Registro sem o instante de início (versão antiga) continua valendo pelo PID.
+   * <p>A record without the start instant (older version) is still accepted by PID.
    */
   public static boolean isAlive(DnsDaemonState state) {
     if (state == null || state.getPid() <= 0) {
@@ -237,11 +236,11 @@ public class DnsDaemonState {
     if (handle.isEmpty() || !handle.get().isAlive()) {
       return false;
     }
-    Instant registrado = state.getProcessStartedAt();
-    if (registrado == null) {
+    Instant recorded = state.getProcessStartedAt();
+    if (recorded == null) {
       return true;
     }
-    Optional<Instant> inicio = handle.get().info().startInstant();
-    return inicio.isPresent() && inicio.get().equals(registrado);
+    Optional<Instant> start = handle.get().info().startInstant();
+    return start.isPresent() && start.get().equals(recorded);
   }
 }

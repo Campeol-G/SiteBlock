@@ -19,20 +19,21 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 
 /**
- * siteblock unblock <dominio...> [--force].
- * Temporário ativo só sai com --force + digitar SIM. Sem --force, nada muda.
+ * siteblock unblock <domain...> [--force].
+ * An active temporary block only goes away with --force plus typing YES. Without --force,
+ * nothing changes.
  */
-@Command(name = "unblock", description = "Remove o bloqueio de um ou mais dominios.",
+@Command(name = "unblock", description = "Removes the block from one or more domains.",
         mixinStandardHelpOptions = true)
 public class UnblockCommand implements Callable<Integer> {
 
-    @Parameters(index = "0..*", paramLabel = "<dominio>",
-            description = "Um ou mais dominios. Ex.: tiktok.com vm.tiktok.com",
+    @Parameters(index = "0..*", paramLabel = "<domain>",
+            description = "One or more domains. E.g. tiktok.com vm.tiktok.com",
             arity = "1..*")
     List<String> domainsRaw = new ArrayList<>();
 
     @Option(names = {"--force", "-f"},
-            description = "Permite desbloqueio antecipado de bloqueio temporário (pede confirmação digitada por dominio).")
+            description = "Allows an early unblock of a temporary block (asks for a typed confirmation per domain).")
     boolean force;
 
     @Option(names = "--hosts-file", hidden = true) String hostsFileOverride;
@@ -58,11 +59,11 @@ public class UnblockCommand implements Callable<Integer> {
                 DomainUtils.NormalizationResult r = DomainUtils.normalize(raw);
                 domain = r.domain();
                 if (r.normalized()) {
-                    System.out.println("Aviso: entrada normalizada de '" + r.original()
-                            + "' para '" + r.domain() + "'.");
+                    System.out.println("Warning: normalized input from '" + r.original()
+                            + "' to '" + r.domain() + "'.");
                 }
             } catch (IllegalArgumentException e) {
-                System.err.println("Erro: " + e.getMessage());
+                System.err.println("Error: " + e.getMessage());
                 return 2;
             }
             if (!domains.contains(domain)) {
@@ -73,7 +74,7 @@ public class UnblockCommand implements Callable<Integer> {
         BlockService service = CliSupport.newService(hostsFileOverride, stateFileOverride);
 
         if (!service.isHostsWritable()) {
-            System.err.println("Erro: " + CliSupport.elevationHint("unblock " + String.join(" ", domains)));
+            System.err.println("Error: " + CliSupport.elevationHint("unblock " + String.join(" ", domains)));
             return 1;
         }
 
@@ -82,15 +83,15 @@ public class UnblockCommand implements Callable<Integer> {
             BlockService.SweepResult sweep = service.sweepExpired();
             state = sweep.state();
             if (!sweep.removed().isEmpty()) {
-                System.out.println("Limpeza: bloqueios expirados removidos: "
+                System.out.println("Cleanup: removed expired blocks: "
                         + String.join(", ", sweep.removed()));
             }
         } catch (CorruptedStateException e) {
-            System.err.println("Erro: estado corrompido (" + e.getMessage() + ").");
-            System.err.println("Nada foi alterado. Para recriar do zero, apague o arquivo manualmente ou rode: siteblock reset --yes");
+            System.err.println("Error: corrupted state (" + e.getMessage() + ").");
+            System.err.println("Nothing was changed. To recreate it from scratch, delete the file manually or run: siteblock reset --yes");
             return 1;
         } catch (IOException e) {
-            System.err.println("Erro ao limpar bloqueios expirados: " + e.getMessage());
+            System.err.println("Error clearing expired blocks: " + e.getMessage());
             return 1;
         }
 
@@ -101,132 +102,131 @@ public class UnblockCommand implements Callable<Integer> {
             for (String domain : domains) {
                 BlockEntry entry = state.get(domain);
                 if (entry != null && entry.isTemporaryAndActive(now)) {
-                    protectedDomains.add(domain + " (restam "
-                            + DurationParser.formatRemaining(Duration.between(now, entry.getExpiresAt()))
-                            + ")");
+                    protectedDomains.add(domain + " (" + DurationParser.formatRemaining(
+                            Duration.between(now, entry.getExpiresAt())) + " left)");
                 }
             }
             if (!protectedDomains.isEmpty()) {
-                System.err.println("Desbloqueio RECUSADO para: " + String.join(", ", protectedDomains) + ".");
-                System.err.println("Para desbloquear antecipadamente, rode de novo com --force "
-                        + "(será pedida confirmação digitada por dominio). Nada foi alterado.");
+                System.err.println("Unblock REFUSED for: " + String.join(", ", protectedDomains) + ".");
+                System.err.println("To unblock early, run again with --force "
+                        + "(a typed confirmation will be requested per domain). Nothing was changed.");
                 return 3;
             }
         }
 
-        // A confirmação é digitada antes da transação: segurar a trava do estado
-        // enquanto a pessoa escreve SIM travaria o daemon e qualquer outro
-        // comando até ela terminar de digitar.
-        final List<String> aSoltar = new ArrayList<>();
-        final Map<String, BlockEntry> confirmados = new LinkedHashMap<>();
+        // The confirmation is typed before the transaction: holding the state lock while
+        // the person types YES would block the daemon and every other command until
+        // they finish typing.
+        final List<String> toRelease = new ArrayList<>();
+        final Map<String, BlockEntry> confirmed = new LinkedHashMap<>();
         boolean cancelledAny = false;
         for (String domain : domains) {
             BlockEntry entry = state.get(domain);
             if (entry == null) {
-                System.out.println("'" + domain + "' não está bloqueado. Nada a fazer.");
+                System.out.println("'" + domain + "' is not blocked. Nothing to do.");
                 continue;
             }
             if (entry.isTemporaryAndActive(now)) {
                 Duration remaining = Duration.between(now, entry.getExpiresAt());
-                System.out.println("!!! AVISO FORTE !!!");
-                System.out.println("Você está prestes a DESBLOQUEAR ANTECIPADAMENTE '" + domain + "',");
-                System.out.println("que ainda teria " + DurationParser.formatRemaining(remaining)
-                        + " de bloqueio. Isso enfraquece sua proteção contra procrastinação.");
-                System.out.print("Para confirmar, digite SIM e pressione Enter (qualquer outra coisa cancela): ");
+                System.out.println("!!! STRONG WARNING !!!");
+                System.out.println("You are about to UNBLOCK '" + domain + "' EARLY,");
+                System.out.println("and it would still have " + DurationParser.formatRemaining(remaining)
+                        + " of blocking left. This weakens your protection against procrastination.");
+                System.out.print("To confirm, type YES and press Enter (anything else cancels): ");
                 System.out.flush();
                 String answer = CliSupport.readLine();
-                if (answer == null || !answer.trim().equalsIgnoreCase("SIM")) {
-                    System.out.println("Desbloqueio antecipado CANCELADO para '" + domain + "'. Continua bloqueado.");
+                if (answer == null || !answer.trim().equalsIgnoreCase("YES")) {
+                    System.out.println("Early unblock CANCELLED for '" + domain + "'. It stays blocked.");
                     cancelledAny = true;
                     continue;
                 }
             }
-            aSoltar.add(domain);
-            confirmados.put(domain, entry);
+            toRelease.add(domain);
+            confirmed.put(domain, entry);
         }
 
-        Plano plano = new Plano();
+        Plan plan = new Plan();
         try {
             service.inTransaction(
-                    (estado, tx) -> {
-                        for (String domain : aSoltar) {
-                            BlockEntry entry = estado.get(domain);
+                    (stateNow, tx) -> {
+                        for (String domain : toRelease) {
+                            BlockEntry entry = stateNow.get(domain);
                             if (entry == null) {
-                                plano.ausentes.add(domain);
+                                plan.absent.add(domain);
                                 continue;
                             }
-                            // A entrada foi lida antes da confirmação. Se outro processo
-                            // mexeu nela nesse intervalo, remover seria desfazer um block
-                            // que o usuário não confirmou.
-                            if (!entry.equals(confirmados.get(domain))) {
-                                plano.conflitos.add(domain);
+                            // The entry was read before the confirmation. If another process
+                            // changed it in the meantime, removing it would undo a block
+                            // the user did not confirm.
+                            if (!entry.equals(confirmed.get(domain))) {
+                                plan.conflicts.add(domain);
                                 continue;
                             }
-                            plano.anteriores.put(domain, entry);
-                            estado.remove(domain);
+                            plan.previous.put(domain, entry);
+                            stateNow.remove(domain);
                             try {
-                                tx.save(estado);
+                                tx.save(stateNow);
                             } catch (IOException e) {
-                                System.err.println("Erro ao salvar estado de '" + domain + "': " + e.getMessage());
-                                estado.put(domain, entry);
-                                plano.falhas++;
+                                System.err.println("Error saving the state of '" + domain + "': " + e.getMessage());
+                                stateNow.put(domain, entry);
+                                plan.failures++;
                                 continue;
                             }
-                            plano.gravados.add(domain);
+                            plan.saved.add(domain);
                         }
-                        return plano;
+                        return plan;
                     },
-                    (p, estado, tx) -> {
-                        for (String domain : p.gravados) {
+                    (p, stateNow, tx) -> {
+                        for (String domain : p.saved) {
                             try {
                                 service.getBlocker().unblock(domain);
                             } catch (IOException e) {
                                 try {
-                                    estado.put(domain, p.anteriores.get(domain));
-                                    tx.save(estado);
+                                    stateNow.put(domain, p.previous.get(domain));
+                                    tx.save(stateNow);
                                 } catch (IOException rollbackFailure) {
-                                    System.err.println("Erro CRÍTICO: falha no hosts E ao reverter o estado de '"
-                                            + domain + "': " + rollbackFailure.getMessage());
+                                    System.err.println("CRITICAL ERROR: hosts write failed AND the state of '"
+                                            + domain + "' could not be reverted: " + rollbackFailure.getMessage());
                                 }
-                                System.err.println("Erro ao desbloquear '" + domain + "': " + e.getMessage());
-                                p.falhas++;
+                                System.err.println("Error unblocking '" + domain + "': " + e.getMessage());
+                                p.failures++;
                                 continue;
                             }
-                            System.out.println("Desbloqueado " + domain + ".");
+                            System.out.println("Unblocked " + domain + ".");
                         }
                     });
         } catch (IOException e) {
-            System.err.println("Erro ao gravar o estado: " + e.getMessage());
+            System.err.println("Error writing the state: " + e.getMessage());
             return 1;
         }
-        for (String domain : plano.ausentes) {
-            System.out.println("'" + domain + "' não está bloqueado. Nada a fazer.");
+        for (String domain : plan.absent) {
+            System.out.println("'" + domain + "' is not blocked. Nothing to do.");
         }
-        for (String domain : plano.conflitos) {
-            System.err.println("'" + domain + "' mudou enquanto você confirmava; "
-                    + "nada foi feito para ele. Tente de novo.");
+        for (String domain : plan.conflicts) {
+            System.err.println("'" + domain + "' changed while you were confirming; "
+                    + "nothing was done for it. Try again.");
         }
-        int failures = plano.falhas;
-        if (failures > 0 || !plano.conflitos.isEmpty()) {
+        int failures = plan.failures;
+        if (failures > 0 || !plan.conflicts.isEmpty()) {
             return 1;
         }
         if (!cancelledAny) {
-            // Best-effort: não muda o exit code; só avisa se o flush falhar.
+            // Best-effort: does not change the exit code; only warns if the flush fails.
             CliSupport.flushDnsBestEffort();
         }
         return cancelledAny ? 3 : 0;
     }
 
-    // O que a transação do unblock carrega entre o estado e o hosts: o estado e o
-    // hosts são dois lugares, e o desbloqueio tem que sair nos dois. Guardar o que
-    // estava em cada domínio é o que permite reverter só o que falhou.
-    private static final class Plano {
+    // What the unblock transaction carries between state and hosts: the state and the
+    // hosts file are two places, and the unblock has to happen in both. Keeping what was
+    // there for each domain is what allows reverting only the ones that failed.
+    private static final class Plan {
 
-        final List<String> gravados = new ArrayList<>();
-        final List<String> ausentes = new ArrayList<>();
-        final List<String> conflitos = new ArrayList<>();
-        final Map<String, BlockEntry> anteriores = new LinkedHashMap<>();
-        int falhas;
+        final List<String> saved = new ArrayList<>();
+        final List<String> absent = new ArrayList<>();
+        final List<String> conflicts = new ArrayList<>();
+        final Map<String, BlockEntry> previous = new LinkedHashMap<>();
+        int failures;
     }
 
 }

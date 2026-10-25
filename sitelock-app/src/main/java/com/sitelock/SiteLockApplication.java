@@ -16,8 +16,8 @@ import picocli.CommandLine.Command;
 
 import java.util.concurrent.Callable;
 
-/** Ponto de entrada do SiteBlock. */
-@Command(name = "siteblock", description = "Bloqueia sites localmente via arquivo hosts do sistema.", mixinStandardHelpOptions = true, version = "SiteBlock 1.0.0", subcommands = {
+/** SiteBlock entry point. */
+@Command(name = "siteblock", description = "Blocks websites locally through the system hosts file.", mixinStandardHelpOptions = true, version = "SiteBlock 1.0.0", subcommands = {
     BlockCommand.class, UnblockCommand.class, UninstallCommand.class, StatusCommand.class, ResetCommand.class, DnsCommand.class,
     ProfileCommand.class, DaemonCommand.class,
     CreateProfileCommand.class, SaveProfileCommand.class, DeleteProfileCommand.class })

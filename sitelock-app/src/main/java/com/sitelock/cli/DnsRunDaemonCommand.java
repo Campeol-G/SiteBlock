@@ -18,12 +18,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Processo filho do {@code dns start}: roda o servidor em foreground até
- * {@code dns stop} (SIGTERM), Ctrl+C ou o fim do {@code --for}.
- * Comando interno (oculto da ajuda); não chame diretamente.
+ * Child process of {@code dns start}: runs the server in the foreground until
+ * {@code dns stop} (SIGTERM), Ctrl+C, or the end of {@code --for}.
+ * Internal command (hidden from help); do not call it directly.
  */
 @Command(name = "__run-daemon", hidden = true,
-        description = "Executa o servidor DNS em foreground (uso interno do 'dns start').")
+        description = "Runs the DNS server in the foreground (internal use by 'dns start').")
 public class DnsRunDaemonCommand implements Callable<Integer> {
 
     @Option(names = "--port", defaultValue = "53") int port;
@@ -31,8 +31,8 @@ public class DnsRunDaemonCommand implements Callable<Integer> {
     @Option(names = "--for") String forDuration;
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
 
-    @Option(names = "--allow-from", paramLabel = "<lista>",
-            description = "Origens liberadas além das locais (IP ou CIDR, separados por vírgula).")
+    @Option(names = "--allow-from", paramLabel = "<list>",
+            description = "Origins allowed beyond the local ones (IP or CIDR, separated by commas).")
     String allowFrom;
 
     public DnsRunDaemonCommand() {
@@ -44,7 +44,7 @@ public class DnsRunDaemonCommand implements Callable<Integer> {
         try {
             upstreamAddr = java.net.InetAddress.getByName(upstream);
         } catch (Exception e) {
-            System.err.println("[sitelock-dns] upstream inválido '" + upstream + "': " + e.getMessage());
+            System.err.println("[sitelock-dns] invalid upstream '" + upstream + "': " + e.getMessage());
             return 2;
         }
 
@@ -61,9 +61,9 @@ public class DnsRunDaemonCommand implements Callable<Integer> {
                 ? Path.of(stateFileOverride)
                 : stateDir.resolve("blocks.json");
 
-        final java.util.List<String> origensLiberadas;
+        final java.util.List<String> allowedOrigins;
         try {
-            origensLiberadas = com.sitelock.dns.DnsServer.parseAllowFrom(allowFrom);
+            allowedOrigins = com.sitelock.dns.DnsServer.parseAllowFrom(allowFrom);
         } catch (IllegalArgumentException e) {
             System.err.println("[sitelock-dns] " + e.getMessage());
             return 2;
@@ -71,7 +71,7 @@ public class DnsRunDaemonCommand implements Callable<Integer> {
 
         com.sitelock.dns.DnsServer server = new com.sitelock.dns.DnsServer(
                 port, upstreamAddr, new com.sitelock.core.BlockStore(stateFile), Clock.systemUTC(),
-                origensLiberadas);
+                allowedOrigins);
         server.installShutdownHook();
 
         java.util.concurrent.ScheduledExecutorService scheduler = null;
@@ -82,8 +82,8 @@ public class DnsRunDaemonCommand implements Callable<Integer> {
                 return t;
             });
             scheduler.schedule(() -> {
-                System.out.println("[sitelock-dns] tempo de --for ("
-                        + DurationParser.formatRemaining(duration) + ") esgotado; encerrando.");
+                System.out.println("[sitelock-dns] the --for time ("
+                        + DurationParser.formatRemaining(duration) + ") ran out; shutting down.");
                 server.stop();
             }, duration.toMillis(), TimeUnit.MILLISECONDS);
         }
@@ -92,8 +92,8 @@ public class DnsRunDaemonCommand implements Callable<Integer> {
             com.sitelock.dns.NetworkUtils.printStartupInfo(port, upstreamAddr.getHostAddress());
             server.runWithWatchdog();
         } catch (com.sitelock.dns.DnsServerException e) {
-            // Falha no bind inicial (porta em uso/sem permissão): sai para que o
-            // `dns start` detecte o filho morto e mostre o motivo do log.
+            // Failure during the initial bind (port in use / no permission): exit so that
+            // `dns start` detects the dead child and shows the reason from the log.
             System.err.println("[sitelock-dns] " + e.getMessage());
             return 1;
         } finally {
@@ -108,7 +108,7 @@ public class DnsRunDaemonCommand implements Callable<Integer> {
         return 0;
     }
 
-    /** Ponto de entrada alternativo (não usado pela CLI; o daemon nasce via SiteLockApplication). */
+    /** Alternative entry point (not used by the CLI; the daemon is born via SiteLockApplication). */
     public static int run(int port, String upstream, String forDuration, String stateFileOverride) {
         DnsRunDaemonCommand cmd = new DnsRunDaemonCommand();
         cmd.port = port;

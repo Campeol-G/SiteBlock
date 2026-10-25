@@ -5,19 +5,19 @@ import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
- * Normalização e validação de domínios.
+ * Normalization and validation of domains.
  *
- * Remove protocolo, credenciais, porta, caminho/query/fragmento, converte
- * para minúsculas, tira ponto final e um prefixo "www." inicial.
- * O bloqueio sempre cobre "dominio" + "www.dominio".
+ * Removes protocol, credentials, port, path/query/fragment, converts
+ * to lowercase, strips trailing dot and an initial "www." prefix.
+ * Blocking always covers "domain" + "www.domain".
  */
 public final class DomainUtils {
 
-    // Rótulo DNS: 1-63 chars, alfanumérico/hífen, sem começar/terminar com hífen.
+    // DNS label: 1-63 chars, alphanumeric/hyphen, must not start/end with hyphen.
     private static final String LABEL = "(?!-)[A-Za-z0-9-]{1,63}(?<!-)";
     private static final Pattern DOMAIN_PATTERN =
             Pattern.compile("^" + LABEL + "(\\." + LABEL + ")+$");
-    // IPv4 simples — rejeitado explicitamente (bloquear IP não faz sentido aqui).
+    // Plain IPv4 — explicitly rejected (blocking an IP makes no sense here).
     private static final Pattern IPV4_PATTERN =
             Pattern.compile("^\\d{1,3}(\\.\\d{1,3}){3}$");
 
@@ -32,13 +32,13 @@ public final class DomainUtils {
     }
 
     /**
-     * Normaliza e valida.
-     * @throws IllegalArgumentException se vazio, com espaços internos ou formato inválido
+     * Normalizes and validates.
+     * @throws IllegalArgumentException if it is empty, contains internal spaces, or is in an invalid format
      */
     public static NormalizationResult normalize(String raw) {
         if (raw == null || raw.isBlank()) {
             throw new IllegalArgumentException(
-                    "Domínio vazio. Informe um domínio válido, ex.: tiktok.com");
+                    "Empty domain. Provide a valid domain, e.g.: tiktok.com");
         }
         String original = raw;
         String s = raw.trim();
@@ -46,7 +46,7 @@ public final class DomainUtils {
 
         if (s.contains(" ") || s.contains("\t") || s.contains("\n")) {
             throw new IllegalArgumentException(
-                    "Domínio inválido (contém espaços): '" + original + "'. Ex.: tiktok.com");
+                    "Invalid domain (contains spaces): '" + original + "'. E.g.: tiktok.com");
         }
 
         int schemeIdx = s.indexOf("://");
@@ -55,7 +55,7 @@ public final class DomainUtils {
             changed = true;
             if (s.isBlank()) {
                 throw new IllegalArgumentException(
-                        "Domínio inválido: '" + original + "'. Ex.: tiktok.com");
+                        "Invalid domain: '" + original + "'. E.g.: tiktok.com");
             }
         }
 
@@ -88,16 +88,16 @@ public final class DomainUtils {
 
         if (s.equals("www")) {
             throw new IllegalArgumentException(
-                    "Domínio inválido: '" + original + "'. Ex.: tiktok.com");
+                    "Invalid domain: '" + original + "'. E.g.: tiktok.com");
         }
-        // POR QUE: "www.com" é domínio legítimo, mas sem o prefixo sobra "com", que
-        // não é domínio. O prefixo só sai quando o que resta ainda é um domínio válido.
+        // WHY: "www.com" is a legitimate domain, but without the prefix "com" is left, which
+        // is not a domain. The prefix is only removed when what remains is still a valid domain.
         while (s.startsWith("www.")) {
-            String semPrefixo = s.substring("www.".length());
-            if (!isValid(semPrefixo)) {
+            String withoutPrefix = s.substring("www.".length());
+            if (!isValid(withoutPrefix)) {
                 break;
             }
-            s = semPrefixo;
+            s = withoutPrefix;
             changed = true;
         }
 
@@ -106,7 +106,7 @@ public final class DomainUtils {
         return new NormalizationResult(s, changed, original);
     }
 
-    /** Apenas valida, sem normalizar. */
+    /** Validation only, without normalizing. */
     public static boolean isValid(String domain) {
         if (domain == null || domain.isBlank()) {
             return false;
@@ -123,8 +123,8 @@ public final class DomainUtils {
         if (domain.length() > 253) {
             return false;
         }
-        // Exige TLD com ao menos uma letra e ao menos 2 chars
-        // (rejeita "exemplo.123" e "exemplo.c").
+        // Requires a TLD with at least one letter and at least 2 chars
+        // (rejects "example.123" and "example.c").
         String tld = domain.substring(domain.lastIndexOf('.') + 1);
         if (tld.length() < 2 || !tld.matches(".*[a-z].*")) {
             return false;
@@ -135,30 +135,30 @@ public final class DomainUtils {
     private static void validate(String domain, String original) {
         if (domain.isBlank()) {
             throw new IllegalArgumentException(
-                    "Domínio inválido: '" + original + "'. Ex.: tiktok.com");
+                    "Invalid domain: '" + original + "'. E.g.: tiktok.com");
         }
         if (IPV4_PATTERN.matcher(domain).matches()) {
             throw new IllegalArgumentException(
-                    "Endereços IP não são aceitos; informe um domínio, ex.: tiktok.com (recebido: '"
+                    "IP addresses are not accepted; provide a domain, e.g.: tiktok.com (received: '"
                             + original + "')");
         }
         if (!DOMAIN_PATTERN.matcher(domain).matches() || domain.length() > 253) {
             throw new IllegalArgumentException(
-                    "Domínio inválido: '" + original + "' (interpretado como '" + domain
-                            + "'). Ex.: tiktok.com");
+                    "Invalid domain: '" + original + "' (interpreted as '" + domain
+                            + "'). E.g.: tiktok.com");
         }
         if (isOnlyWww(domain)) {
             throw new IllegalArgumentException(
-                    "Domínio inválido: '" + original + "'. Ex.: tiktok.com");
+                    "Invalid domain: '" + original + "'. E.g.: tiktok.com");
         }
         String tld = domain.substring(domain.lastIndexOf('.') + 1);
         if (tld.length() < 2 || !tld.matches(".*[a-z].*")) {
             throw new IllegalArgumentException(
-                    "Domínio inválido (TLD suspeito): '" + original + "'. Ex.: tiktok.com");
+                    "Invalid domain (suspicious TLD): '" + original + "'. E.g.: tiktok.com");
         }
     }
 
-    // Só rótulos "www" não são domínio: sobraria a linha "127.0.0.1 www" no hosts.
+    // "www"-only labels are not a domain: the line "127.0.0.1 www" would be left in the hosts file.
     private static boolean isOnlyWww(String domain) {
         for (String label : domain.split("\\.")) {
             if (!label.equals("www")) {

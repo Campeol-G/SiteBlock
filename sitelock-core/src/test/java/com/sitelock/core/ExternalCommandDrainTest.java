@@ -9,11 +9,11 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * Comando externo verboso não pode encher o pipe antes do waitFor.
+ * A verbose external command must not fill the pipe before waitFor.
  *
- * <p>Os dois executores que chamam processo de fora drenam a saída em paralelo
- * (ou descartam, quando o texto não é usado). O cenário reproduz um comando que
- * escreve mais que o buffer padrão do pipe.
+ * <p>The two executors that spawn processes from the outside drain the output in parallel
+ * (or discard it, when the text is not used). The scenario reproduces a command that
+ * writes more than the pipe's default buffer.
  */
 @EnabledOnOs({OS.LINUX, OS.MAC})
 class ExternalCommandDrainTest {

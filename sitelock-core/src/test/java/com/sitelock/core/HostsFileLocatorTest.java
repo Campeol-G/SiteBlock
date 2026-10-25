@@ -9,8 +9,8 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Cobre os três ramos de SO de forma simulada (injetando {@code os.name}),
- * sem depender de rodar de fato no SO em questão.
+ * Covers the three OS branches in a simulated way (injecting {@code os.name}),
+ * without depending on actually running on the OS in question.
  */
 class HostsFileLocatorTest {
 
@@ -47,7 +47,7 @@ class HostsFileLocatorTest {
 
     @Test
     void windowsFallsBackToCFallbackWhenSystemRootMissing() {
-        // Limitação documentada: sem %SystemRoot%, assume C:\Windows.
+        // Documented limitation: without %SystemRoot%, it assumes C:\Windows.
         DefaultHostsFileLocator loc =
                 new DefaultHostsFileLocator(OsType.WINDOWS, () -> null);
         assertEquals(Path.of("C:\\Windows", "System32", "drivers", "etc", "hosts"),

@@ -12,7 +12,7 @@ import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Dicas de sudo usam o caminho real do binário. */
+/** Sudo hints use the real path of the binary. */
 class CliSupportTest {
 
     @TempDir
@@ -64,25 +64,25 @@ class CliSupportTest {
                 CliSupport.sudoCommand("status"));
     }
 
-    // ATENÇÃO: mandar "sudo siteblock daemon enable" no Windows é mandar um
-    // comando que não existe na máquina.
+    // WARNING: sending "sudo siteblock daemon enable" on Windows sends a command
+    // that does not exist on the machine.
     /**
-     * No Windows não existe sudo: quem eleva é o terminal aberto como
-     * Administrador.
+     * There is no sudo on Windows: the terminal elevates when opened as
+     * Administrator.
      */
     @Test
-    void oAvisoDeDaemonNoWindowsNaoMandaSudo() {
+    void daemonWarningOnWindowsDoesNotUseSudo() {
         System.setProperty("os.name", "Windows 11");
 
-        String saida = capturar(() -> CliSupport.warnIfNoDaemon(
-                tmp.resolve("estado/blocks.json").toString()));
+        String output = capture(() -> CliSupport.warnIfNoDaemon(
+                tmp.resolve("state/blocks.json").toString()));
 
-        assertFalse(saida.contains("sudo"), saida);
-        assertTrue(saida.contains("Administrador"), saida);
-        assertTrue(saida.contains("daemon enable"), saida);
+        assertFalse(output.contains("sudo"), output);
+        assertTrue(output.contains("Administrator"), output);
+        assertTrue(output.contains("daemon enable"), output);
     }
 
-    private static String capturar(Runnable r) {
+    private static String capture(Runnable r) {
         PrintStream original = System.out;
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         System.setOut(new PrintStream(buffer, true, StandardCharsets.UTF_8));

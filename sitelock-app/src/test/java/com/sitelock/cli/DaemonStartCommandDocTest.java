@@ -10,48 +10,47 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * O javadoc do {@code daemon start} tem que descrever o que o código faz.
+ * The {@code daemon start} Javadoc must describe what the code does.
  *
- * <p>A checagem de identidade do daemon deixou de ser só "o PID está vivo":
- * o registro guarda o instante de início do processo, e é ele que prova que
- * o PID vivo ainda é o nosso. Um javadoc que afirma o contrário não é
- * documento: é mentira, e a próxima pessoa que mexer no arquivo confia
- * nela.
+ * <p>The daemon identity check is no longer only "the PID is alive": the record
+ * stores the process start instant, and that is what proves the live PID is
+ * still ours. A Javadoc that says otherwise is not documentation: it is a lie,
+ * and the next person to touch the file trusts it.
  */
 class DaemonStartCommandDocTest {
 
     @Test
-    void javadocDoRegistroOrfaoDescreveAChecagemAtual() throws Exception {
-        String fonte = Files.readString(fonteDoComando(), StandardCharsets.UTF_8);
-        String javadoc = javadocDe(fonte, "descartarRegistroOrfao");
+    void orphanRecordJavadocDescribesTheCurrentCheck() throws Exception {
+        String source = Files.readString(commandSource(), StandardCharsets.UTF_8);
+        String javadoc = javadocFor(source, "discardOrphanRecord");
 
-        assertFalse(javadoc.contains("a checagem é só"),
-                "a checagem não é só o PID: " + javadoc);
-        assertTrue(javadoc.contains("instante de início"),
-                "o javadoc precisa falar do instante de início do processo: " + javadoc);
+        assertFalse(javadoc.contains("the check is only"),
+                "the check is not only the PID: " + javadoc);
+        assertTrue(javadoc.contains("start instant"),
+                "the Javadoc must mention the process start instant: " + javadoc);
         assertTrue(javadoc.contains("PID"),
-                "o javadoc precisa continuar falando do PID: " + javadoc);
+                "the Javadoc must still mention the PID: " + javadoc);
     }
 
-    // O arquivo-fonte do comando, subindo a árvore até achar.
-    private static Path fonteDoComando() {
-        Path relativo = Path.of("src/main/java/com/sitelock/cli/DaemonStartCommand.java");
-        Path atual = Path.of("").toAbsolutePath();
-        while (atual != null) {
-            Path candidato = atual.resolve(relativo);
-            if (Files.exists(candidato)) {
-                return candidato;
+    // The command source file, walking up the tree until it is found.
+    private static Path commandSource() {
+        Path relative = Path.of("src/main/java/com/sitelock/cli/DaemonStartCommand.java");
+        Path current = Path.of("").toAbsolutePath();
+        while (current != null) {
+            Path candidate = current.resolve(relative);
+            if (Files.exists(candidate)) {
+                return candidate;
             }
-            atual = atual.getParent();
+            current = current.getParent();
         }
-        throw new IllegalStateException("fonte do DaemonStartCommand não encontrada");
+        throw new IllegalStateException("DaemonStartCommand source not found");
     }
 
-    // O bloco de javadoc que precede o método.
-    private static String javadocDe(String fonte, String metodo) {
-        int declaracao = fonte.lastIndexOf(metodo);
-        int inicio = fonte.lastIndexOf("/**", declaracao);
-        int fim = fonte.indexOf("*/", inicio);
-        return fonte.substring(inicio, fim + 2);
+    // The Javadoc block that precedes the method.
+    private static String javadocFor(String source, String method) {
+        int declaration = source.lastIndexOf(method);
+        int start = source.lastIndexOf("/**", declaration);
+        int end = source.indexOf("*/", start);
+        return source.substring(start, end + 2);
     }
 }

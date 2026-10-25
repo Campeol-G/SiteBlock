@@ -10,11 +10,11 @@ import java.util.Objects;
 import java.util.TreeMap;
 
 /**
- * Um conjunto nomeado de domínios com duração.
+ * A named set of domains with a duration.
  *
- * <p>Guarda as duas datas porque {@code updatedAt} responde "quando foi a
- * última vez que eu mudei esta receita" e {@code createdAt} responde "desde
- * quando eu tenho esta receita" — são coisas diferentes depois do segundo save.
+ * <p>It stores both dates because {@code updatedAt} answers "when did I last
+ * change this recipe" and {@code createdAt} answers "when did I create this
+ * recipe" — they are different things after the second save.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Profile {
@@ -23,7 +23,7 @@ public class Profile {
     private Instant updatedAt;
     private Map<String, ProfileEntry> entries;
 
-    /** Construtor para o Jackson. */
+    /** Constructor for Jackson. */
     @JsonCreator
     public Profile(
             @JsonProperty(value = "createdAt", required = true) Instant createdAt,
@@ -31,9 +31,9 @@ public class Profile {
             @JsonProperty("entries") Map<String, ProfileEntry> entries) {
         this.createdAt = createdAt;
         this.updatedAt = updatedAt != null ? updatedAt : createdAt;
-        // TreeMap para o JSON sair determinístico: a lista de um perfil não pode
-        // mudar de ordem entre um save e um show só porque o mapa mudou de
-        // implementação.
+        // TreeMap so the JSON comes out deterministic: a profile's list must not
+        // change order between a save and a show just because the map changed
+        // implementation.
         this.entries = entries != null ? new TreeMap<>(entries) : new TreeMap<>();
     }
 

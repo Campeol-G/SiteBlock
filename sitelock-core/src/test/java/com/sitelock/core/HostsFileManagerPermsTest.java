@@ -16,11 +16,11 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Escrita no hosts preserva as permissões e repara o arquivo deixado em 600.
+ * Writing to the hosts file preserves permissions and repairs a file left at 600.
  *
- * <p>Só faz sentido onde existe permissão POSIX. Onde não há, o teste é pulado
- * e a suíte reporta o pulo — engolir a {@code UnsupportedOperationException}
- * deixaria a CI do Windows verde sem cobertura nenhuma.
+ * <p>It only makes sense where POSIX permissions exist. Where they do not, the test is skipped
+ * and the suite reports the skip — swallowing the {@code UnsupportedOperationException}
+ * would leave Windows CI green with no coverage at all.
  */
 @EnabledOnOs({OS.LINUX, OS.MAC})
 class HostsFileManagerPermsTest {
@@ -33,7 +33,7 @@ class HostsFileManagerPermsTest {
         Path hosts = tmp.resolve("hosts");
         Files.writeString(hosts, "127.0.0.1 localhost\n", StandardCharsets.UTF_8);
         Assumptions.assumeTrue(Files.getFileAttributeView(hosts, PosixFileAttributeView.class) != null,
-                "o FS do temporário não expõe permissões POSIX");
+                "the temp file's FS does not expose POSIX permissions");
         Files.setPosixFilePermissions(hosts, Set.of(
                 PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE,
                 PosixFilePermission.GROUP_READ, PosixFilePermission.OTHERS_READ));
@@ -55,7 +55,7 @@ class HostsFileManagerPermsTest {
         Path hosts = tmp.resolve("hosts");
         Files.writeString(hosts, "127.0.0.1 localhost\n", StandardCharsets.UTF_8);
         Assumptions.assumeTrue(Files.getFileAttributeView(hosts, PosixFileAttributeView.class) != null,
-                "o FS do temporário não expõe permissões POSIX");
+                "the temp file's FS does not expose POSIX permissions");
         Files.setPosixFilePermissions(hosts, Set.of(
                 PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE));
         Path backup = tmp.resolve("state/hosts.backup");

@@ -7,7 +7,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 
-/** Bloqueio local via arquivo hosts do sistema (ex.: /etc/hosts no Linux/macOS). */
+/** Local blocking via the system hosts file (e.g. /etc/hosts on Linux/macOS). */
 public class HostsFileBlocker implements SiteBlocker {
 
     private final Path hostsPath;
@@ -20,7 +20,7 @@ public class HostsFileBlocker implements SiteBlocker {
         this.lockFile = lockFile;
     }
 
-    /** Usa os caminhos padrão. */
+    /** Uses the default paths. */
     public HostsFileBlocker() {
         this(SiteLockPaths.getHostsPath(), SiteLockPaths.getBackupFile(),
                 SiteLockPaths.getStateDir().resolve("hosts.lock"));

@@ -24,7 +24,7 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * Leitura/escrita do bloco gerenciado dentro do /etc/hosts.
+ * Read/write of the managed block inside /etc/hosts.
  *
  * <pre>
  * # SITELOCK-START
@@ -35,9 +35,9 @@ import java.util.Set;
  * # SITELOCK-END
  * </pre>
  *
- * Bloco vazio não é mantido: se não sobrar nenhuma entrada, os marcadores
- * também são removidos. A escrita é atômica (temp + move) e nunca escreve
- * por cima do original.
+ * An empty block is not kept: if no entry remains, the markers
+ * are also removed. Writing is atomic (temp + move) and never rewrites
+ * the original in place.
  */
 public final class HostsFileManager {
 
@@ -49,7 +49,7 @@ public final class HostsFileManager {
     private HostsFileManager() {
     }
 
-    /** As quatro linhas gerenciadas para um domínio (IPv4 + IPv6, com e sem www). */
+    /** The four managed lines for a domain (IPv4 + IPv6, with and without www). */
     public static List<String> managedLines(String domain) {
         String base = baseDomain(domain);
         return List.of(
@@ -59,14 +59,14 @@ public final class HostsFileManager {
                 REDIRECT_IPV6 + " www." + base);
     }
 
-    /** Os dois hostnames gerenciados para um domínio. */
+    /** The two hostnames managed for a domain. */
     public static List<String> managedHosts(String domain) {
         String base = baseDomain(domain);
         return List.of(base, "www." + base);
     }
 
-    // POR QUE: o bloqueio é o mesmo com ou sem o prefixo "www", e "www." +
-    // "www.x.com" seria "www.www.x.com" — um host que não existe.
+    // WHY: the block is the same with or without the "www" prefix, and "www." +
+    // "www.x.com" would be "www.www.x.com" — a host that does not exist.
     private static String baseDomain(String domain) {
         String d = domain.toLowerCase(Locale.ROOT);
         while (d.startsWith("www.") && d.length() > "www.".length()) {
@@ -75,7 +75,7 @@ public final class HostsFileManager {
         return d;
     }
 
-    /** Insere o domínio no bloco. Idempotente, nunca duplica linhas nem marcadores. */
+    /** Inserts the domain into the block. Idempotent, never duplicates lines or markers. */
     public static String addDomain(String hostsContent, String domain) {
         String content = hostsContent == null ? "" : hostsContent;
         List<String> lines = managedLines(domain);
@@ -90,12 +90,12 @@ public final class HostsFileManager {
 
         List<String> body = blockBody(all, start, end);
         body.addAll(missingLines(body, lines, hosts));
-        // Bloco sem marcador final é fechado aqui: o arquivo passa a terminar em "\n".
-        boolean terminaComQuebra = end >= 0 ? endsWithNewline(content) : true;
-        return joinLines(rebuild(all, start, end, body), terminaComQuebra);
+        // A block without a final marker is closed here: the file now ends with "\n".
+        boolean keepTrailingBreak = end >= 0 ? endsWithNewline(content) : true;
+        return joinLines(rebuild(all, start, end, body), keepTrailingBreak);
     }
 
-    /** Remove o domínio do bloco. Bloco sem entradas é removido por inteiro. */
+    /** Removes the domain from the block. Block with no entries is removed entirely. */
     public static String removeDomain(String hostsContent, String domain) {
         String content = hostsContent == null ? "" : hostsContent;
         List<String> hosts = managedHosts(domain);
@@ -103,8 +103,8 @@ public final class HostsFileManager {
         List<String> all = splitLines(content);
         int start = indexOfMarker(all, START_MARKER, 0);
         if (start < 0) {
-            // POR QUE: o SiteBlock só reescreve o bloco que ele mesmo escreveu.
-            // Linha do usuário fora dele é intocável, mesmo que cite o domínio.
+            // WHY: SiteBlock only rewrites the block it wrote itself.
+            // A user line outside it is untouched, even if it mentions the domain.
             return content;
         }
         int end = indexOfMarker(all, END_MARKER, start + 1);
@@ -126,19 +126,19 @@ public final class HostsFileManager {
         }
 
         if (!kept.stream().anyMatch(HostsFileManager::isEntryLine)) {
-            // Bloco sem entradas: some inteiro, e só ele.
+            // Block with no entries: it goes away entirely, and only it does.
             int regionEnd = end >= 0 ? end : all.size() - 1;
             List<String> out = new ArrayList<>(all.subList(0, start));
             out.addAll(all.subList(regionEnd + 1, all.size()));
             return joinLines(out, endsWithNewline(content));
         }
-        // Bloco sem marcador final é fechado aqui: o arquivo passa a terminar em "\n".
-        boolean terminaComQuebra = end >= 0 ? endsWithNewline(content) : true;
-        return joinLines(rebuild(all, start, end, kept), terminaComQuebra);
+        // A block without a final marker is closed here: the file now ends with "\n".
+        boolean keepTrailingBreak = end >= 0 ? endsWithNewline(content) : true;
+        return joinLines(rebuild(all, start, end, kept), keepTrailingBreak);
     }
 
-    // POR QUE: marcador repetido dentro da região é descartado — um arquivo
-    // com dois blocos deixa o segundo invisível para a remoção.
+    // WHY: a repeated marker inside the region is discarded — a file
+    // with two blocks leaves the second invisible to removal.
     private static List<String> blockBody(List<String> all, int start, int end) {
         int to = end >= 0 ? end : all.size();
         List<String> body = new ArrayList<>();
@@ -152,7 +152,7 @@ public final class HostsFileManager {
         return body;
     }
 
-    // POR QUE: o que está fora do bloco é copiado como está — é conteúdo do usuário.
+    // WHY: whatever is outside the block is copied as is — it is user content.
     private static List<String> rebuild(List<String> all, int start, int end, List<String> body) {
         List<String> out = new ArrayList<>(all.subList(0, start + 1));
         out.addAll(body);
@@ -160,13 +160,13 @@ public final class HostsFileManager {
             out.add(all.get(end));
             out.addAll(all.subList(end + 1, all.size()));
         } else {
-            // Bloco sem marcador final: fecha o bloco para o arquivo ficar bem formado.
+            // Block without a final marker: close the block so the file is well formed.
             out.add(END_MARKER);
         }
         return out;
     }
 
-    // Bloco novo entra no fim do arquivo — só é usado quando ainda não existe um.
+    // A new block goes at the end of the file — used only when none exists yet.
     private static List<String> appendBlock(List<String> all, List<String> lines) {
         List<String> out = new ArrayList<>(all);
         out.add(START_MARKER);
@@ -175,7 +175,7 @@ public final class HostsFileManager {
         return out;
     }
 
-    // Linhas que faltam para o domínio ficar completo no bloco — reparo automático.
+    // Lines missing for the domain to be complete in the block — automatic repair.
     private static List<String> missingLines(List<String> body, List<String> lines, List<String> hosts) {
         String block = String.join("\n", body);
         List<String> insert = new ArrayList<>();
@@ -194,7 +194,7 @@ public final class HostsFileManager {
         return insert;
     }
 
-    // Linhas do arquivo sem o terminador final: quem remontar decide se ele volta.
+    // Lines of the file without the final terminator: the caller decides whether to restore it.
     private static List<String> splitLines(String content) {
         if (content.isEmpty()) {
             return new ArrayList<>();
@@ -245,8 +245,8 @@ public final class HostsFileManager {
         return false;
     }
 
-    // ATENÇÃO: null não é "não mudou" — significa "apague esta linha" (sobrou
-    // só o IP). Nos outros casos, devolve a linha reescrita.
+    // WARNING: null does not mean "unchanged" — it means "delete this line" (only
+    // the IP is left). In the other cases, it returns the rewritten line.
     private static String stripHostnames(String line, List<String> hosts) {
         String trimmed = line.strip();
         if (trimmed.isEmpty() || trimmed.startsWith("#")) {
@@ -284,8 +284,8 @@ public final class HostsFileManager {
         if (!removedAny) {
             return line;
         }
-        // Sem host sobrando, o comentário era da entrada removida: a linha
-        // inteira sai. Deixá-la como "127.0.0.1 # note" manteria o bloco vivo.
+        // With no host left, the comment belonged to the removed entry: the whole
+        // line goes. Leaving it as "127.0.0.1 # note" would keep the block alive.
         if (!remainingHost) {
             return null;
         }
@@ -313,7 +313,7 @@ public final class HostsFileManager {
         return Files.isWritable(hostsPath);
     }
 
-    /** Cria o backup do hosts original uma única vez (nunca sobrescreve). */
+    /** Creates the backup of the original hosts file once (never overwrites). */
     public static void ensureBackup(Path hostsPath, Path backupPath) throws IOException {
         if (Files.exists(backupPath)) {
             return;
@@ -333,17 +333,17 @@ public final class HostsFileManager {
         return Files.readString(hostsPath, StandardCharsets.UTF_8);
     }
 
-    /** Aplica bloqueio no arquivo com backup, lock e escrita atômica. */
+    /** Applies the block to the file with backup, lock and atomic write. */
     public static void blockInFile(Path hostsPath, Path backupPath, Path lockFile, String domain)
             throws IOException {
         blockInFile(hostsPath, backupPath, lockFile, List.of(domain));
     }
 
-    // POR QUE: por domínio são 3 locks e 3 leituras, e a checagem de concorrência compara o hosts
-    // com o que foi lido milissegundos atrás — num apply de 40 domínios, um passo veria o arquivo
-    // mudado e a operação morreria no meio: daí o lote compondo tudo em memória antes do lock.
+    // WHY: per domain it is 3 locks and 3 reads, and the concurrency check compares the hosts file
+    // with what was read milliseconds ago — in an apply of 40 domains, one step would see the file
+    // changed and the operation would die halfway: hence the batch composing everything in memory before the lock.
     /**
-     * Aplica o bloqueio de vários domínios numa única leitura e uma única escrita.
+     * Applies the block for several domains in a single read and a single write.
      */
     public static void blockInFile(Path hostsPath, Path backupPath, Path lockFile, List<String> domains)
             throws IOException {
@@ -358,13 +358,13 @@ public final class HostsFileManager {
         modifyHosts(hostsPath, backupPath, lockFile, updated, current);
     }
 
-    /** Remove bloqueio no arquivo. */
+    /** Removes the block from the file. */
     public static void unblockInFile(Path hostsPath, Path backupPath, Path lockFile, String domain)
             throws IOException {
         unblockInFile(hostsPath, backupPath, lockFile, List.of(domain));
     }
 
-    /** Remove vários domínios numa única leitura e uma única escrita. */
+    /** Removes several domains in a single read and a single write. */
     public static void unblockInFile(Path hostsPath, Path backupPath, Path lockFile, List<String> domains)
             throws IOException {
         if (domains == null || domains.isEmpty()) {
@@ -397,8 +397,8 @@ public final class HostsFileManager {
             SiteLockPaths.chownToRealUserIfSudo(lockFile);
             String current = readHosts(hostsPath);
             if (!current.equals(originalContent)) {
-                throw new IOException("O arquivo hosts (" + hostsPath
-                        + ") foi modificado concorrentemente. Tente novamente.");
+                throw new IOException("The hosts file (" + hostsPath
+                        + ") was modified concurrently. Try again.");
             }
             if (current.equals(newContent)) {
                 return;
@@ -406,14 +406,14 @@ public final class HostsFileManager {
             ensureBackup(hostsPath, backupPath);
             writeAtomically(hostsPath, newContent);
         } catch (IOException e) {
-            throw new IOException("Falha ao atualizar " + hostsPath + ": " + e.getMessage()
-                    + " (nenhuma alteração parcial foi aplicada)", e);
+            throw new IOException("Failed to update " + hostsPath + ": " + e.getMessage()
+                    + " (no partial change was applied)", e);
         }
     }
 
-    // ATENÇÃO: a escrita preserva dono e permissões do alvo; alvo chamado "hosts"
-    // sem leitura para outros ganha leitura de grupo/outros — é o reparo da
-    // permissão 600 quebrada.
+    // WARNING: the write preserves the target's owner and permissions; a target named "hosts"
+    // without read for others gains group/others read — that is the repair of a
+    // broken 600 permission.
     static void writeAtomically(Path target, String content) throws IOException {
         boolean targetExists = Files.exists(target, LinkOption.NOFOLLOW_LINKS);
         Set<PosixFilePermission> origPerms = null;
@@ -447,8 +447,8 @@ public final class HostsFileManager {
             } catch (AtomicMoveNotSupportedException e) {
                 Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
             }
-            // Alguns FSs podem não preservar attrs no rename: garante no alvo final.
-            // O hosts NUNCA recebe chown (deve continuar root); só perms.
+            // Some filesystems may not preserve attributes on rename: enforce them on the final target.
+            // The hosts file NEVER receives chown (it should stay root); only perms.
             applyTargetAttributes(target, target, origPerms, null, null);
         } finally {
             Files.deleteIfExists(tmp);
@@ -465,7 +465,7 @@ public final class HostsFileManager {
             try {
                 Set<PosixFilePermission> toApply = EnumSet.copyOf(origPerms);
                 if (isHosts && !toApply.contains(PosixFilePermission.OTHERS_READ)) {
-                    // Auto-reparo do estrago 600: hosts precisa ser legível por todos.
+                    // Auto-repair of the 600 damage: hosts must be readable by everyone.
                     toApply.add(PosixFilePermission.GROUP_READ);
                     toApply.add(PosixFilePermission.OTHERS_READ);
                 }

@@ -3,24 +3,24 @@ package com.sitelock.core;
 import java.nio.file.Path;
 
 /**
- * Tudo o que o artefato de autostart precisa, já resolvido e absoluto.
+ * Everything the autostart artifact needs, already resolved and absolute.
  *
- * <p>Estes valores são resolvidos no instante do {@code daemon enable} e
- * embutidos no artefato. Resolver depois é tarde: unit de sistema, LaunchDaemon
- * e {@code schtasks /ru SYSTEM} rodam como root <b>sem {@code SUDO_USER}</b>.
+ * <p>These values are resolved at {@code daemon enable} time and embedded in
+ * the artifact. Resolving later is too late: systemd units, LaunchDaemon and
+ * {@code schtasks /ru SYSTEM} run as root <b>without {@code SUDO_USER}</b>.
  *
- * <p>Aí {@code user.home} é {@code /root} ou o profile do SYSTEM: o daemon
- * leria um {@code blocks.json} que não é o do {@code sudo siteblock block}, e a
- * feature inteira vira um no-op silencioso.
+ * <p>In that case, {@code user.home} is {@code /root} or the SYSTEM profile: the daemon
+ * would read a {@code blocks.json} that is not the one from
+ * {@code sudo siteblock block}, and the whole feature becomes a silent no-op.
  *
- * @param stateDir      diretório de estado do usuário real
- * @param hostsFile     arquivo de hosts do sistema
- * @param javaBin       caminho absoluto do java
- * @param jarPath       caminho absoluto do fat-jar, ou null para usar o classpath
- * @param classpath     classpath de reserva, quando não há jar
- * @param realUserName  usuário a quem devolver a posse dos arquivos escritos;
- *                      null quando desconhecido
- * @param os            sistema operacional-alvo
+ * @param stateDir      state directory of the real user
+ * @param hostsFile     system hosts file
+ * @param javaBin       absolute path to java
+ * @param jarPath       absolute path to the fat-jar, or null to use the classpath
+ * @param classpath     fallback classpath, when there is no jar
+ * @param realUserName  user to whom ownership of the written files is handed back;
+ *                      null when unknown
+ * @param os            target operating system
  */
 public record AutostartPaths(Path stateDir, Path hostsFile, String javaBin,
                             String jarPath, String classpath, String realUserName, OsType os) {

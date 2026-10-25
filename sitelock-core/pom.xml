@@ -12,7 +12,7 @@
 
   <artifactId>sitelock-core</artifactId>
   <name>SiteLock Core</name>
-  <description>Persistência (blocks.json), /etc/hosts, parsing de duração e domínios.</description>
+  <description>Persistence (blocks.json), /etc/hosts, duration parsing, and domains.</description>
 
   <dependencies>
     <dependency>

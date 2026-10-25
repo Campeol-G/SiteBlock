@@ -3,14 +3,14 @@ package com.sitelock.core;
 import java.nio.file.Path;
 
 /**
- * Retorna o caminho do arquivo hosts do sistema operacional.
+ * Returns the path of the operating system's hosts file.
  *
- * <p>Só o caminho varia por SO — toda a lógica de edição (marcadores
- * {@code # SITELOCK-START} / {@code # SITELOCK-END}, escrita atômica via
- * temporário + rename em {@link HostsFileManager}) é reutilizada sem duplicação.
+ * <p>Only the path varies by OS — all the editing logic (markers
+ * {@code # SITELOCK-START} / {@code # SITELOCK-END}, atomic write via
+ * temp file + rename in {@link HostsFileManager}) is reused without duplication.
  */
 public interface HostsFileLocator {
 
-    /** Caminho do arquivo hosts no SO corrente (ou simulado, em testes). */
+    /** Path of the hosts file on the current (or simulated, in tests) OS. */
     Path getHostsPath();
 }

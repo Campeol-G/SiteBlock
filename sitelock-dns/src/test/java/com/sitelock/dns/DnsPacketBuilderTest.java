@@ -4,11 +4,11 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-// Verifica que a resposta de bloqueio está corretamente formada no nível dos bytes:
-// ID ecoado, flags, contadores, pergunta ecoada e answer com o sinkhole.
+// Verifies that the block response is correctly formed at the byte level:
+// echoed ID, flags, counters, echoed question, and an answer with the sinkhole.
 class DnsPacketBuilderTest {
 
-    // Tamanho do pseudo-registro OPT do EDNS (RFC 6891).
+    // Size of the EDNS OPT pseudo-record (RFC 6891).
     private static final int OPT_LEN = 11;
 
     private static DnsQuery query(int id, String name, int type) throws Exception {
@@ -26,31 +26,31 @@ class DnsPacketBuilderTest {
     }
 
     @Test
-    void respostaABloqueadaBemFormada() throws Exception {
+    void blockedResponseIsWellFormed() throws Exception {
         DnsQuery q = query(0xBEEF, "www.tiktok.com", 1);
         byte[] resp = DnsPacketBuilder.buildBlockedResponse(q);
 
         int questionLen = q.questionSection().length;
         assertEquals(12 + questionLen + 12 + 4 + OPT_LEN, resp.length);
 
-        // Header: ID ecoado, QR=1, RCODE=0, QD=1, AN=1, NS=0, AR=1 (OPT do EDNS).
+        // Header: echoed ID, QR=1, RCODE=0, QD=1, AN=1, NS=0, AR=1 (EDNS OPT).
         assertEquals(0xBEEF, u16(resp, 0));
         int flags = u16(resp, 2);
-        assertTrue((flags & 0x8000) != 0, "QR deve ser 1");
-        assertEquals(0, flags & 0x000F, "RCODE deve ser 0");
-        assertTrue((flags & 0x0100) != 0, "RD deve ser copiado da pergunta");
-        assertTrue((flags & 0x0080) != 0, "RA deve ser 1");
+        assertTrue((flags & 0x8000) != 0, "QR should be 1");
+        assertEquals(0, flags & 0x000F, "RCODE should be 0");
+        assertTrue((flags & 0x0100) != 0, "RD should be copied from the question");
+        assertTrue((flags & 0x0080) != 0, "RA should be 1");
         assertEquals(1, u16(resp, 4));
         assertEquals(1, u16(resp, 6));
         assertEquals(0, u16(resp, 8));
-        assertEquals(1, u16(resp, 10), "ARCOUNT deve ser 1 (OPT do EDNS)");
+        assertEquals(1, u16(resp, 10), "ARCOUNT should be 1 (EDNS OPT)");
 
-        // Pergunta ecoada byte a byte.
+        // Question echoed byte for byte.
         byte[] echoed = new byte[questionLen];
         System.arraycopy(resp, 12, echoed, 0, questionLen);
         assertArrayEquals(q.questionSection(), echoed);
 
-        // Answer: ponteiro 0xC00C, A/IN, TTL 60, RDLEN 4, 0.0.0.0.
+        // Answer: pointer 0xC00C, A/IN, TTL 60, RDLEN 4, 0.0.0.0.
         int a = 12 + questionLen;
         assertEquals(0xC0, resp[a] & 0xFF);
         assertEquals(0x0C, resp[a + 1] & 0xFF);
@@ -67,7 +67,7 @@ class DnsPacketBuilderTest {
     }
 
     @Test
-    void respostaAaaaUsaSinkholeIpv6() throws Exception {
+    void aaaaResponseUsesIpv6Sinkhole() throws Exception {
         DnsQuery q = query(0x1234, "m.tiktok.com", 28);
         byte[] resp = DnsPacketBuilder.buildBlockedResponse(q);
 
@@ -78,113 +78,114 @@ class DnsPacketBuilderTest {
         assertEquals(1, u16(resp, a + 4));
         assertEquals(16, u16(resp, a + 10));
         for (int i = 0; i < 16; i++) {
-            assertEquals(0, resp[a + 12 + i], "byte " + i + " do :: deve ser zero");
+            assertEquals(0, resp[a + 12 + i], "byte " + i + " of :: should be zero");
         }
     }
 
     @Test
-    void tipoNaoBloqueavelRespondeNodata() throws Exception {
+    void nonBlockableTypeAnswersNodata() throws Exception {
         DnsQuery q = query(0x1234, "tiktok.com", 15); // MX
         byte[] resp = DnsPacketBuilder.buildBlockedResponse(q);
-        assertEquals(0, u16(resp, 6), "ANCOUNT deve ser 0 (NODATA)");
-        assertEquals(0, u16(resp, 2) & 0x000F, "RCODE deve ser 0");
+        assertEquals(0, u16(resp, 6), "ANCOUNT should be 0 (NODATA)");
+        assertEquals(0, u16(resp, 2) & 0x000F, "RCODE should be 0");
     }
 
     @Test
-    void respostaNodataTemRcodeZeroEAncountZero() throws Exception {
-        DnsQuery q = query(0x1111, "youtube.com", 15); // MX de um nome bloqueado
+    void nodataResponseHasZeroRcodeAndAncount() throws Exception {
+        DnsQuery q = query(0x1111, "youtube.com", 15); // MX for a blocked name
         byte[] resp = DnsPacketBuilder.buildNoDataResponse(q);
 
         assertEquals(12 + q.questionSection().length + OPT_LEN, resp.length);
         assertEquals(0x1111, u16(resp, 0));
         int flags = u16(resp, 2);
-        assertTrue((flags & 0x8000) != 0, "QR deve ser 1");
-        assertEquals(0, flags & 0x000F, "RCODE deve ser 0");
-        assertEquals(1, u16(resp, 4), "QDCOUNT deve ser 1");
-        assertEquals(0, u16(resp, 6), "ANCOUNT deve ser 0");
-        assertEquals(0, u16(resp, 8), "NSCOUNT deve ser 0");
+        assertTrue((flags & 0x8000) != 0, "QR should be 1");
+        assertEquals(0, flags & 0x000F, "RCODE should be 0");
+        assertEquals(1, u16(resp, 4), "QDCOUNT should be 1");
+        assertEquals(0, u16(resp, 6), "ANCOUNT should be 0");
+        assertEquals(0, u16(resp, 8), "NSCOUNT should be 0");
     }
 
     @Test
-    void buildResponseEscolheSinkholeOuNodata() throws Exception {
+    void buildResponseChoosesSinkholeOrNodata() throws Exception {
         DnsQuery a = query(0x2222, "tiktok.com", 1);
         assertEquals(1, u16(DnsPacketBuilder.buildResponse(a, DnsResolver.Decision.BLOCK), 6),
-                "BLOCK tem 1 answer (sinkhole)");
+                "BLOCK has 1 answer (sinkhole)");
         DnsQuery mx = query(0x2223, "tiktok.com", 15);
         assertEquals(0, u16(DnsPacketBuilder.buildResponse(mx, DnsResolver.Decision.BLOCK_NODATA), 6),
-                "BLOCK_NODATA tem 0 answer");
+                "BLOCK_NODATA has 0 answers");
         assertThrows(IllegalArgumentException.class,
                 () -> DnsPacketBuilder.buildResponse(a, DnsResolver.Decision.FORWARD));
     }
 
     @Test
-    void respostaDeBloqueioTemBitAA() throws Exception {
+    void blockResponseHasAaBit() throws Exception {
         DnsQuery q = query(0xBEEF, "www.tiktok.com", 1);
         byte[] resp = DnsPacketBuilder.buildBlockedResponse(q);
         int flags = u16(resp, 2);
-        assertTrue((flags & 0x0400) != 0, "AA deve ser 1: o servidor e a autoridade do nome bloqueado");
-        assertEquals(0x8580, flags, "flags devem ser QR|AA|RD|RA");
+        assertTrue((flags & 0x0400) != 0, "AA should be 1: the server is authoritative for the blocked name");
+        assertEquals(0x8580, flags, "flags should be QR|AA|RD|RA");
     }
 
     @Test
-    void respostaNodataTemBitAA() throws Exception {
+    void nodataResponseHasAaBit() throws Exception {
         DnsQuery q = query(0x1111, "youtube.com", 15);
         byte[] resp = DnsPacketBuilder.buildNoDataResponse(q);
-        assertTrue((u16(resp, 2) & 0x0400) != 0, "AA deve ser 1 no NODATA de nome bloqueado");
+        assertTrue((u16(resp, 2) & 0x0400) != 0, "AA should be 1 in NODATA for a blocked name");
     }
 
     @Test
-    void respostaDeErroNaoTemBitAA() throws Exception {
-        DnsQuery q = query(0x4321, "exemplo.com", 1);
+    void errorResponseHasNoAaBit() throws Exception {
+        DnsQuery q = query(0x4321, "example.com", 1);
         byte[] resp = DnsPacketBuilder.buildErrorResponse(q, 2);
         assertEquals(0, u16(resp, 2) & 0x0400,
-                "AA deve ser 0 no SERVFAIL: nao somos autoridade do nome");
+                "AA should be 0 in SERVFAIL: we are not authoritative for the name");
     }
 
     @Test
-    void questionSectionPublicoDevolveCopia() throws Exception {
+    void publicQuestionSectionReturnsCopy() throws Exception {
         DnsQuery q = query(0x1, "www.tiktok.com", 1);
-        byte[] primeira = q.questionSection();
-        byte[] segunda = q.questionSection();
-        assertNotSame(primeira, segunda, "o accessor publico deve devolver uma copia");
-        primeira[0] = 0x7F; // mexer na cópia não pode alterar a consulta
+        byte[] first = q.questionSection();
+        byte[] second = q.questionSection();
+        assertNotSame(first, second, "the public accessor should return a copy");
+        first[0] = 0x7F; // changing the copy must not change the query
         assertNotEquals(0x7F, q.questionSection()[0] & 0xFF);
     }
 
     @Test
-    void questionSectionInternoNaoClona() throws Exception {
+    void internalQuestionSectionDoesNotClone() throws Exception {
         DnsQuery q = query(0x2, "www.tiktok.com", 1);
         assertSame(q.questionSectionInternal(), q.questionSectionInternal(),
-                "o accessor interno nao deve clonar: a resposta usa o array direto");
+                "the internal accessor should not clone: the response uses the array directly");
     }
 
     @Test
-    void respostaIncluiOptMinimoDoEdns() throws Exception {
+    void responseIncludesMinimalEdnsOpt() throws Exception {
         DnsQuery q = query(0x7777, "youtube.com", 15);
         byte[] resp = DnsPacketBuilder.buildNoDataResponse(q);
 
-        assertEquals(1, u16(resp, 10), "ARCOUNT deve ser 1 (OPT do EDNS)");
+        assertEquals(1, u16(resp, 10), "ARCOUNT should be 1 (EDNS OPT)");
         int opt = resp.length - 11;
-        assertEquals(0x00, resp[opt] & 0xFF, "NAME do OPT deve ser a raiz");
-        assertEquals(41, u16(resp, opt + 1), "TYPE do OPT deve ser 41");
-        assertEquals(4096, u16(resp, opt + 3), "CLASS deve ser o payload size padrao");
-        assertEquals(0L, u32(resp, opt + 5), "TTL do OPT deve ser 0");
-        assertEquals(0, u16(resp, opt + 9), "RDLEN do OPT deve ser 0");
+        assertEquals(0x00, resp[opt] & 0xFF, "the OPT NAME should be the root");
+        assertEquals(41, u16(resp, opt + 1), "the OPT TYPE should be 41");
+        assertEquals(4096, u16(resp, opt + 3), "CLASS should be the default payload size");
+        assertEquals(0L, u32(resp, opt + 5), "the OPT TTL should be 0");
+        assertEquals(0, u16(resp, opt + 9), "the OPT RDLEN should be 0");
     }
 
     @Test
-    void respostaEchoaOPayloadSizeDoCliente() throws Exception {
+    void responseEchoesClientPayloadSize() throws Exception {
         byte[] raw = DnsPacketParserTest.queryBytesWithOpt(0x7778, "youtube.com", 15, 1232);
         DnsQuery q = DnsPacketParser.parse(raw, raw.length);
         assertEquals(1232, q.ednsPayloadSize());
 
         byte[] resp = DnsPacketBuilder.buildBlockedResponse(q);
         int opt = resp.length - 11;
-        assertEquals(1232, u16(resp, opt + 3), "CLASS do OPT deve ecoar o payload size do cliente");
+        assertEquals(1232, u16(resp, opt + 3), "the OPT CLASS should echo the client payload size");
     }
 
     @Test
-    void servfailSemAnswersERcode2() throws Exception {        DnsQuery q = query(0x4321, "exemplo.com", 1);
+    void servfailHasNoAnswersAndRcode2() throws Exception {
+        DnsQuery q = query(0x4321, "example.com", 1);
         byte[] resp = DnsPacketBuilder.buildErrorResponse(q, 2);
 
         assertEquals(12 + q.questionSection().length + OPT_LEN, resp.length);

@@ -15,23 +15,23 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * O jar do daemon é instalado numa cópia estável.
+ * The daemon jar is installed into a stable copy.
  *
- * <p>Sem isso, a unit aponta para o {@code target/} do build — que o
- * {@code mvn clean} apaga — e o systemd entra em loop de crash: o prazo dos
- * bloqueios para de ser cumprido, sem nenhuma mensagem que explique o motivo.
+ * <p>Without it, the unit points at the build's {@code target/} — which
+ * {@code mvn clean} deletes — and systemd enters a crash loop: block deadlines
+ * stop being honored, with no message explaining why.
  *
- * <p>A cópia vive num diretório do root: o daemon deixa de executar código de
- * um caminho que o usuário pode trocar.
+ * <p>The copy lives in a root-owned directory: the daemon stops executing code from
+ * a path the user can swap.
  */
 class JarInstallTest {
 
     @TempDir
     Path tmp;
 
-    private Path jarDeExemplo(String conteudo) throws IOException {
+    private Path exampleJar(String content) throws IOException {
         Path jar = tmp.resolve("siteblock-1.0.0.jar");
-        Files.writeString(jar, conteudo, StandardCharsets.UTF_8);
+        Files.writeString(jar, content, StandardCharsets.UTF_8);
         return jar;
     }
 
@@ -53,134 +53,134 @@ class JarInstallTest {
 
     @Test
     void installCopiesTheJarToTheStableLocation() throws Exception {
-        Path origem = jarDeExemplo("versao 1");
-        Path destino = AutostartInstaller.installJarPath(OsType.LINUX, tmp);
+        Path source = exampleJar("version 1");
+        Path destination = AutostartInstaller.installJarPath(OsType.LINUX, tmp);
 
-        AutostartInstaller.InstallResult r = AutostartInstaller.installJar(OsType.LINUX, tmp, origem);
+        AutostartInstaller.InstallResult r = AutostartInstaller.installJar(OsType.LINUX, tmp, source);
 
         assertTrue(r.success(), r.detail());
-        assertTrue(Files.exists(destino), "o jar tem que existir em " + destino);
-        assertEquals("versao 1", Files.readString(destino, StandardCharsets.UTF_8));
+        assertTrue(Files.exists(destination), "the jar must exist at " + destination);
+        assertEquals("version 1", Files.readString(destination, StandardCharsets.UTF_8));
     }
 
     @Test
     void installOverwritesAnOlderCopy() throws Exception {
-        Path origem = jarDeExemplo("versao 1");
-        AutostartInstaller.installJar(OsType.LINUX, tmp, origem);
+        Path source = exampleJar("version 1");
+        AutostartInstaller.installJar(OsType.LINUX, tmp, source);
 
-        Files.writeString(origem, "versao 2", StandardCharsets.UTF_8);
-        AutostartInstaller.installJar(OsType.LINUX, tmp, origem);
+        Files.writeString(source, "version 2", StandardCharsets.UTF_8);
+        AutostartInstaller.installJar(OsType.LINUX, tmp, source);
 
-        assertEquals("versao 2", Files.readString(
+        assertEquals("version 2", Files.readString(
                 AutostartInstaller.installJarPath(OsType.LINUX, tmp), StandardCharsets.UTF_8),
-                "reinstalar tem que atualizar a cópia — é assim que o daemon passa a rodar a "
-                        + "versão nova depois de um rebuild");
+                "reinstalling has to update the copy — that is how the daemon starts running the "
+                        + "new version after a rebuild");
     }
 
     @Test
     void installFailsClearlyWhenTheSourceIsMissing() {
-        Path origem = tmp.resolve("nao-existe.jar");
+        Path source = tmp.resolve("does-not-exist.jar");
 
         AutostartInstaller.InstallResult r =
-                AutostartInstaller.installJar(OsType.LINUX, tmp, origem);
+                AutostartInstaller.installJar(OsType.LINUX, tmp, source);
 
         assertFalse(r.success());
-        assertTrue(r.detail().contains("nao-existe.jar"), r.detail());
+        assertTrue(r.detail().contains("does-not-exist.jar"), r.detail());
     }
 
     @Test
     void installDoesNotCopyOntoItself() throws Exception {
-        Path destino = AutostartInstaller.installJarPath(OsType.LINUX, tmp);
-        Files.createDirectories(destino.getParent());
-        Files.writeString(destino, "original", StandardCharsets.UTF_8);
+        Path destination = AutostartInstaller.installJarPath(OsType.LINUX, tmp);
+        Files.createDirectories(destination.getParent());
+        Files.writeString(destination, "original", StandardCharsets.UTF_8);
 
         AutostartInstaller.InstallResult r =
-                AutostartInstaller.installJar(OsType.LINUX, tmp, destino);
+                AutostartInstaller.installJar(OsType.LINUX, tmp, destination);
 
         assertTrue(r.success(), r.detail());
-        assertEquals("original", Files.readString(destino, StandardCharsets.UTF_8),
-                "copiar o jar para cima de si mesmo o apagaria");
+        assertEquals("original", Files.readString(destination, StandardCharsets.UTF_8),
+                "copying the jar over itself would delete it");
     }
 
     @Test
     void theArtifactPointsAtTheInstalledCopyNotAtTheSource() throws Exception {
-        Path origem = jarDeExemplo("versao 1");
-        Path destino = AutostartInstaller.installJarPath(OsType.LINUX, tmp);
-        AutostartInstaller.installJar(OsType.LINUX, tmp, origem);
+        Path source = exampleJar("version 1");
+        Path destination = AutostartInstaller.installJarPath(OsType.LINUX, tmp);
+        AutostartInstaller.installJar(OsType.LINUX, tmp, source);
 
-        AutostartPaths caminhos = new AutostartPaths(
+        AutostartPaths paths = new AutostartPaths(
                 Path.of("/home/chico/.sitelock"), Path.of("/etc/hosts"),
-                "/usr/bin/java", destino.toString(), "/opt/classes", "chico", OsType.LINUX);
-        String unit = AutostartArtifact.systemdUnit(caminhos);
+                "/usr/bin/java", destination.toString(), "/opt/classes", "chico", OsType.LINUX);
+        String unit = AutostartArtifact.systemdUnit(paths);
 
-        assertTrue(unit.contains(destino.toString()), unit);
-        assertFalse(unit.contains(origem.toString()),
-                "a unit não pode apontar para o jar de origem — é o que o mvn clean apaga:\n" + unit);
+        assertTrue(unit.contains(destination.toString()), unit);
+        assertFalse(unit.contains(source.toString()),
+                "a unit cannot point at the source jar — that is what mvn clean deletes:\n" + unit);
     }
 
     @Test
     void theInstalledCopyIsNotNextToTheBuildOutput() {
-        Path origem = Path.of("/home/chico/Projects/SiteBlock/sitelock-app/target/siteblock-1.0.0.jar");
-        Path destino = AutostartInstaller.installJarPath(OsType.LINUX, Path.of("/"));
+        Path source = Path.of("/home/chico/Projects/SiteBlock/sitelock-app/target/siteblock-1.0.0.jar");
+        Path destination = AutostartInstaller.installJarPath(OsType.LINUX, Path.of("/"));
 
-        assertNotEquals(origem, destino);
-        assertFalse(destino.toString().contains("target"),
-                "o destino não pode estar dentro de target/: " + destino);
+        assertNotEquals(source, destination);
+        assertFalse(destination.toString().contains("target"),
+                "the destination must not be inside target/: " + destination);
     }
 
     @Test
     void installDirIsCreatedWithTheJarInsideIt() throws Exception {
-        Path origem = jarDeExemplo("versao 1");
+        Path source = exampleJar("version 1");
         Path dir = AutostartInstaller.installDir(OsType.LINUX, tmp);
 
         assertFalse(Files.exists(dir));
-        AutostartInstaller.installJar(OsType.LINUX, tmp, origem);
+        AutostartInstaller.installJar(OsType.LINUX, tmp, source);
 
         assertTrue(Files.isDirectory(dir));
         assertTrue(Files.exists(dir.resolve("siteblock.jar")));
     }
 
     @Test
-    void oResultadoSeparaOCaminhoDoJarDaMensagem() throws Exception {
-        Path origem = jarDeExemplo("versao 1");
+    void resultSeparatesTheJarPathFromTheMessage() throws Exception {
+        Path source = exampleJar("version 1");
 
         AutostartInstaller.InstallResult r =
-                AutostartInstaller.installJar(OsType.LINUX, tmp, origem);
+                AutostartInstaller.installJar(OsType.LINUX, tmp, source);
 
-        Path destino = AutostartInstaller.installJarPath(OsType.LINUX, tmp);
+        Path destination = AutostartInstaller.installJarPath(OsType.LINUX, tmp);
         assertTrue(r.success(), r.detail());
-        assertEquals(destino, r.path(),
-                "o caminho do jar vem separado da mensagem — misturados, a frase virava "
-                        + "caminho da unit");
-        assertTrue(r.detail().contains(destino.toString()), r.detail());
+        assertEquals(destination, r.path(),
+                "the jar path is separate from the message — mixed together, the sentence became "
+                        + "the unit's path");
+        assertTrue(r.detail().contains(destination.toString()), r.detail());
     }
 
     @Test
-    void oResultadoTemOCaminhoQuandoOJarJaEstaNoLugar() throws Exception {
-        // É o caso do enable rodado a partir do jar já instalado: o detail()
-        // era a frase "O jar já está no lugar: ..." e a unit passava a apontar
-        // para ela.
-        Path destino = AutostartInstaller.installJarPath(OsType.LINUX, tmp);
-        Files.createDirectories(destino.getParent());
-        Files.writeString(destino, "original", StandardCharsets.UTF_8);
+    void theResultHasThePathWhenTheJarIsAlreadyInPlace() throws Exception {
+        // It is the enable run from the already installed jar: the detail
+        // was the sentence "The jar is already in place: ..." and the unit started pointing
+        // at it.
+        Path destination = AutostartInstaller.installJarPath(OsType.LINUX, tmp);
+        Files.createDirectories(destination.getParent());
+        Files.writeString(destination, "original", StandardCharsets.UTF_8);
 
         AutostartInstaller.InstallResult r =
-                AutostartInstaller.installJar(OsType.LINUX, tmp, destino);
+                AutostartInstaller.installJar(OsType.LINUX, tmp, destination);
 
         assertTrue(r.success(), r.detail());
-        assertEquals(destino, r.path());
+        assertEquals(destination, r.path());
     }
 
     @Test
-    void oInstallEDoDisableTrazemOCaminhoDoArtefato() {
+    void installAndDisableReturnTheArtifactPath() {
         AutostartInstaller installer =
                 new AutostartInstaller(OsType.LINUX, tmp, c -> 0);
-        AutostartPaths caminhos = new AutostartPaths(
+        AutostartPaths paths = new AutostartPaths(
                 Path.of("/home/chico/.sitelock"), Path.of("/etc/hosts"),
                 "/usr/bin/java", "/opt/sitelock/siteblock.jar", "/opt/classes",
                 "chico", OsType.LINUX);
 
-        AutostartInstaller.InstallResult installed = installer.install(caminhos);
+        AutostartInstaller.InstallResult installed = installer.install(paths);
         assertTrue(installed.success(), installed.detail());
         assertEquals(installer.artifactPath(), installed.path());
 
@@ -191,12 +191,12 @@ class JarInstallTest {
 
     @Test
     void listOfFilesInInstallDirIsJustTheJar() throws Exception {
-        Path origem = jarDeExemplo("versao 1");
-        AutostartInstaller.installJar(OsType.LINUX, tmp, origem);
+        Path source = exampleJar("version 1");
+        AutostartInstaller.installJar(OsType.LINUX, tmp, source);
 
         try (var stream = Files.list(AutostartInstaller.installDir(OsType.LINUX, tmp))) {
-            List<String> nomes = stream.map(p -> p.getFileName().toString()).toList();
-            assertEquals(List.of("siteblock.jar"), nomes);
+            List<String> names = stream.map(p -> p.getFileName().toString()).toList();
+            assertEquals(List.of("siteblock.jar"), names);
         }
     }
 }

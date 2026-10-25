@@ -10,13 +10,13 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 
 /**
- * siteblock daemon stop — encerra o daemon.
+ * siteblock daemon stop — stops the daemon.
  *
- * <p>A varredura final é do filho, no shutdown hook: é ele que sabe o que
- * ainda está vencido. O pai só manda o sinal e espera.
+ * <p>The final sweep belongs to the child, not the shutdown hook: it is the one that knows what
+ * has already expired. The parent only sends the signal and waits.
  */
 @Command(name = "stop",
-        description = "Encerra o daemon de expiracao.",
+        description = "Stops the expiration daemon.",
         mixinStandardHelpOptions = true)
 public class DaemonStopCommand implements Callable<Integer> {
 
@@ -36,29 +36,29 @@ public class DaemonStopCommand implements Callable<Integer> {
         try {
             state = ExpirationDaemonState.read(stateDir);
         } catch (IOException e) {
-            System.err.println("Erro ao ler o estado do daemon: " + e.getMessage());
+            System.err.println("Error reading the daemon state: " + e.getMessage());
             return 1;
         }
         if (state.isEmpty() || !ExpirationDaemonState.isAlive(state.get())) {
-            System.err.println("Nenhum daemon rodando.");
+            System.err.println("No daemon is running.");
             return 1;
         }
 
         long pid = state.get().getPid();
         Optional<ProcessHandle> handle = ProcessHandle.of(pid);
         if (handle.isEmpty()) {
-            System.err.println("Nenhum daemon rodando (pid " + pid + " não existe).");
+            System.err.println("No daemon is running (pid " + pid + " does not exist).");
             return 1;
         }
 
         try {
-            encerrar(handle.get());
+            stopProcess(handle.get());
         } catch (SecurityException e) {
-            return semPermissaoParaEncerrar(pid);
+            return noPermissionToStop(pid);
         }
         for (int i = 0; i < 50; i++) {
             if (!handle.get().isAlive()) {
-                System.out.println("Daemon de expiração encerrado (pid " + pid + ").");
+                System.out.println("Expiration daemon stopped (pid " + pid + ").");
                 return 0;
             }
             try {
@@ -71,24 +71,24 @@ public class DaemonStopCommand implements Callable<Integer> {
         try {
             handle.get().destroyForcibly();
         } catch (SecurityException e) {
-            return semPermissaoParaEncerrar(pid);
+            return noPermissionToStop(pid);
         }
-        System.out.println("Daemon de expiração encerrado à força (pid " + pid
-                + "); não respondeu ao pedido de saída.");
+        System.out.println("Expiration daemon stopped by force (pid " + pid
+                + "); it did not respond to the exit request.");
         return 0;
     }
 
-    // POR QUE: o daemon roda como root e o comando roda como usuário: o SO recusa
-    // o sinal. Sem esta mensagem, o picocli imprime a pilha da exceção.
-    private int semPermissaoParaEncerrar(long pid) {
-        System.err.println("Erro: sem permissão para encerrar o pid " + pid
-                + " (daemon iniciado elevado?). " + CliSupport.elevationHint("daemon stop"));
+    // WHY: the daemon runs as root and the command runs as the user: the OS refuses
+    // the signal. Without this message, picocli prints the exception stack.
+    private int noPermissionToStop(long pid) {
+        System.err.println("Error: no permission to stop pid " + pid
+                + " (daemon started elevated?). " + CliSupport.elevationHint("daemon stop"));
         return 1;
     }
 
-    // POR QUE: separado do call para o teste poder simular a recusa do SO — a
-    // SecurityException de verdade só acontece com o daemon rodando como root.
-    void encerrar(ProcessHandle handle) {
+    // WHY: extracted from call so the test can simulate the OS refusal — the
+    // real SecurityException only happens with the daemon running as root.
+    void stopProcess(ProcessHandle handle) {
         handle.destroy();
     }
 }

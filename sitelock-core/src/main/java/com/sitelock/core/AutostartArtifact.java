@@ -4,19 +4,19 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Gera o texto do artefato de autostart de cada SO.
+ * Generates the autostart artifact text for each OS.
  *
- * <p>Puro: nenhum caminho é resolvido aqui dentro. Tudo chega já absoluto pelo
- * {@link AutostartPaths} — resolver no gerador seria resolver no momento
- * errado, que é o daemon rodando como root sem {@code SUDO_USER}.
+ * <p>Pure: no path is resolved in here. Everything arrives already absolute via
+ * {@link AutostartPaths} — resolving in the generator would resolve at the wrong
+ * moment, when the daemon runs as root without {@code SUDO_USER}.
  */
 public final class AutostartArtifact {
 
-    /** Nome da tarefa no Windows. */
+    /** Task name on Windows. */
     public static final String TASK_NAME = "sitelock-sweeper";
-    /** Label da LaunchDaemon no macOS. */
+    /** LaunchDaemon label on macOS. */
     public static final String LABEL = "com.sitelock.sweeper";
-    /** Nome da unit no Linux. */
+    /** Unit name on Linux. */
     public static final String UNIT_NAME = "sitelock-sweeper.service";
 
     private static final int DEFAULT_INTERVAL_SECONDS = 60;
@@ -25,15 +25,15 @@ public final class AutostartArtifact {
     }
 
     /**
-     * O comando do daemon, como tokens.
+     * The daemon command, as tokens.
      *
-     * <p>Compartilhado pelos três artefatos — é a lista que vira o ExecStart, o
-     * ProgramArguments ou o {@code /tr}. Manter uma só fonte é o que impede o
-     * caso em que o macOS recebe o caminho certo e o Linux recebe o errado.
+     * <p>Shared by the three artifacts — it is the list that becomes the ExecStart, the
+     * ProgramArguments or the {@code /tr}. Having a single source prevents the case
+     * where macOS gets the right path and Linux gets the wrong one.
      *
-     * <p>A forma da linha é montada por {@link DaemonCommandLine}, que é também
-     * o que o fork do {@code daemon start} usa: a unit e o fork precisam
-     * Produzir a <b>mesma</b> invocação, senão um caminho sobe e o outro não.
+     * <p>The shape of the line is assembled by {@link DaemonCommandLine}, which is also
+     * what the {@code daemon start} fork uses: the unit and the fork need to
+     * produce the <b>same</b> invocation, otherwise one works and the other does not.
      */
     public static List<String> commandLine(AutostartPaths p) {
         List<String> properties = new ArrayList<>();
@@ -47,25 +47,25 @@ public final class AutostartArtifact {
                         String.valueOf(DEFAULT_INTERVAL_SECONDS)));
     }
 
-    /** Unit do systemd, para {@code /etc/systemd/system/sitelock-sweeper.service}. */
+    /** systemd unit, for {@code /etc/systemd/system/sitelock-sweeper.service}. */
     public static String systemdUnit(AutostartPaths p) {
         StringBuilder sb = new StringBuilder();
         sb.append("[Unit]\n");
-        sb.append("Description=SiteBlock: libera sozinho os bloqueios expirados\n");
+        sb.append("Description=SiteBlock: releases expired blocks on its own\n");
         sb.append("Documentation=https://github.com/Campeol-G/SiteBlock\n");
         sb.append("\n[Service]\n");
         sb.append("Type=simple\n");
         sb.append("ExecStart=").append(execStart(p)).append('\n');
         sb.append("Restart=always\n");
         sb.append("RestartSec=5\n");
-        // Unit de sistema de propósito: sem User=, porque sem elevação o daemon
-        // não consegue tirar nada do hosts — que é a única coisa que ele faz.
+        // A system unit on purpose: no User=, because without elevation the daemon
+        // cannot remove anything from the hosts file — which is all it does.
         sb.append("\n[Install]\n");
         sb.append("WantedBy=multi-user.target\n");
         return sb.toString();
     }
 
-    /** Plist da LaunchDaemon, para {@code /Library/LaunchDaemons}. */
+    /** LaunchDaemon plist, for {@code /Library/LaunchDaemons}. */
     public static String launchdPlist(AutostartPaths p) {
         StringBuilder sb = new StringBuilder();
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
@@ -85,21 +85,21 @@ public final class AutostartArtifact {
     }
 
     /**
-     * Comando {@code schtasks} que instala a tarefa.
+     * The {@code schtasks} command that installs the task.
      *
-     * <p>Dispara em <b>ONLOGON</b>, não em ONSTART: {@code /ru SYSTEM} trocaria
-     * a identidade do processo, e todo arquivo do diretório de estado nasceria
-     * do SYSTEM.
+     * <p>Triggers on <b>ONLOGON</b>, not ONSTART: {@code /ru SYSTEM} would change
+     * the process identity, and every file in the state directory would end up
+     * owned by SYSTEM.
      *
-     * <p>{@code ONLOGON} com {@code HIGHEST} dá o root que o daemon precisa sem
-     * esse custo. Perde-se só o caso "ligada, ninguém logado" — e sem sessão não
-     * há navegador para estar bloqueado.
+     * <p>{@code ONLOGON} with {@code HIGHEST} gives the root the daemon needs without
+     * that cost. The only case lost is "enabled, nobody logged in" — and without a session there
+     * is no browser to be blocked.
      */
     public static String schtasksCommand(AutostartPaths p) {
         return String.join(" ", schtasksArgs(p));
     }
 
-    /** O mesmo comando em lista de tokens, para o instalador executar direto. */
+    /** The same command as a token list, for the installer to run directly. */
     public static List<String> schtasksArgs(AutostartPaths p) {
         List<String> args = new ArrayList<>();
         args.add("schtasks");
@@ -112,20 +112,20 @@ public final class AutostartArtifact {
         args.add(TASK_NAME);
         args.add("/tr");
         args.add(quotedTaskCommand(p));
-        // /f sobrescreve a tarefa existente; sem ele, um segundo `daemon enable`
-        // falha porque a tarefa já existe.
+        // /f overwrites the existing task; without it, a second `daemon enable`
+        // fails because the task already exists.
         args.add("/f");
         return args;
     }
 
-    /** Comando do Windows para remover a tarefa. */
+    /** Windows command to remove the task. */
     public static List<String> schtasksDeleteArgs() {
         return List.of("schtasks", "/delete", "/tn", TASK_NAME, "/f");
     }
 
     private static String quotedTaskCommand(AutostartPaths p) {
-        // O /tr é um único argumento: aspas por fora, e aspas internas
-        // duplicadas — é a regra do cmd.exe, não a do shell Unix.
+        // The /tr is a single argument: quotes on the outside, and doubled
+        // quotes inside — that is cmd.exe's rule, not the Unix shell's.
         StringBuilder sb = new StringBuilder("\"");
         for (String arg : commandLine(p)) {
             sb.append(arg.contains(" ") ? "\\\"\"" + arg + "\\\"\" " : arg).append(' ');
@@ -140,7 +140,7 @@ public final class AutostartArtifact {
             if (sb.length() > 0) {
                 sb.append(' ');
             }
-            // O systemd não faz split de shell: o espaço quebraria a diretiva.
+            // systemd does not do shell splitting: the space would break the directive.
             sb.append(arg.contains(" ") ? "\"" + arg + "\"" : arg);
         }
         return sb.toString();

@@ -19,16 +19,16 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * profile apply — merge em memória, um save, um blockAll, rollback se o hosts
- * falhar. O caminho por domínio morria no meio de um perfil de 40 domínios e
- * deixava estado parcial; o lote existe para que o comando seja tudo ou nada.
+ * profile apply — merge in memory, one save, one blockAll, rollback if the hosts
+ * file fails. The per-domain path died halfway through a 40-domain profile and
+ * left partial state; the batch exists so the command is all or nothing.
  */
 class ProfileApplyTest {
 
     @TempDir
     Path tmp;
 
-    // Criar uma vez: reescrever apagaria os bloqueios que o teste acabou de fazer.
+    // Create once: rewriting would erase the blocks the test just made.
     private Path hosts() throws Exception {
         if (hosts == null) {
             hosts = tmp.resolve("hosts");
@@ -47,12 +47,12 @@ class ProfileApplyTest {
         assertEquals(0, new BlockCommand(List.of(domains), "4h", hosts().toString(), state()).call());
     }
 
-    private int save(String nome) throws Exception {
-        return new ProfileSaveCommand(nome, false, hosts().toString(), state()).call();
+    private int save(String name) throws Exception {
+        return new ProfileSaveCommand(name, false, hosts().toString(), state()).call();
     }
 
-    private int apply(String nome) throws Exception {
-        return new ProfileApplyCommand(nome, hosts().toString(), state(), null).call();
+    private int apply(String name) throws Exception {
+        return new ProfileApplyCommand(name, hosts().toString(), state(), null).call();
     }
 
     private String hostsContent() throws Exception {
@@ -63,25 +63,25 @@ class ProfileApplyTest {
         return Files.readString(Path.of(state()), StandardCharsets.UTF_8);
     }
 
-    // Lê o expiresAt de um domínio direto do JSON, sem passar pela CLI.
+    // Reads a domain's expiresAt straight from the JSON, without going through the CLI.
     private Instant expiresAt(String domain) throws Exception {
         String json = blocksJson();
-        int dominio = json.indexOf("\"" + domain + "\"");
-        assertTrue(dominio >= 0, "domínio ausente do estado: " + json);
-        int chave = json.indexOf("\"expiresAt\"", dominio);
-        assertTrue(chave > 0, "expiresAt ausente: " + json);
-        int doisPontos = json.indexOf(':', chave);
-        int fim = json.indexOf('\n', doisPontos);
-        String valor = json.substring(doisPontos + 1, fim < 0 ? json.length() : fim)
+        int domainIndex = json.indexOf("\"" + domain + "\"");
+        assertTrue(domainIndex >= 0, "domain missing from the state: " + json);
+        int expiresKey = json.indexOf("\"expiresAt\"", domainIndex);
+        assertTrue(expiresKey > 0, "expiresAt missing: " + json);
+        int colon = json.indexOf(':', expiresKey);
+        int end = json.indexOf('\n', colon);
+        String value = json.substring(colon + 1, end < 0 ? json.length() : end)
                 .trim().replace(",", "").replace("\"", "").trim();
-        return Instant.parse(valor);
+        return Instant.parse(value);
     }
 
     @Test
     void applyBlocksEveryDomainOfTheProfile() throws Exception {
         block("tiktok.com", "youtube.com");
-        assertEquals(0, save("trabalho"));
-        assertEquals(0, apply("trabalho"));
+        assertEquals(0, save("work"));
+        assertEquals(0, apply("work"));
 
         String h = hostsContent();
         assertTrue(h.contains("127.0.0.1 tiktok.com"), h);
@@ -92,78 +92,78 @@ class ProfileApplyTest {
     @Test
     void applyIsIdempotent() throws Exception {
         block("tiktok.com", "youtube.com");
-        assertEquals(0, save("trabalho"));
-        assertEquals(0, apply("trabalho"));
-        String antes = hostsContent();
+        assertEquals(0, save("work"));
+        assertEquals(0, apply("work"));
+        String before = hostsContent();
 
-        String saida = capture(() -> apply("trabalho"));
+        String output = capture(() -> apply("work"));
 
-        assertEquals(antes, hostsContent(), "o segundo apply não pode tocar no hosts");
-        assertFalse(saida.contains("(novo)"), "nada pode ser criado de novo: " + saida);
+        assertEquals(before, hostsContent(), "the second apply must not touch the hosts file");
+        assertFalse(output.contains("(new)"), "nothing may be created again: " + output);
     }
 
     @Test
     void applyRestoresHostsWhenEveryDecisionIsKept() throws Exception {
         block("tiktok.com");
-        assertEquals(0, save("trabalho"));
-        assertEquals(0, apply("trabalho"));
+        assertEquals(0, save("work"));
+        assertEquals(0, apply("work"));
 
-        // Simula um apply anterior que gravou o estado e morreu antes do hosts.
-        String semLinha = HostsFileManager.removeDomain(hostsContent(), "tiktok.com");
-        Files.writeString(hosts(), semLinha, StandardCharsets.UTF_8);
+        // Simulates a previous apply that saved the state and died before the hosts file.
+        String withoutLine = HostsFileManager.removeDomain(hostsContent(), "tiktok.com");
+        Files.writeString(hosts(), withoutLine, StandardCharsets.UTF_8);
         assertFalse(hostsContent().contains("127.0.0.1 tiktok.com"), hostsContent());
 
-        assertEquals(0, apply("trabalho"));
+        assertEquals(0, apply("work"));
 
-        String depois = hostsContent();
-        assertTrue(depois.contains("127.0.0.1 tiktok.com"),
-                "KEPT também precisa reparar o hosts: " + depois);
-        assertTrue(depois.contains("::1 tiktok.com"), depois);
+        String after = hostsContent();
+        assertTrue(after.contains("127.0.0.1 tiktok.com"),
+                "KEPT also needs to repair the hosts file: " + after);
+        assertTrue(after.contains("::1 tiktok.com"), after);
     }
 
     @Test
     void applyNeverShortens() throws Exception {
         assertEquals(0, new BlockCommand(List.of("tiktok.com"), "10h", hosts().toString(), state()).call());
-        assertEquals(0, save("curto"));
-        Instant antes = expiresAt("tiktok.com");
+        assertEquals(0, save("short"));
+        Instant before = expiresAt("tiktok.com");
 
-        assertEquals(0, apply("curto"));
-        Instant depois = expiresAt("tiktok.com");
+        assertEquals(0, apply("short"));
+        Instant after = expiresAt("tiktok.com");
 
-        // Não pode encurtar. Pode até esticar um pouquinho: o perfil guarda o que
-        // restava no momento do save, e os milissegundos entre o save e o apply
-        // fazem o prazo andar para frente. A regra é max(), não "igual".
-        assertFalse(depois.isBefore(antes),
-                "perfil mais fraco não pode encurtar prazo mais forte: " + antes + " -> " + depois);
+        // It must not shorten. It may even stretch a little: the profile stores what
+        // was left at save time, and the milliseconds between save and apply push
+        // the deadline forward. The rule is max(), not "equal".
+        assertFalse(after.isBefore(before),
+                "a weaker profile must not shorten a stronger deadline: " + before + " -> " + after);
     }
 
     @Test
     void applyRaisesShortBlock() throws Exception {
-        // A receita oferece 4h; o estado em que ela vai cair tem só 30min.
-        // É a linha da tabela "temporário, restam 30min | 8h | RAISED".
+        // The recipe offers 4h; the state it lands in has only 30min left.
+        // This is the "temporary, 30min left | 8h | RAISED" table row.
         assertEquals(0, new BlockCommand(List.of("tiktok.com"), "4h", hosts().toString(), state()).call());
-        assertEquals(0, save("longo"));
+        assertEquals(0, save("long"));
         assertEquals(0, new BlockCommand(List.of("tiktok.com"), "30m", hosts().toString(), state()).call());
-        Instant antes = expiresAt("tiktok.com");
+        Instant before = expiresAt("tiktok.com");
 
-        assertEquals(0, apply("longo"));
+        assertEquals(0, apply("long"));
 
-        Instant depois = expiresAt("tiktok.com");
-        assertTrue(depois.isAfter(antes.plusSeconds(3 * 3600)),
-                "30min tem que virar as ~4h do perfil: " + antes + " -> " + depois);
+        Instant after = expiresAt("tiktok.com");
+        assertTrue(after.isAfter(before.plusSeconds(3 * 3600)),
+                "30min must become the profile's ~4h: " + before + " -> " + after);
     }
 
     @Test
     void rollbackWhenBlockAllFails() throws Exception {
-        // A receita precisa oferecer MAIS que o estado atual, senão a decisão é
-        // KEPT e o blockAll nem é chamado — e não há rollback para provar. É o
-        // mesmo cenário de applyRaisesShortBlock: salva com 4h, encolhe para 30m.
+        // The recipe must offer MORE than the current state, otherwise the decision is
+        // KEPT and blockAll is never called — and there is no rollback to prove. It is the
+        // same scenario as applyRaisesShortBlock: save with 4h, shrink to 30m.
         assertEquals(0, new BlockCommand(List.of("tiktok.com"), "4h", hosts().toString(), state()).call());
-        assertEquals(0, save("trabalho"));
+        assertEquals(0, save("work"));
         assertEquals(0, new BlockCommand(List.of("tiktok.com"), "30m", hosts().toString(), state()).call());
-        String antes = blocksJson();
+        String before = blocksJson();
 
-        SiteBlocker falho = new SiteBlocker() {
+        SiteBlocker failingBlocker = new SiteBlocker() {
             @Override
             public void block(String domain) {
             }
@@ -174,7 +174,7 @@ class ProfileApplyTest {
 
             @Override
             public void blockAll(List<String> domains) throws IOException {
-                throw new IOException("hosts somente leitura");
+                throw new IOException("hosts file is read-only");
             }
 
             @Override
@@ -182,57 +182,57 @@ class ProfileApplyTest {
             }
         };
 
-        int exit = new ProfileApplyCommand("trabalho", hosts().toString(), state(), falho).call();
+        int exit = new ProfileApplyCommand("work", hosts().toString(), state(), failingBlocker).call();
 
         assertEquals(1, exit);
-        assertEquals(antes, blocksJson(),
-                "se o hosts não aceitou, o estado tem que voltar — senão o JSON diz bloqueado e o hosts não tem a linha");
+        assertEquals(before, blocksJson(),
+                "if the hosts file refused, the state must return — otherwise the JSON says blocked and the hosts file lacks the line");
     }
 
     /**
-     * O aviso de daemon ausente depende do ESTADO FINAL, não da mudança.
+     * The missing-daemon warning depends on the FINAL STATE, not on the change.
      *
-     * <p>Com a receita mais fraca que o estado, o merge dá KEPT — nada mudou.
-     * Mas o bloqueio com prazo continua valendo, e sem daemon ele só vence
-     * quando alguém rodar outro comando. Quem digitou o prazo precisa saber
-     * disso, e o aviso escondido faz a pessoa acreditar que o prazo se cumpre
-     * sozinho.
+     * <p>With a recipe weaker than the state, the merge returns KEPT — nothing
+     * changed. But the time-bound block is still active, and without a daemon it
+     * only expires when someone runs another command. Whoever typed the deadline
+     * needs to know that, and a hidden warning makes the person believe the
+     * deadline enforces itself.
      */
     @Test
-    void applyAvisaQuandoOTemporarioAtivoJaEstavaNoEstado() throws Exception {
+    void applyWarnsWhenTheTemporaryBlockWasAlreadyInTheState() throws Exception {
         assertEquals(0, new BlockCommand(List.of("tiktok.com"), "1h",
                 hosts().toString(), state()).call());
-        assertEquals(0, save("trabalho"));
-        // O estado passa a ser mais forte que a receita: o merge vai dar KEPT.
+        assertEquals(0, save("work"));
+        // The state becomes stronger than the recipe: the merge will return KEPT.
         assertEquals(0, new BlockCommand(List.of("tiktok.com"), "10h",
                 hosts().toString(), state()).call());
 
-        String saida = capture(() -> apply("trabalho"));
+        String output = capture(() -> apply("work"));
 
-        assertTrue(saida.contains("AVISO:"),
-                "temporário ativo sem daemon tem que avisar, mesmo sem mudança: " + saida);
-        assertTrue(saida.contains("daemon enable"), saida);
+        assertTrue(output.contains("WARNING:"),
+                "an active temporary block without a daemon must warn, even with no change: " + output);
+        assertTrue(output.contains("daemon enable"), output);
     }
 
     @Test
     void applyUnknownProfileFails() throws Exception {
-        assertEquals(1, apply("nao-existe"));
+        assertEquals(1, apply("missing"));
     }
 
     @Test
-    void applyGravaOJsonOrdenado() throws Exception {
-        block("alfa.com", "beta.com", "mike.com", "zeta.com");
-        assertEquals(0, save("trabalho"));
+    void applyWritesSortedJson() throws Exception {
+        block("alpha.com", "beta.com", "mike.com", "zeta.com");
+        assertEquals(0, save("work"));
 
-        assertEquals(0, apply("trabalho"));
+        assertEquals(0, apply("work"));
 
         String json = blocksJson();
-        int alfa = json.indexOf("alfa.com");
+        int alpha = json.indexOf("alpha.com");
         int beta = json.indexOf("beta.com");
         int mike = json.indexOf("mike.com");
         int zeta = json.indexOf("zeta.com");
-        assertTrue(alfa >= 0 && alfa < beta && beta < mike && mike < zeta,
-                "o JSON tem que sair sempre ordenado: " + json);
+        assertTrue(alpha >= 0 && alpha < beta && beta < mike && mike < zeta,
+                "the JSON must always come out sorted: " + json);
     }
 
     @FunctionalInterface

@@ -19,17 +19,17 @@ import java.util.concurrent.TimeoutException;
 /**
  * siteblock dns stop [--force].
  *
- * <p>Encerra o daemon (SIGTERM → shutdown hook fecha socket e pool de forma controlada).
- * Com {@code --for} ainda no prazo, a parada antecipada segue a regra do {@code unblock}:
- * sem {@code --force} nada muda (saída 3); com {@code --force}, confirmação digitada.
+ * <p>Stops the daemon (SIGTERM → the shutdown hook closes the socket and pool in a controlled way).
+ * With {@code --for} still within its deadline, an early stop follows the {@code unblock} rule:
+ * without {@code --force} nothing changes (exit 3); with {@code --force}, a typed confirmation.
  */
 @Command(name = "stop",
-        description = "Encerra o servidor DNS local.",
+        description = "Stops the local DNS server.",
         mixinStandardHelpOptions = true)
 public class DnsStopCommand implements Callable<Integer> {
 
     @Option(names = {"--force", "-f"},
-            description = "Permite parada antecipada de servidor temporário (pede confirmação digitada).")
+            description = "Allows an early stop of a temporary server (asks for a typed confirmation).")
     boolean force;
 
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
@@ -49,11 +49,11 @@ public class DnsStopCommand implements Callable<Integer> {
         try {
             existing = DnsDaemonState.read(stateDir);
         } catch (IOException e) {
-            System.err.println("Erro ao ler estado do daemon: " + e.getMessage());
+            System.err.println("Error reading the daemon state: " + e.getMessage());
             return 1;
         }
         if (existing.isEmpty()) {
-            System.out.println("Servidor DNS não está em execução.");
+            System.out.println("The DNS server is not running.");
             return 0;
         }
         DnsDaemonState state = existing.get();
@@ -62,31 +62,31 @@ public class DnsStopCommand implements Callable<Integer> {
                 DnsDaemonState.delete(stateDir);
             } catch (IOException ignored) {
             }
-            System.out.println("Servidor DNS não está em execução (restava estado obsoleto do pid "
-                    + state.getPid() + ", já limpo).");
+            System.out.println("The DNS server was not running (stale state for pid "
+                    + state.getPid() + " was still there, cleared).");
             return 0;
         }
 
         Instant now = Instant.now(Clock.systemUTC());
         if (state.isTemporaryAndActive(now) && !force) {
             Duration remaining = Duration.between(now, state.getExpiresAt());
-            System.err.println("Parada RECUSADA: o servidor DNS é temporário (restam "
-                    + DurationParser.formatRemaining(remaining) + ").");
-            System.err.println("Para encerrar antecipadamente, rode de novo com --force "
-                    + "(será pedida confirmação digitada). Nada foi alterado.");
+            System.err.println("Stop REFUSED: the DNS server is temporary ("
+                    + DurationParser.formatRemaining(remaining) + " left).");
+            System.err.println("To stop it early, run again with --force "
+                    + "(a typed confirmation will be requested). Nothing was changed.");
             return 3;
         }
         if (state.isTemporaryAndActive(now)) {
             Duration remaining = Duration.between(now, state.getExpiresAt());
-            System.out.println("!!! AVISO FORTE !!!");
-            System.out.println("Você está prestes a ENCERRAR ANTECIPADAMENTE o servidor DNS,");
-            System.out.println("que ainda rodaria por " + DurationParser.formatRemaining(remaining) + ".");
-            System.out.println("Dispositivos com DNS apontado para cá podem ficar sem proteção.");
-            System.out.print("Para confirmar, digite SIM e pressione Enter (qualquer outra coisa cancela): ");
+            System.out.println("!!! STRONG WARNING !!!");
+            System.out.println("You are about to STOP THE DNS SERVER EARLY,");
+            System.out.println("which would otherwise keep running for " + DurationParser.formatRemaining(remaining) + ".");
+            System.out.println("Devices with DNS pointed here may lose protection.");
+            System.out.print("To confirm, type YES and press Enter (anything else cancels): ");
             System.out.flush();
             String answer = CliSupport.readLine();
-            if (answer == null || !answer.trim().equalsIgnoreCase("SIM")) {
-                System.out.println("Parada antecipada CANCELADA. Servidor continua rodando.");
+            if (answer == null || !answer.trim().equalsIgnoreCase("YES")) {
+                System.out.println("Early stop CANCELLED. The server keeps running.");
                 return 3;
             }
         }
@@ -97,22 +97,22 @@ public class DnsStopCommand implements Callable<Integer> {
                 DnsDaemonState.delete(stateDir);
             } catch (IOException ignored) {
             }
-            System.out.println("Servidor DNS já havia encerrado (pid " + state.getPid() + "). Estado limpo.");
+            System.out.println("The DNS server had already stopped (pid " + state.getPid() + "). State cleared.");
             return 0;
         }
         try {
-            handle.get().destroy(); // SIGTERM: o hook no daemon fecha tudo com controle.
+            handle.get().destroy(); // SIGTERM: the daemon's hook closes everything in a controlled way.
             try {
                 handle.get().onExit().get(5, TimeUnit.SECONDS);
             } catch (TimeoutException e) {
                 handle.get().destroyForcibly();
             } catch (Exception e) {
-                System.err.println("Erro ao aguardar o encerramento: " + e.getMessage());
+                System.err.println("Error waiting for shutdown: " + e.getMessage());
                 return 1;
             }
         } catch (SecurityException e) {
-            System.err.println("Erro: sem permissão para encerrar o pid " + state.getPid()
-                    + " (daemon iniciado elevado?). "
+            System.err.println("Error: no permission to stop pid " + state.getPid()
+                    + " (daemon started elevated?). "
                     + new PermissionAdvisor().elevationHint(
                             com.sitelock.core.SiteLockPaths.getHostsPath(),
                             "dns stop" + (force ? " --force" : "")));
@@ -122,9 +122,9 @@ public class DnsStopCommand implements Callable<Integer> {
             DnsDaemonState.delete(stateDir);
         } catch (IOException ignored) {
         }
-        System.out.println("Servidor DNS encerrado (pid " + state.getPid() + ").");
-        System.out.println("Lembrete: volte o DNS dos dispositivos para automático/DHCP, "
-                + "senão eles continuam sem resolver nada.");
+        System.out.println("DNS server stopped (pid " + state.getPid() + ").");
+        System.out.println("Reminder: set the devices' DNS back to automatic/DHCP, "
+                + "otherwise they keep resolving nothing.");
         return 0;
     }
 }

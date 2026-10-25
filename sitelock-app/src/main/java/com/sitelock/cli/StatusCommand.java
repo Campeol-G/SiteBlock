@@ -20,9 +20,9 @@ import java.util.TreeSet;
 import java.util.concurrent.Callable;
 
 /**
- * siteblock status — lista bloqueios. Limpa expirados só se puder escrever no hosts.
+ * siteblock status — lists blocks. Cleans expired ones only if it can write the hosts file.
  */
-@Command(name = "status", description = "Lista dominios bloqueados e tempo restante.",
+@Command(name = "status", description = "Lists blocked domains and the time remaining.",
         mixinStandardHelpOptions = true)
 public class StatusCommand implements Callable<Integer> {
 
@@ -47,7 +47,7 @@ public class StatusCommand implements Callable<Integer> {
                 BlockService.SweepResult sweep = service.sweepExpired();
                 state = sweep.state();
                 if (!sweep.removed().isEmpty()) {
-                    System.out.println("Limpeza: bloqueios expirados removidos: "
+                    System.out.println("Cleanup: expired blocks removed: "
                             + String.join(", ", sweep.removed()));
                 }
             } else {
@@ -56,25 +56,25 @@ public class StatusCommand implements Callable<Integer> {
                         .filter(e -> e.isExpired(Instant.now(service.getClock())))
                         .count();
                 if (pending > 0) {
-                    System.out.println("Aviso: há " + pending + " bloqueio(s) expirado(s) pendentes de limpeza.");
+                    System.out.println("Warning: there are " + pending + " expired block(s) pending cleanup.");
                     System.out.println(CliSupport.elevationHint("status")
-                            + " para concluir a limpeza no hosts.");
+                            + " to finish the cleanup in the hosts file.");
                 }
             }
         } catch (CorruptedStateException e) {
-            System.err.println("Erro: estado corrompido (" + e.getMessage() + ").");
-            System.err.println("Nada foi alterado. Para recriar do zero, apague o arquivo manualmente ou rode: siteblock reset --yes");
+            System.err.println("Error: corrupted state (" + e.getMessage() + ").");
+            System.err.println("Nothing was changed. To recreate from scratch, delete the file manually or run: siteblock reset --yes");
             return 1;
         } catch (IOException e) {
-            System.err.println("Erro ao ler estado: " + e.getMessage());
+            System.err.println("Error reading state: " + e.getMessage());
             return 1;
         }
 
         Instant now = Instant.now(service.getClock());
 
         if (state.isEmpty()) {
-            System.out.println("Nenhum domínio bloqueado.");
-            conferirDivergencia(service, state, now);
+            System.out.println("No domains blocked.");
+            checkDivergence(service, state, now);
             return 0;
         }
 
@@ -82,114 +82,114 @@ public class StatusCommand implements Callable<Integer> {
         for (BlockEntry e : state.values()) {
             String remaining;
             if (e.getExpiresAt() == null) {
-                remaining = "permanente";
+                remaining = "permanent";
             } else if (!now.isBefore(e.getExpiresAt())) {
-                remaining = "expirado (pendente limpeza)";
+                remaining = "expired (pending cleanup)";
             } else {
                 remaining = DurationParser.formatRemaining(Duration.between(now, e.getExpiresAt()));
             }
             lines.add(e.getDomain() + " — " + remaining);
         }
-        System.out.println("Domínios bloqueados (" + lines.size() + "):");
+        System.out.println("Blocked domains (" + lines.size() + "):");
         lines.forEach(l -> System.out.println("  " + l));
 
-        conferirDivergencia(service, state, now);
+        checkDivergence(service, state, now);
 
-        // Só fala quando há temporário ativo: bloqueio permanente não tem prazo
-        // para vencer, então não há o que avisar.
-        boolean temAtivo = state.values().stream().anyMatch(e -> e.isTemporaryAndActive(now));
-        if (temAtivo && !CliSupport.temDaemonVivo(stateFileOverride)) {
-            System.out.println("Há bloqueio com prazo e nenhum daemon rodando: o prazo só será "
-                    + "aplicado quando você rodar outro comando do siteblock.");
+        // Only speaks when there is an active temporary block: a permanent block has no deadline
+        // to expire, so there is nothing to warn about.
+        boolean hasActive = state.values().stream().anyMatch(e -> e.isTemporaryAndActive(now));
+        if (hasActive && !CliSupport.isDaemonAlive(stateFileOverride)) {
+            System.out.println("There is a block with a deadline and no daemon running: the deadline will only be "
+                    + "honored when you run another siteblock command.");
             System.out.println(CliSupport.elevatedCommand("daemon enable")
-                    + " para ele vencer sozinho.");
+                    + " to make it expire on its own.");
         }
         return 0;
     }
 
-    // POR QUE: os dois podem discordar, e cada desfecho é ruim de um jeito diferente.
-    // Estado sem linha no hosts: o site está livre e o status diz que está bloqueado.
-    // Linha no hosts sem registro: preso para sempre, porque o sweep varre o JSON.
-    private void conferirDivergencia(BlockService service, Map<String, BlockEntry> state, Instant now) {
-        final String conteudo;
+    // WHY: the two can disagree, and each outcome is bad in a different way.
+    // State without a line in the hosts file: the site is free and status says it is blocked.
+    // Line in the hosts file without a record: stuck forever, because the sweep walks the JSON.
+    private void checkDivergence(BlockService service, Map<String, BlockEntry> state, Instant now) {
+        final String content;
         try {
-            conteudo = service.readHostsContent();
+            content = service.readHostsContent();
         } catch (IOException e) {
-            // O status roda sem elevação: ler o hosts pode falhar por
-            // permissão. Não é erro — é falta de conferência.
-            System.out.println("Aviso: não consegui ler o hosts (" + service.getHostsPath()
-                    + ") para conferir a divergência: " + e.getMessage());
+            // Status runs without elevation: reading the hosts file can fail on
+            // permission. It is not an error — it is a missing cross-check.
+            System.out.println("Warning: could not read the hosts file (" + service.getHostsPath()
+                    + ") to check for divergence: " + e.getMessage());
             return;
         }
 
-        Set<String> semEfeito = new TreeSet<>();
-        Set<String> noEstado = new TreeSet<>();
+        Set<String> ineffective = new TreeSet<>();
+        Set<String> inState = new TreeSet<>();
         for (BlockEntry e : state.values()) {
-            noEstado.add(baseDe(e.getDomain()));
+            inState.add(baseDomain(e.getDomain()));
             if (e.isExpired(now)) {
-                // Expirado não está ativo: a limpeza pendente é assunto do sweep.
+                // An expired entry is not active: the pending cleanup is the sweep's job.
                 continue;
             }
-            if (!temLinhaGerenciada(conteudo, e.getDomain())) {
-                semEfeito.add(e.getDomain());
+            if (!hasManagedLine(content, e.getDomain())) {
+                ineffective.add(e.getDomain());
             }
         }
 
-        Set<String> presoSemRegistro = new TreeSet<>();
-        for (String dominio : dominiosNoBloco(conteudo)) {
-            if (!noEstado.contains(dominio)) {
-                presoSemRegistro.add(dominio);
+        Set<String> stuckWithoutRecord = new TreeSet<>();
+        for (String domain : blockedDomains(content)) {
+            if (!inState.contains(domain)) {
+                stuckWithoutRecord.add(domain);
             }
         }
 
-        if (semEfeito.isEmpty() && presoSemRegistro.isEmpty()) {
+        if (ineffective.isEmpty() && stuckWithoutRecord.isEmpty()) {
             return;
         }
-        System.out.println("Divergência entre o estado e o hosts ("
-                + (semEfeito.size() + presoSemRegistro.size()) + "):");
-        for (String dominio : semEfeito) {
-            System.out.println("  " + dominio
-                    + " — sem efeito: o estado diz bloqueado, mas o hosts não tem a linha"
-                    + " (o site está livre).");
+        System.out.println("Divergence between state and hosts ("
+                + (ineffective.size() + stuckWithoutRecord.size()) + "):");
+        for (String domain : ineffective) {
+            System.out.println("  " + domain
+                    + " — ineffective: the state says blocked, but the hosts file has no line"
+                    + " (the site is free).");
         }
-        for (String dominio : presoSemRegistro) {
-            System.out.println("  " + dominio
-                    + " — preso sem registro: o hosts tem a linha, mas o estado não tem"
-                    + " o registro (o site fica bloqueado para sempre).");
-            // O unblock só sabe tirar o que está no estado: sem registro, ele
-            // diria que o domínio não está bloqueado e não tocaria no hosts.
-            System.out.println("    Resolva com: " + CliSupport.elevatedCommand("block " + dominio)
-                    + " e depois " + CliSupport.elevatedCommand("unblock " + dominio));
+        for (String domain : stuckWithoutRecord) {
+            System.out.println("  " + domain
+                    + " — stuck without a record: the hosts file has the line, but the state has no"
+                    + " record (the site stays blocked forever).");
+            // unblock only knows how to remove what is in the state: without a record it
+            // would say the domain is not blocked and never touch the hosts file.
+            System.out.println("    Fix with: " + CliSupport.elevatedCommand("block " + domain)
+                    + " and then " + CliSupport.elevatedCommand("unblock " + domain));
         }
     }
 
-    // O domínio sem o prefixo "www." — o bloqueio é o mesmo com ou sem ele.
-    private static String baseDe(String dominio) {
-        return HostsFileManager.managedHosts(dominio).get(0);
+    // The domain without the "www." prefix — the block is the same with or without it.
+    private static String baseDomain(String domain) {
+        return HostsFileManager.managedHosts(domain).get(0);
     }
 
-    private static boolean temLinhaGerenciada(String conteudo, String dominio) {
-        for (String gerenciada : HostsFileManager.managedLines(dominio)) {
-            String[] partes = gerenciada.strip().split("\\s+");
-            if (linhaExiste(conteudo, partes[0], partes[1])) {
+    private static boolean hasManagedLine(String content, String domain) {
+        for (String managed : HostsFileManager.managedLines(domain)) {
+            String[] parts = managed.strip().split("\\s+");
+            if (lineExists(content, parts[0], parts[1])) {
                 return true;
             }
         }
         return false;
     }
 
-    private static boolean linhaExiste(String conteudo, String ip, String host) {
-        for (String linha : conteudo.split("\n", -1)) {
-            String t = linha.strip();
+    private static boolean lineExists(String content, String ip, String host) {
+        for (String line : content.split("\n", -1)) {
+            String t = line.strip();
             if (t.isEmpty() || t.startsWith("#")) {
                 continue;
             }
-            String[] partes = t.split("\\s+");
-            if (partes.length < 2 || !partes[0].equalsIgnoreCase(ip)) {
+            String[] parts = t.split("\\s+");
+            if (parts.length < 2 || !parts[0].equalsIgnoreCase(ip)) {
                 continue;
             }
-            for (int i = 1; i < partes.length; i++) {
-                if (partes[i].equalsIgnoreCase(host)) {
+            for (int i = 1; i < parts.length; i++) {
+                if (parts[i].equalsIgnoreCase(host)) {
                     return true;
                 }
             }
@@ -197,49 +197,49 @@ public class StatusCommand implements Callable<Integer> {
         return false;
     }
 
-    // Os domínios que o SiteLock tem no bloco gerenciado do hosts.
-    private static Set<String> dominiosNoBloco(String conteudo) {
-        Set<String> dominios = new TreeSet<>();
-        for (String linha : linhasDoBloco(conteudo)) {
-            String[] partes = linha.split("\\s+");
-            if (partes.length < 2 || !ehDominioBloqueavel(partes[1])) {
+    // The domains SiteLock has in the hosts file's managed block.
+    private static Set<String> blockedDomains(String content) {
+        Set<String> domains = new TreeSet<>();
+        for (String line : blockLines(content)) {
+            String[] parts = line.split("\\s+");
+            if (parts.length < 2 || !isBlockableDomain(parts[1])) {
                 continue;
             }
-            String dominio = baseDe(partes[1]);
-            for (String gerenciada : HostsFileManager.managedLines(dominio)) {
-                if (gerenciada.equals(partes[0] + " " + partes[1])) {
-                    dominios.add(dominio);
+            String domain = baseDomain(parts[1]);
+            for (String managed : HostsFileManager.managedLines(domain)) {
+                if (managed.equals(parts[0] + " " + parts[1])) {
+                    domains.add(domain);
                     break;
                 }
             }
         }
-        return dominios;
+        return domains;
     }
 
-    // As linhas dentro do bloco que o SiteLock gerencia.
-    private static List<String> linhasDoBloco(String conteudo) {
-        List<String> linhas = new ArrayList<>();
-        boolean dentro = false;
-        for (String linha : conteudo.split("\n", -1)) {
-            String t = linha.strip();
+    // The lines inside the block that SiteLock manages.
+    private static List<String> blockLines(String content) {
+        List<String> lines = new ArrayList<>();
+        boolean inside = false;
+        for (String line : content.split("\n", -1)) {
+            String t = line.strip();
             if (t.contains(HostsFileManager.START_MARKER)) {
-                dentro = true;
+                inside = true;
                 continue;
             }
             if (t.contains(HostsFileManager.END_MARKER)) {
-                dentro = false;
+                inside = false;
                 continue;
             }
-            if (dentro) {
-                linhas.add(t);
+            if (inside) {
+                lines.add(t);
             }
         }
-        return linhas;
+        return lines;
     }
 
-    // POR QUE: o "localhost" e afins do /etc/hosts são conteúdo do sistema, e o que o
-    // SiteLock pode bloquear é o que o normalize() aceita como domínio.
-    private static boolean ehDominioBloqueavel(String host) {
+    // WHY: the "localhost" and friends of /etc/hosts are system content, and what
+    // SiteLock can block is what normalize() accepts as a domain.
+    private static boolean isBlockableDomain(String host) {
         try {
             DomainUtils.normalize(host);
             return true;

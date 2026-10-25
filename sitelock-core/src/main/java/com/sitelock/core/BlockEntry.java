@@ -8,8 +8,8 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * Um bloqueio persistido no blocks.json.
- * expiresAt null = permanente.
+ * A block persisted in blocks.json.
+ * A null expiresAt means a permanent block.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class BlockEntry {
@@ -18,16 +18,16 @@ public class BlockEntry {
     private Instant createdAt;
     private Instant expiresAt;
 
-    /** Construtor para o Jackson. */
+    /** Constructor for Jackson. */
     @JsonCreator
     public BlockEntry(
             @JsonProperty(value = "domain", required = true) String domain,
             @JsonProperty("createdAt") Instant createdAt,
             @JsonProperty("expiresAt") Instant expiresAt) {
         this.domain = Objects.requireNonNull(domain, "domain");
-        // POR QUE: createdAt nulo é "desconhecido" (arquivo escrito à mão ou
-        // por uma versão antiga). Inventar "agora" mudaria a semântica sem
-        // erro visível — e a data exibida mentiria.
+        // WHY: null createdAt is "unknown" (file written by hand or
+        // by an old version). Inventing "now" would change the semantics with no
+        // visible error — and the displayed date would lie.
         this.createdAt = createdAt;
         this.expiresAt = expiresAt;
     }
@@ -59,12 +59,12 @@ public class BlockEntry {
         this.expiresAt = expiresAt;
     }
 
-    /** true se já passou da expiração. */
+    /** True if past the expiration. */
     public boolean isExpired(Instant now) {
         return expiresAt != null && !now.isBefore(expiresAt);
     }
 
-    /** true se temporário e ainda dentro do prazo. */
+    /** True if temporary and still within its deadline. */
     public boolean isTemporaryAndActive(Instant now) {
         return expiresAt != null && now.isBefore(expiresAt);
     }

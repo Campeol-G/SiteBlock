@@ -1,33 +1,33 @@
 # SiteBlock
 
-Bloqueia sites na sua máquina. Sem extensão, sem app instalado, sem conta.
-Você digita o domínio, ele escreve no arquivo de hosts do sistema — o mesmo
-mecanismo que a escola e o trabalho usam para travar site na lancha.
+Blocks sites on your machine. No extension, no installed app, no account.
+You type the domain, and it writes to the system hosts file — the same
+mechanism schools and offices use to block sites on the LAN.
 
-Funciona em Linux, macOS e Windows.
+Works on Linux, macOS, and Windows.
 
-## O que ele faz
+## What it does
 
 ```bash
-sudo siteblock block tiktok.com --for 4h   # bloqueia por 4 horas
-siteblock status                            # o que está bloqueado e por quanto tempo
-sudo siteblock unblock tiktok.com          # solta
+sudo siteblock block tiktok.com --for 4h   # blocks for 4 hours
+siteblock status                            # what's blocked and for how long
+sudo siteblock unblock tiktok.com          # unblocks
 ```
 
-Sem `--for`, o bloqueio não tem prazo: fica até você tirar.
+Without `--for`, a block has no deadline: it stays until you remove it.
 
-Também tem um servidor DNS opcional que estende o bloqueio para os outros
-aparelhos da mesma rede — celular, tablet, console. Está em `siteblock dns`.
+There is also an optional DNS server that extends blocking to other devices
+on the same network — phone, tablet, console. See `siteblock dns`.
 
-## Requisitos
+## Requirements
 
-- **Java 26 ou mais novo**. É o requisito mais incomum do projeto: o código
-  usa recursos do Java 26 e não compila em versões anteriores. A CI usa
+- **Java 26 or newer**. It is the project's most unusual requirement: the
+  code uses Java 26 features and does not compile on earlier versions. CI uses
   Temurin 26.
-- Maven 3.8+ só para compilar. Para rodar, não precisa.
-- Linux, macOS ou Windows. Em Windows, abra o terminal como Administrador.
+- Maven 3.8+ to compile. Not needed to run.
+- Linux, macOS, or Windows. On Windows, open the terminal as Administrator.
 
-## Instalar
+## Install
 
 ```bash
 git clone https://github.com/Campeol-G/SiteBlock.git
@@ -35,160 +35,161 @@ cd SiteBlock
 mvn package
 ```
 
-O executável sai em `sitelock-app/target/siteblock-*.jar`.
+The executable is produced at `sitelock-app/target/siteblock-*.jar`.
 
-## Rodar
+## Run
 
-Coloque o comando no terminal:
+Add the command to your PATH:
 
 ```bash
 ln -sf "$PWD/bin/siteblock" ~/.local/bin/siteblock
 ```
 
-Depois use direto:
+Then run it directly:
 
 ```bash
 sudo siteblock block tiktok.com --for 1h
 siteblock status
 ```
 
-Sem instalar nada no PATH, use os scripts, que encontram o jar sozinhos:
+If you don't install it into your PATH, use the scripts; they find the jar
+themselves:
 
 ```bash
-./run.sh block tiktok.com --for 1h    # Linux e macOS
+./run.sh block tiktok.com --for 1h    # Linux and macOS
 run.bat block tiktok.com --for 1h     # Windows
 ```
 
-Se o jar estiver em outro lugar, aponte com `SITEBLOCK_JAR=/caminho/siteblock.jar`.
+If the jar is somewhere else, point to it with `SITEBLOCK_JAR=/path/siteblock.jar`.
 
-## Comandos
+## Commands
 
 ```bash
-# Bloquear. Vários domínios de uma vez:
+# Block. Multiple domains at once:
 sudo ./run.sh block tiktok.com vm.tiktok.com --for 30m
-sudo ./run.sh block twitter.com               # sem --for = sem prazo
+sudo ./run.sh block twitter.com               # no --for = no deadline
 
-# Ver o que está bloqueado e quanto tempo resta
+# See what's blocked and how much time is left
 ./run.sh status
 
-# Desbloquear. Se ainda tiver prazo, pede --force e confirmação digitada:
+# Unblock. If the deadline has not passed, it asks for --force and a typed confirmation:
 sudo ./run.sh unblock tiktok.com
 sudo ./run.sh unblock tiktok.com --force
 
-# Apagar o histórico de bloqueios (não mexe no hosts)
+# Delete the block history (does not touch hosts)
 ./run.sh reset --yes
 
-# Servidor DNS para a rede local
-sudo ./run.sh dns start      # bloqueia também no celular/tablet/console
-sudo ./run.sh dns start --allow-from 192.168.1.50,10.8.0.0/24   # libera outras origens
+# DNS server for the local network
+sudo ./run.sh dns start      # also blocks on phone/tablet/console
+sudo ./run.sh dns start --allow-from 192.168.1.50,10.8.0.0/24   # allows other sources
 ./run.sh dns status
 sudo ./run.sh dns stop
-sudo ./run.sh dns stop --force  # encerra antes do prazo, com confirmação
+sudo ./run.sh dns stop --force  # stops before the deadline, with confirmation
 
-# Conjuntos de domínios com nome
-sudo ./run.sh save profile trabalho      # guarda o que está bloqueado agora
+# Named domain sets
+sudo ./run.sh save profile work      # saves what's currently blocked
 ./run.sh profile list
-./run.sh profile trabalho apply             # recarrega sem nunca encurtar o prazo
-sudo ./run.sh profile trabalho unblock --force
-./run.sh delete profile trabalho         # apaga a receita (pede confirmação)
+./run.sh profile work apply             # reloads without ever shortening the deadline
+sudo ./run.sh profile work unblock --force
+./run.sh delete profile work         # deletes the profile (asks for confirmation)
 
-# Criar vazio, sem bloquear nada agora
-./run.sh create profile trabalho
+# Create an empty profile without blocking anything now
+./run.sh create profile work
 
-# Editar a receita de um perfil que já existe
-./run.sh profile trabalho add tiktok.com            # entra permanente
-./run.sh profile trabalho add tiktok.com --for 4h   # entra com 4h de prazo
-./run.sh profile trabalho remove tiktok.com          # só sai da receita
+# Edit the recipe of an existing profile
+./run.sh profile work add tiktok.com            # permanent
+./run.sh profile work add tiktok.com --for 4h   # adds it with a 4h deadline
+./run.sh profile work remove tiktok.com          # only removes it from the recipe
 
-# Daemon de expiração (o prazo vence sozinho)
-sudo ./run.sh daemon enable             # instala para subir a cada boot
-./run.sh daemon status                  # responde sem sudo
-sudo ./run.sh daemon start              # sobe agora, em background
+# Expiration daemon (deadlines expire on their own)
+sudo ./run.sh daemon enable             # installs it to start on every boot
+./run.sh daemon status                  # answers without sudo
+sudo ./run.sh daemon start              # starts it now, in the background
 sudo ./run.sh daemon stop
 sudo ./run.sh daemon disable
 ```
 
-Durações aceitas: `30m`, `2h`, `1h30m`, `1d`, `1d2h30m`. Só minúsculo, sem
-espaço. O limite é 1.000 anos; acima disso o comando recusa.
+Accepted durations: `30m`, `2h`, `1h30m`, `1d`, `1d2h30m`. Lowercase only, no
+spaces. The limit is 1,000 years; anything above that is rejected.
 
-### Códigos de saída
+### Exit codes
 
-Todo comando devolve um código, para quem quiser montar script em cima:
+Every command returns an exit code, for anyone who wants to build scripts on top of it:
 
-| Código | Quando |
+| Code | When |
 |---|---|
-| `0` | deu certo |
-| `1` | erro (não conseguiu ler ou gravar o arquivo, perfil que não existe) |
-| `2` | uso errado (falta argumento, valor inválido, comando desconhecido) |
-| `3` | recusado ou cancelado (recusou parar antes do prazo, cancelou a confirmação) |
+| `0` | success |
+| `1` | error (could not read or write the file, profile does not exist) |
+| `2` | wrong usage (missing argument, invalid value, unknown command) |
+| `3` | refused or cancelled (refused to stop before the deadline, cancelled the confirmation) |
 
-### Por que precisa de sudo
+### Why it needs sudo
 
-Editar o arquivo de hosts exige permissão de administrador nos três sistemas.
-`block`, `unblock`, `profile <nome> apply`, `profile <nome> unblock` e `dns start` pedem.
-`status`, `reset`, `profile list` e `daemon status` não.
+Editing the hosts file requires administrator permission on all three systems.
+`block`, `unblock`, `profile <name> apply`, `profile <name> unblock`, and `dns start` need it.
+`status`, `reset`, `profile list`, and `daemon status` do not.
 
-Os comandos de daemon (`enable`, `start`, `stop`, `disable`) mexem no sistema
-— autostart, serviço, processo do root — e também pedem elevação.
+The daemon commands (`enable`, `start`, `stop`, `disable`) touch the system —
+autostart, service, root process — and also need elevation.
 
-## Onde ficam as coisas
+## Where things are
 
-Em `~/.sitelock/`:
+In `~/.sitelock/`:
 
-| Arquivo | O que é |
+| File | What it is |
 |---|---|
-| `blocks.json` | o que está bloqueado e até quando |
-| `blocks.json.lock` | lock: serializa processos que mexem no estado ao mesmo tempo |
-| `hosts.backup` | cópia do hosts original, criada uma vez |
-| `hosts.lock` | lock: serializa as escritas no arquivo de hosts |
-| `dns-server.json` | estado do servidor DNS |
-| `dns-server.start.lock` | lock: impede dois `dns start` ao mesmo tempo |
-| `dns-server.log` | log do servidor DNS (consultas, upstream, decisões) |
-| `dns-server.log.1` | log anterior, quando o atual passa de 5 MiB |
-| `profiles.json` | os conjuntos de domínios salvos com nome |
-| `profiles.json.lock` | lock: serializa as escritas dos perfis |
-| `daemon.json` | o daemon de expiração está rodando (pid, último sweep) |
-| `daemon.lock` | lock: garante um daemon só, mesmo com dois `daemon start` |
-| `daemon.log` | log do daemon de expiração (o que ele liberou, erros) |
+| `blocks.json` | what's blocked and until when |
+| `blocks.json.lock` | lock: serializes processes that modify state concurrently |
+| `hosts.backup` | copy of the original hosts file, created once |
+| `hosts.lock` | lock: serializes writes to the hosts file |
+| `dns-server.json` | DNS server state |
+| `dns-server.start.lock` | lock: prevents two `dns start` runs at the same time |
+| `dns-server.log` | DNS server log (queries, upstream, decisions) |
+| `dns-server.log.1` | previous log, once the current one exceeds 5 MiB |
+| `profiles.json` | saved named domain sets |
+| `profiles.json.lock` | lock: serializes profile writes |
+| `daemon.json` | expiration daemon state (pid, last sweep) |
+| `daemon.lock` | lock: guarantees only one daemon, even with two `daemon start` runs |
+| `daemon.log` | expiration daemon log (what it released, errors) |
 
-O arquivo de hosts do sistema só é alterado no bloco delimitado por
-marcadores, entre uma linha original sua e o resto do arquivo. Nunca
-sobrescreve o que já estava lá.
+The system hosts file is only modified inside the block delimited by markers,
+which sits between one of your original lines and the rest of the file. It
+never overwrites what was already there.
 
-## Limites
+## Limits
 
-Coisas que **não** funcionam, e é bom saber antes:
+Things that **do not work**, worth knowing up front:
 
-- **Não bloqueia por app.** Bloqueia por domínio. Se o tiktok abre pelo `app.net`,
-  passa.
-- **No modo hosts, não cobre subdomínio.** `tiktok.com` cobre `tiktok.com` e
-  `www.tiktok.com`, mas não `vm.tiktok.com`. Liste os subdomínios que você
-  usa. No modo DNS a cobertura é outra: o servidor responde por todos os
-  subdomínios de um domínio bloqueado, sem precisar listar um por um.
-- **O modo DNS escuta em todas as interfaces.** O servidor fica em
-  `0.0.0.0:53` e repassa para o DNS de cima o que não está bloqueado. É assim
-  que ele alcança a rede local — e é assim que ele vira um resolver aberto se
-  o roteador deixar a porta 53 passar para a internet. **Não exponha a porta
-  53 para fora da sua rede.**
-- **O servidor DNS recusa quem não está na rede local.** As origens de fora são
-  ignoradas em silêncio, e o `--allow-from` (no `dns start`) é quem libera
-  mais alguma.
-- **App com DNS próprio ou IP fixo fura.** Alguns apps (principalmente Android
-  e Electron) resolvem por conta própria e ignoram o hosts.
-- **Modo anônimo, extensões e alguns navegadores** podem ignorar o hosts.
-- **Expirado só sai sozinho se o daemon estiver ligado.** Com
-  `sudo siteblock daemon enable` instalado, o prazo vence sem você abrir o
-  terminal — inclusive depois de reiniciar. Sem ele, o site só é liberado
-  quando você roda outro comando do siteblock (`status` já resolve), e o
-  `block --for` avisa na hora que o daemon não está cobrindo.
-- **Não é à prova de você mesmo.** Você é dono da máquina e pode editar o
-  `/etc/hosts` com `sudo`. O siteblock é uma trava de HPV contra distraído, não
-  de segurança.
-- **Precisa de Java 26.** Em máquina com Java 17, 21 ou 25, não roda.
+- **It does not block by app.** It blocks by domain. If TikTok opens through
+  `app.net`, it gets through.
+- **In hosts mode, it does not cover subdomains.** `tiktok.com` covers
+  `tiktok.com` and `www.tiktok.com`, but not `vm.tiktok.com`. List the
+  subdomains you use. In DNS mode, coverage is different: the server answers
+  for all subdomains of a blocked domain, without listing them one by one.
+- **DNS mode listens on all interfaces.** The server listens on
+  `0.0.0.0:53` and forwards anything that is not blocked to the upstream DNS.
+  That is how it reaches the local network — and how it becomes an open
+  resolver if the router lets port 53 through to the internet. **Do not expose
+  port 53 outside your network.**
+- **The DNS server refuses anyone not on the local network.** Outside sources
+  are ignored silently, and `--allow-from` (on `dns start`) is what allows
+  additional ones.
+- **Apps with their own DNS or a fixed IP bypass it.** Some apps (mostly
+  Android and Electron) resolve on their own and ignore hosts.
+- **Private browsing, extensions, and some browsers** may ignore hosts.
+- **Expired blocks are only removed automatically if the daemon is running.**
+  With `sudo siteblock daemon enable` installed, the deadline expires without
+  you opening the terminal — even after a reboot. Without it, the site is only
+  released when you run another siteblock command (`status` already does the
+  trick), and `block --for` warns right away that the daemon is not covering it.
+- **It will not stop you.** You own the machine and can edit
+  `/etc/hosts` with `sudo`. SiteBlock is a lock against distraction, not a
+  security mechanism.
+- **It needs Java 26.** On a machine with Java 17, 21, or 25, it will not run.
 
-## Como funciona
+## How it works
 
-O SiteBlock escreve no arquivo de hosts do sistema:
+SiteBlock writes to the system hosts file:
 
 ```
 # SITELOCK-START
@@ -199,98 +200,102 @@ O SiteBlock escreve no arquivo de hosts do sistema:
 # SITELOCK-END
 ```
 
-Ele reescreve só esse bloco. O que está acima e abaixo, nunca toca. O
-`hosts.backup` é a cópia do arquivo inteiro antes da primeira alteração, caso
-você queira desfazer tudo na mão.
+It only rewrites that block. Everything above and below it is never touched.
+`hosts.backup` is a copy of the full file before the first change, in case
+you want to undo everything manually.
 
-Quando você bloqueia, o prazo é gravado como um horário exato no `blocks.json`,
-não como "4 horas a partir de agora". Por isso o bloqueio sobrevive a
-reiniciar ou desligar o computador: se você bloqueou 4 horas, usou 2 horas e
-desligou, quando voltar ainda restam 1h30m.
+When you block, the deadline is saved as an exact time in `blocks.json`,
+not as "4 hours from now". That is why a block survives a reboot or shutdown:
+if you blocked for 4 hours, used 2 hours, and shut down, you still have
+1h30m left when you come back.
 
-O `daemon` existe para fechar o outro lado dessa mesma conta: sozinho, ele
-acorda, vê o que venceu e tira do `/etc/hosts`. Ele **só remove** — bloquear
-continua sendo coisa do `block` e do `profile <nome> apply` — e escreve o resultado em
-`daemon.json` para o `daemon status` mostrar quando foi a última vez que algo
-expirou por conta própria.
+The `daemon` closes the other half of that loop: on its own, it wakes up, sees
+what expired, and removes it from `/etc/hosts`. It **only removes** — blocking
+is still done by `block` and `profile <name> apply` — and writes the result to
+`daemon.json` so that `daemon status` can show when something last expired on
+its own.
 
-Os `perfis` guardam um conjunto de domínios com nome para não remontar a
-mesma lista todo dia. O que fica gravado é o **prazo restante** no momento do
-save, nunca o horário original: um perfil é uma receita, não um histórico.
-Aplicar um perfil **só aumenta** prazo, nunca encurta — repetir `profile <nome> apply`
-várias vezes no dia é seguro.
+Profiles store a named set of domains so you don't have to rebuild the same
+list every day. What is saved is the **remaining deadline** at save time,
+never the original time: a profile is a recipe, not a history. Applying a
+profile **only increases** the deadline, never shortens it — repeating
+`profile <name> apply` several times a day is safe.
 
-`profile <nome> add` e `profile <nome> remove` editam a receita de um perfil que já existe,
-sem passar pelo `block`: o `add` grava o domínio com o prazo pedido (ou
-permanente, sem `--for`) e o `remove` tira o domínio da receita. Nenhum dos
-dois toca no `/etc/hosts` — o que está bloqueado continua bloqueado, e o
-`remove` avisa quando o domínio que saiu da receita continua preso, porque o
-`profile <nome> unblock` só alcança o que ainda está no perfil.
+`profile <name> add` and `profile <name> remove` edit the recipe of an
+existing profile, without going through `block`: `add` saves the domain with
+the requested deadline (or as permanent, without `--for`), and `remove`
+removes it from the recipe. Neither touches `/etc/hosts` — what is blocked
+stays blocked, and `remove` warns when a domain that was removed from the
+recipe is still blocked, because `profile <name> unblock` only reaches what
+is still in the profile.
 
-Para instalar o autostart (o passo recomendado depois de instalar):
+To install autostart (recommended after installation):
 
 ```bash
-sudo siteblock daemon enable     # Linux: unit systemd · macOS: LaunchDaemon · Windows: tarefa
-siteblock daemon status          # sem sudo: responde se está ligado
+sudo siteblock daemon enable     # Linux: systemd unit · macOS: LaunchDaemon · Windows: task
+siteblock daemon status          # without sudo: answers if it is running
 ```
 
-O daemon roda como root, porque precisa escrever no `/etc/hosts`. Ele grava os
-caminhos no artefato de inicialização e devolve a posse dos arquivos que escreve
-para o seu usuário, para que `status` funcione sem elevação.
+The daemon runs as root because it needs to write to `/etc/hosts`. It saves
+paths in the autostart artifact and gives ownership of the files it writes
+back to your user, so `status` works without elevation.
 
-O `daemon enable` também **instala uma cópia do jar** num diretório do root
-(`/opt/sitelock` no Linux, `/usr/local/lib/sitelock` no macOS,
-`%ProgramData%\SiteBlock` no Windows) e aponta a inicialização para lá. Não
-aponta para o jar do build porque `mvn clean` apaga o `target/` — e uma
-inicialização apontando para o nada entra em loop de crash, e o prazo dos
-bloqueios para de ser cumprido sem nenhuma mensagem que explique o motivo.
+`daemon enable` also **installs a copy of the jar** in a root directory
+(`/opt/sitelock` on Linux, `/usr/local/lib/sitelock` on macOS,
+`%ProgramData%\SiteBlock` on Windows) and points startup there. It does not
+point to the build jar because `mvn clean` deletes `target/` — and an autostart
+entry pointing at nothing enters a crash loop, so block deadlines stop being
+enforced with no message explaining why.
 
-Depois de recompilar, rode o `enable` de novo para atualizar a cópia:
+After recompiling, run `enable` again to update the copy:
 
 ```bash
 mvn package
 sudo siteblock daemon enable
 ```
 
-Se a cópia sumir, o `daemon status` diz isso explicitamente e diz como
-consertar.
+If the copy disappears, `daemon status` says so explicitly and tells you how
+to fix it.
 
-O modo DNS é separado: ele roda um servidor que responde no seu IP, e os
-aparelhos da rede precisam apontar para ele. Cobre mais aparelhos do que o
-hosts, ao custo de configurar cada dispositivo.
+DNS mode is separate: it runs a server that answers on your IP, and devices
+on the network need to point to it. It covers more devices than hosts, at the
+cost of configuring each device.
 
-O servidor atende **UDP e TCP na mesma porta**. O TCP não é enfeite: quando a
-resposta não cabe num pacote UDP, o servidor devolve `TC=1` e o cliente refaz
-a mesma consulta por TCP (RFC 7766). Sem o listener TCP, a resolução falha
-justamente nas respostas grandes. E se o upstream também responder truncado, o
-SiteBlock refaz a consulta por TCP antes de entregar a resposta.
+The server handles **UDP and TCP on the same port**. TCP is not just for show:
+when the answer does not fit in a UDP packet, the server returns `TC=1`
+and the client retries the same query over TCP (RFC 7766). Without the TCP
+listener, resolution fails precisely on large answers. And if the upstream
+also responds truncated, SiteBlock retries the query over TCP before
+delivering the answer.
 
-Quem pode consultar o servidor é definido na hora de subir. Por padrão, só
-quem está na rede local (loopback, link-local, faixas RFC1918, IPv6 ULA e os
-próprios endereços da máquina); o resto é recusado em silêncio. Para liberar
-mais alguma origem — um celular em outra rede, um servidor da empresa — use o
-`--allow-from` com IP ou CIDR, separado por vírgula:
+Who can query the server is decided at startup. By default, only clients on
+the local network (loopback, link-local, RFC1918 ranges, IPv6 ULA, and the
+machine's own addresses) are allowed; everything else is silently refused. To allow
+additional sources — a phone on another network, a company server — use
+`--allow-from` with IPs or CIDR ranges, separated by commas:
 
 ```bash
 sudo siteblock dns start --allow-from 192.168.1.50,10.8.0.0/24
 ```
 
-A lista é validada antes do servidor subir: erro de digitação aparece na hora,
-e não depois.
+The list is validated before the server starts: a typo shows up immediately,
+not later.
 
-## Desenvolvimento
+## Development
 
 ```bash
-mvn test          # testes (roda em Linux, macOS e Windows no CI)
-mvn package       # gera o jar
+mvn test          # tests (run on Linux, macOS, and Windows in CI)
+mvn package       # produces the jar
 ```
 
-O repositório traz um `./mvnw` (e `mvnw.cmd` no Windows) com o Maven 3.9.16
-fixado: é o que a CI usa, e evita o "funciona na minha máquina" de versão de
-Maven e de plugin.
+The repository includes `./mvnw` (and `mvnw.cmd` on Windows) with Maven 3.9.16
+pinned: that is what CI uses, and it avoids the "works on my machine" problem
+with Maven and plugin versions.
 
-Três módulos Maven:
+Three Maven modules:
 
-- `sitelock-core` — estado, arquivo de hosts, domínios
-- `sitelock-dns` — servidor DNS local
-- `sitelock-app` — a CLI
+- `sitelock-core` — state, hosts file, domains
+- `sitelock-dns` — local DNS server
+
+The `sitelock-app` module builds the CLI and the executable jar. `sitelock-dns`
+is optional and does not need to be built to use hosts mode.

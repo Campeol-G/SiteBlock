@@ -7,23 +7,23 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Objects;
 
 /**
- * Um domínio dentro de um perfil.
+ * A domain inside a profile.
  *
- * <p>{@code durationMillis} é um {@code Long} porque {@code null} significa
- * "permanente" — o mesmo contrato de {@link BlockEntry#expiresAt}. Guardar
- * string ISO de duração não resolveria: {@code Duration} serializa no Jackson
- * como segundos decimais ("28800.000000000"), que é ambíguo de ler.
+ * <p>{@code durationMillis} is a {@code Long} because {@code null} means
+ * "permanent" — the same contract as {@link BlockEntry#expiresAt}. Storing an
+ * ISO duration string would not help: {@code Duration} serializes in Jackson
+ * as decimal seconds ("28800.000000000"), which is ambiguous to read.
  *
- * <p>É a <b>duração restante no momento do save</b>, nunca o {@code expiresAt}
- * original: um perfil é uma receita, não um histórico. Guardar o instante
- * transformaria um perfil de 6 meses em "já vencido".
+ * <p>It is the <b>remaining duration at save time</b>, never the original
+ * {@code expiresAt}: a profile is a recipe, not a history. Storing the instant
+ * would turn a 6-month profile into "already expired".
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ProfileEntry {
 
     private Long durationMillis;
 
-    /** Construtor para o Jackson. */
+    /** Constructor for Jackson. */
     @JsonCreator
     public ProfileEntry(@JsonProperty("durationMillis") Long durationMillis) {
         this.durationMillis = durationMillis;
@@ -32,7 +32,7 @@ public class ProfileEntry {
     public ProfileEntry() {
     }
 
-    /** {@code null} = bloqueio permanente. */
+    /** {@code null} = permanent block. */
     public Long getDurationMillis() {
         return durationMillis;
     }
@@ -42,8 +42,8 @@ public class ProfileEntry {
     }
 
     /**
-     * True se a entrada tem prazo. Equivale a {@link BlockEntry#isTemporaryAndActive}
-     * sem a checagem de validade: a receita guarda duração, não instante.
+     * True if the entry has a deadline. Equivalent to {@link BlockEntry#isTemporaryAndActive}
+     * without the expiry check: the recipe stores a duration, not a point in time.
      */
     public boolean isTemporary() {
         return durationMillis != null;

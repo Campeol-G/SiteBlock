@@ -21,12 +21,12 @@ import java.util.Map;
 import java.util.TreeMap;
 
 /**
- * Persistência do {@code profiles.json} com escrita atômica e lock entre processos.
+ * Persistence of {@code profiles.json} with atomic write and inter-process lock.
  *
- * <p>Disciplina igual à do {@link BlockStore}: dois {@code profile save} simultâneos
- * não podem deixar o arquivo pela metade, e JSON ilegível vira
- * {@link CorruptedStateException} sem apagar nada. O caminho vem do construtor
- * porque quem decide o {@code stateDir} é a camada de CLI.
+ * <p>Same discipline as {@link BlockStore}: two simultaneous {@code save profile}
+ * operations cannot leave the file half-written, and unreadable JSON becomes
+ * {@link CorruptedStateException} without deleting anything. The path comes from
+ * the constructor because the CLI layer decides {@code stateDir}.
  */
 public class ProfileStore {
 
@@ -56,7 +56,7 @@ public class ProfileStore {
         return profilesFile;
     }
 
-    /** Arquivo inexistente vira mapa vazio. Lê o snapshot direto se o lock falhar. */
+    /** Missing file becomes an empty map. Reads the snapshot directly if the lock fails. */
     public Map<String, Profile> load() throws IOException {
         if (!Files.exists(profilesFile)) {
             return new TreeMap<>();
@@ -66,9 +66,9 @@ public class ProfileStore {
                  FileLock ignored = channel.tryLock(0L, Long.MAX_VALUE, true)) {
                 return readAndParse();
             } catch (IOException | UnsupportedOperationException | OverlappingFileLockException e) {
-                // ATENÇÃO: lock inacessível (ex.: root-owned sem sudo), FS sem lock, ou outra
-                // thread da MESMA JVM já o mantém: lock é por JVM, então tryLock concorrente
-                // lança OverlappingFileLockException (unchecked). Ler o snapshot direto é seguro.
+                // WARNING: inaccessible lock (e.g. root-owned without sudo), FS without locks, or another
+                // thread in the SAME JVM already holds it: locks are per JVM, so a concurrent tryLock
+                // throws OverlappingFileLockException (unchecked). Reading the snapshot directly is safe.
                 return readAndParse();
             }
         }
@@ -80,27 +80,27 @@ public class ProfileStore {
         try {
             text = Files.readString(profilesFile, StandardCharsets.UTF_8).trim();
         } catch (IOException e) {
-            throw new IOException("Falha ao ler " + profilesFile + ": " + e.getMessage(), e);
+            throw new IOException("Failed to read " + profilesFile + ": " + e.getMessage(), e);
         }
         if (text.isEmpty()) {
             throw new CorruptedStateException(
-                    "Arquivo de perfis vazio/corrompido: " + profilesFile, null);
+                    "Profiles file empty/corrupted: " + profilesFile, null);
         }
         final ProfileDocument doc;
         try {
             doc = mapper.readValue(text, ProfileDocument.class);
         } catch (JsonProcessingException e) {
             throw new CorruptedStateException(
-                    "Arquivo de perfis corrompido: " + profilesFile, e);
+                    "Profiles file corrupted: " + profilesFile, e);
         }
         if (doc == null || doc.getProfiles() == null) {
             throw new CorruptedStateException(
-                    "Arquivo de perfis corrompido (conteúdo nulo): " + profilesFile, null);
+                    "Profiles file corrupted (null content): " + profilesFile, null);
         }
         return new TreeMap<>(doc.getProfiles());
     }
 
-    /** Salva os perfis de forma atômica. */
+    /** Saves the profiles atomically. */
     public void save(Map<String, Profile> profiles) throws IOException {
         Map<String, Profile> toSave = profiles != null ? new TreeMap<>(profiles) : new TreeMap<>();
         ensureParentExists(profilesFile);
@@ -110,23 +110,23 @@ public class ProfileStore {
              FileLock ignored = channel.lock()) {
             writeAtomically(toSave);
         } catch (OverlappingFileLockException e) {
-            throw new IOException("Outro processo/thread está escrevendo as receitas agora; "
-                    + "tente de novo.", e);
+            throw new IOException("Another process/thread is writing the recipes right now; "
+                    + "try again.", e);
         }
     }
 
     /**
-     * Executa uma modificação das receitas sob a trava do arquivo.
+     * Executes a recipe modification under the file lock.
      *
-     * <p>Dois {@code profile add} simultâneos não podem se perder: sem a trava, o
-     * último a gravar apagava o domínio do outro. Receita é trabalho digitado;
-     * perdê-lo é pior do que perder estado de bloqueio, que se reconstrói.
+     * <p>Two simultaneous {@code profile add} operations cannot get lost: without
+     * the lock, the last writer would erase the other domain. A recipe is typed
+     * work; losing it is worse than losing block state, which is rebuilt.
      *
-     * <p>A gravação é um delta sobre o que está no disco: quem escreve sem esperar
-     * a trava não é apagado.
+     * <p>The write is a delta over what is on disk: whoever writes without
+     * waiting for the lock risks a lost update.
      *
-     * @param body recebe acesso às receitas já carregadas e um {@code save} que
-     *             não trava de novo
+     * @param body receives access to already loaded recipes and a {@code save}
+     *             that does not lock again
      */
     public <R> R inTransaction(TransactionBody<R> body) throws IOException {
         ensureParentExists(profilesFile);
@@ -136,12 +136,12 @@ public class ProfileStore {
              FileLock ignored = channel.lock()) {
             return body.apply(new LockedProfiles());
         } catch (OverlappingFileLockException e) {
-            throw new IOException("Outro processo/thread está escrevendo as receitas agora; "
-                    + "tente de novo.", e);
+            throw new IOException("Another process/thread is writing the recipes right now; "
+                    + "try again.", e);
         }
     }
 
-    /** O que se pode fazer dentro de uma transação de receitas. */
+    /** What can be done inside a recipe transaction. */
     public interface Transaction {
         Map<String, Profile> load() throws IOException;
 
@@ -153,44 +153,44 @@ public class ProfileStore {
         R apply(Transaction tx) throws IOException;
     }
 
-    // A transação: as receitas carregadas e o que foi gravado por último.
-    // POR QUE: o save de dentro dela não pode ser escrita cega — o que está no
-    // disco pode ter mudado desde o load, e apagar isso é o lost update.
+    // A transaction: the loaded recipes and what was written last.
+    // WHY: the save inside it cannot be a blind write — what is on
+    // disk may have changed since the load, and erasing it is the lost update.
     private final class LockedProfiles implements Transaction {
 
-        // O que foi gravado por último: a base do delta da próxima gravação.
+        // What was written last: the base of the delta for the next write.
         private Map<String, Profile> lastWritten = new TreeMap<>();
 
         @Override
         public Map<String, Profile> load() throws IOException {
-            // O load público já sabe ler sem a trava — e a transação já tem a
-            // trava, então ele cai no caminho direto, que é o que interessa.
-            Map<String, Profile> perfis = ProfileStore.this.load();
-            lastWritten = copia(perfis);
-            return perfis;
+            // The public load already knows how to read without the lock — and the transaction already holds
+            // the lock, so it takes the direct path, which is what matters here.
+            Map<String, Profile> loaded = ProfileStore.this.load();
+            lastWritten = copy(loaded);
+            return loaded;
         }
 
         @Override
-        public void save(Map<String, Profile> perfis) throws IOException {
-            writeAtomically(mergeIntoDisk(perfis));
-            lastWritten = copia(perfis);
+        public void save(Map<String, Profile> profiles) throws IOException {
+            writeAtomically(mergeIntoDisk(profiles));
+            lastWritten = copy(profiles);
         }
 
-        // Aplica o delta entre o que foi gravado por último e o que se quer
-        // gravar sobre o que está no disco agora.
-        private Map<String, Profile> mergeIntoDisk(Map<String, Profile> perfis)
+        // Applies the delta between what was written last and what we want to
+        // write, on top of what is on disk right now.
+        private Map<String, Profile> mergeIntoDisk(Map<String, Profile> profiles)
                 throws IOException {
             Map<String, Profile> onDisk = Files.exists(profilesFile)
                     ? readAndParse()
                     : new TreeMap<>();
             Map<String, Profile> merged = new TreeMap<>(onDisk);
             for (Map.Entry<String, Profile> e : lastWritten.entrySet()) {
-                Profile wanted = perfis.get(e.getKey());
+                Profile wanted = profiles.get(e.getKey());
                 if (wanted == null || !wanted.equals(e.getValue())) {
                     merged.remove(e.getKey());
                 }
             }
-            for (Map.Entry<String, Profile> e : perfis.entrySet()) {
+            for (Map.Entry<String, Profile> e : profiles.entrySet()) {
                 Profile before = lastWritten.get(e.getKey());
                 if (before == null || !before.equals(e.getValue())) {
                     merged.put(e.getKey(), e.getValue());
@@ -200,32 +200,32 @@ public class ProfileStore {
         }
     }
 
-    // POR QUE: a cópia de comparação tem que ser o estado como ele estava antes da
-    // mudança — guardar os mesmos objetos carregados faria uma alteração no lugar
-    // mudar a base junto, e o delta não veria mudança nenhuma.
-    private static Map<String, Profile> copia(Map<String, Profile> perfis) {
-        Map<String, Profile> copia = new TreeMap<>();
-        for (Map.Entry<String, Profile> e : perfis.entrySet()) {
+    // WHY: the comparison copy has to be the state as it was before the
+    // change — keeping the same loaded objects would make an in-place change
+    // move the base along with it, and the delta would see no change at all.
+    private static Map<String, Profile> copy(Map<String, Profile> profiles) {
+        Map<String, Profile> copy = new TreeMap<>();
+        for (Map.Entry<String, Profile> e : profiles.entrySet()) {
             Profile p = e.getValue();
             if (p == null) {
-                copia.put(e.getKey(), null);
+                copy.put(e.getKey(), null);
                 continue;
             }
-            Map<String, ProfileEntry> entradas = new TreeMap<>();
-            for (Map.Entry<String, ProfileEntry> entrada : p.getEntries().entrySet()) {
-                ProfileEntry valor = entrada.getValue();
-                entradas.put(entrada.getKey(),
-                        valor == null ? null : new ProfileEntry(valor.getDurationMillis()));
+            Map<String, ProfileEntry> entries = new TreeMap<>();
+            for (Map.Entry<String, ProfileEntry> entry : p.getEntries().entrySet()) {
+                ProfileEntry value = entry.getValue();
+                entries.put(entry.getKey(),
+                        value == null ? null : new ProfileEntry(value.getDurationMillis()));
             }
-            // Construtor sem argumentos e setters: é o jeito de copiar as
-            // datas como elas são, inclusive quando o updatedAt é nulo.
-            Profile novo = new Profile();
-            novo.setCreatedAt(p.getCreatedAt());
-            novo.setUpdatedAt(p.getUpdatedAt());
-            novo.setEntries(entradas);
-            copia.put(e.getKey(), novo);
+            // No-arg constructor and setters: that is how to copy the
+            // dates as they are, including when updatedAt is null.
+            Profile fresh = new Profile();
+            fresh.setCreatedAt(p.getCreatedAt());
+            fresh.setUpdatedAt(p.getUpdatedAt());
+            fresh.setEntries(entries);
+            copy.put(e.getKey(), fresh);
         }
-        return copia;
+        return copy;
     }
 
     private void writeAtomically(Map<String, Profile> toSave) throws IOException {
@@ -247,12 +247,12 @@ public class ProfileStore {
         SiteLockPaths.chownToUserIfConfigured(lockFile);
     }
 
-    /** Remove um perfil. Nome ausente não é erro — apagar o que não existe é o estado desejado. */
+    /** Removes a profile. A missing name is not an error — deleting what does not exist is the desired state. */
     public void delete(String name) throws IOException {
         inTransaction(tx -> {
-            Map<String, Profile> perfis = tx.load();
-            if (perfis.remove(name) != null) {
-                tx.save(perfis);
+            Map<String, Profile> profiles = tx.load();
+            if (profiles.remove(name) != null) {
+                tx.save(profiles);
             }
             return null;
         });

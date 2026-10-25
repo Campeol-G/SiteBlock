@@ -4,19 +4,19 @@ import java.util.Arrays;
 import java.util.Objects;
 
 /**
- * Uma consulta DNS (seção question) já parseada.
+ * An already parsed DNS query (question section).
  *
- * @param transactionId   ID de 16 bits do header (0–65535); a resposta precisa ecoá-lo.
- * @param name            domínio perguntado, normalizado (minúsculas, sem ponto final,
- *                        na forma ASCII canônica/punycode).
- *                        Nome vazio ("") representa a raiz ".".
- * @param type            QTYPE (ex.: 1 = A, 28 = AAAA).
- * @param clazz           QCLASS (ex.: 1 = IN).
- * @param questionSection bytes da seção question (do início do QNAME até QCLASS),
- *                         copiados do pacote original para serem ecoados na resposta.
- * @param requestFlags    palavra de flags do header original (usada para copiar o bit RD).
- * @param ednsPayloadSize payload UDP anunciado pelo cliente no OPT do EDNS (RFC 6891);
- *                         0 = o cliente não mandou OPT.
+ * @param transactionId  16-bit header ID (0–65535); the response must echo it.
+ * @param name           queried domain, normalized (lowercase, no trailing dot,
+ *                       in canonical ASCII/punycode form).
+ *                       An empty name ("") represents the root ".".
+ * @param type           QTYPE (e.g. 1 = A, 28 = AAAA).
+ * @param clazz          QCLASS (e.g. 1 = IN).
+ * @param questionSection question-section bytes (from the start of QNAME through QCLASS),
+ *                        copied from the original packet so they can be echoed in the response.
+ * @param requestFlags   flag word from the original header (used to copy the RD bit).
+ * @param ednsPayloadSize UDP payload advertised by the client in the EDNS OPT (RFC 6891);
+ *                        0 = the client sent no OPT.
  */
 public record DnsQuery(
         int transactionId,
@@ -27,21 +27,21 @@ public record DnsQuery(
         int requestFlags,
         int ednsPayloadSize) {
 
-    /** Tipos e classes (RFC 1035 §3.2.2, §3.2.4). */
+    /** Types and classes (RFC 1035 §3.2.2, §3.2.4). */
     public static final int TYPE_A = 1;
     public static final int TYPE_AAAA = 28;
     public static final int CLASS_IN = 1;
 
     public DnsQuery {
         if (transactionId < 0 || transactionId > 0xFFFF) {
-            throw new IllegalArgumentException("transactionId fora de 0-65535: " + transactionId);
+            throw new IllegalArgumentException("transactionId outside 0-65535: " + transactionId);
         }
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(questionSection, "questionSection");
         questionSection = questionSection.clone();
     }
 
-    /** Construtor sem EDNS (cliente que não mandou OPT). */
+    /** Constructor without EDNS (client sent no OPT). */
     public DnsQuery(int transactionId, String name, int type, int clazz,
                     byte[] questionSection, int requestFlags) {
         this(transactionId, name, type, clazz, questionSection, requestFlags, 0);
@@ -52,9 +52,9 @@ public record DnsQuery(
         return questionSection.clone();
     }
 
-    // Array da seção question sem clonar — uso interno do pacote.
-    // POR QUE: o builder copiava o array duas vezes (uma por accessor); o accessor
-    // público continua devolvendo cópia, então a mutabilidade não escapa do pacote.
+    // Question-section array without cloning — internal use within the package.
+    // WHY: the builder was copying the array twice (once per accessor); the public
+    // accessor still returns a copy, so mutability does not escape the package.
     byte[] questionSectionInternal() {
         return questionSection;
     }

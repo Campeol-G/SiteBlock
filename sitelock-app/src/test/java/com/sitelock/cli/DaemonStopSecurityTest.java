@@ -16,11 +16,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * O {@code daemon stop} contra um daemon que roda como root.
+ * {@code daemon stop} against a daemon running as root.
  *
- * <p>Um usuário normal não pode mandar sinal num processo de outro usuário: o
- * JVM lança {@code SecurityException}. Sem tratamento, o picocli imprime a
- * pilha da exceção — que é o jeito mais feio de dizer " rode com sudo".
+ * <p>A normal user cannot signal another user's process: the JVM throws
+ * {@code SecurityException}. Without handling, picocli prints the exception
+ * stack — the ugliest way to say "run it with sudo".
  */
 class DaemonStopSecurityTest {
 
@@ -28,52 +28,52 @@ class DaemonStopSecurityTest {
     Path tmp;
 
     @Test
-    void recusaDoSoViraMensagemComDicaDeElevacao() throws Exception {
-        Path estado = tmp.resolve("estado");
-        Files.createDirectories(estado);
-        ExpirationDaemonState.write(estado, new ExpirationDaemonState(
-                ProcessHandle.current().pid(), Instant.now(), estado.toString(), null));
+    void osRefusalBecomesAMessageWithAnElevationHint() throws Exception {
+        Path state = tmp.resolve("state");
+        Files.createDirectories(state);
+        ExpirationDaemonState.write(state, new ExpirationDaemonState(
+                ProcessHandle.current().pid(), Instant.now(), state.toString(), null));
 
-        DaemonStopCommand cmd = new DaemonStopCommand(estado.resolve("blocks.json").toString()) {
+        DaemonStopCommand cmd = new DaemonStopCommand(state.resolve("blocks.json").toString()) {
             @Override
-            void encerrar(ProcessHandle handle) {
-                throw new SecurityException("uid do processo nao pode ser sinalizado");
+            void stopProcess(ProcessHandle handle) {
+                throw new SecurityException("the process uid cannot be signaled");
             }
         };
 
-        String saida = capturarErro(() -> cmd.call());
+        String output = captureError(() -> cmd.call());
 
-        assertTrue(saida.contains("permissão"),
-                "a mensagem tem que dizer que faltou permissão: " + saida);
-        assertTrue(saida.contains("daemon stop"),
-                "a mensagem tem que dizer como repetir o comando: " + saida);
-        assertFalse(saida.contains("Exception in thread"),
-                "não pode estourar pilha: " + saida);
-        assertFalse(saida.contains("\tat "),
-                "não pode estourar pilha: " + saida);
+        assertTrue(output.contains("permission"),
+                "the message must say permission was missing: " + output);
+        assertTrue(output.contains("daemon stop"),
+                "the message must say how to repeat the command: " + output);
+        assertFalse(output.contains("Exception in thread"),
+                "it must not throw a stack: " + output);
+        assertFalse(output.contains("\tat "),
+                "it must not throw a stack: " + output);
     }
 
     @Test
-    void oCodigoDeSaidaERrro() throws Exception {
-        Path estado = tmp.resolve("estado");
-        Files.createDirectories(estado);
-        ExpirationDaemonState.write(estado, new ExpirationDaemonState(
-                ProcessHandle.current().pid(), Instant.now(), estado.toString(), null));
+    void exitCodeIsAnError() throws Exception {
+        Path state = tmp.resolve("state");
+        Files.createDirectories(state);
+        ExpirationDaemonState.write(state, new ExpirationDaemonState(
+                ProcessHandle.current().pid(), Instant.now(), state.toString(), null));
 
-        DaemonStopCommand cmd = new DaemonStopCommand(estado.resolve("blocks.json").toString()) {
+        DaemonStopCommand cmd = new DaemonStopCommand(state.resolve("blocks.json").toString()) {
             @Override
-            void encerrar(ProcessHandle handle) {
-                throw new SecurityException("uid do processo nao pode ser sinalizado");
+            void stopProcess(ProcessHandle handle) {
+                throw new SecurityException("the process uid cannot be signaled");
             }
         };
 
-        int[] codigo = new int[1];
-        capturarErro(() -> codigo[0] = cmd.call());
+        int[] code = new int[1];
+        captureError(() -> code[0] = cmd.call());
 
-        assertEquals(1, codigo[0], "sem permissão para encerrar é erro");
+        assertEquals(1, code[0], "no permission to stop is an error");
     }
 
-    private static String capturarErro(Comando r) throws Exception {
+    private static String captureError(Command r) throws Exception {
         PrintStream original = System.err;
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         System.setErr(new PrintStream(buffer, true, StandardCharsets.UTF_8));
@@ -86,7 +86,7 @@ class DaemonStopSecurityTest {
     }
 
     @FunctionalInterface
-    private interface Comando {
+    private interface Command {
         int run() throws Exception;
     }
 }

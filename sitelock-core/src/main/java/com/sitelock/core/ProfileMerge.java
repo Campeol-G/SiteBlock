@@ -5,46 +5,46 @@ import java.util.Map;
 import java.util.TreeMap;
 
 /**
- * Regra de mesclagem de um perfil sobre o estado atual.
+ * Merge rule for applying a profile over the current state.
  *
- * <p>Formalmente, tratando "permanente" como infinito, o resultado é
- * {@code max(quanto resta agora, o que o perfil oferece)}. O perfil só pode
- * <b>aumentar</b> o prazo.
+ * <p>Formally, treating "permanent" as infinity, the result is
+ * {@code max(what remains now, what the profile offers)}. A profile can only
+ * <b>raise</b> the deadline.
  *
  * <pre>
- * | estado atual          | perfil oferece | ação    |
+ * | current state        | profile offers | action  |
  * |-----------------------|----------------|---------|
- * | ausente               | 8h             | ADDED   |
- * | ausente               | permanente     | ADDED   |
- * | temporário, 30min     | 8h             | RAISED  |
- * | temporário, 10h       | 8h             | KEPT    |
- * | temporário, 8h        | 8h             | KEPT    |
- * | temporário, 30min     | permanente     | RAISED  |
- * | permanente            | 8h             | KEPT    |
- * | permanente            | permanente     | KEPT    |
+ * | absent                | 8h             | ADDED   |
+ * | absent                | permanent      | ADDED   |
+ * | temporary, 30min      | 8h             | RAISED  |
+ * | temporary, 10h        | 8h             | KEPT    |
+ * | temporary, 8h         | 8h             | KEPT    |
+ * | temporary, 30min      | permanent      | RAISED  |
+ * | permanent             | 8h             | KEPT    |
+ * | permanent             | permanent      | KEPT    |
  * </pre>
  *
- * <p>Repetir a operação é seguro: o mesmo perfil N vezes só produz {@code KEPT},
- * e um perfil mais fraco sobre um setup mais forte não faz estrago. E um
- * {@code KEPT} <b>não</b> é no-op interno — devolve a mesma instância do
- * {@link BlockEntry}, com o mesmo {@code createdAt} e o mesmo {@code expiresAt}.
- * Reescrever o mapa do zero faria um bloqueio de 10h virar "10h a partir de agora".
+ * <p>Repeating the operation is safe: applying the same profile N times only produces {@code KEPT},
+ * and a weaker profile over a stronger setup does no damage. And a
+ * {@code KEPT} decision is <b>not</b> an internal no-op — it returns the same {@link BlockEntry}
+ * instance, with the same {@code createdAt} and the same {@code expiresAt}.
+ * Rewriting the map from scratch would turn a 10h block into "10h from now".
  *
- * <p>Puro: sem I/O e sem {@code Clock}. O instante de referência entra no método.
+ * <p>Pure: no I/O and no {@code Clock}. The reference instant goes into the method.
  */
 public final class ProfileMerge {
 
-    /** O que aconteceu com um domínio. */
+    /** What happened to a domain. */
     public enum Action {
-        /** Não estava bloqueado; o perfil criou o bloqueio. */
+        /** Was not blocked; the profile created the block. */
         ADDED,
-        /** Estava bloqueado com prazo menor; o perfil estendeu. */
+        /** Was blocked with a shorter deadline; the profile extended it. */
         RAISED,
-        /** O estado atual já era mais forte; nada muda. */
+        /** The current state was already stronger; nothing changes. */
         KEPT
     }
 
-    /** Uma decisão por domínio do perfil. */
+    /** One decision per profile domain. */
     public record Decision(String domain, Action action, BlockEntry entry) {
     }
 
@@ -52,11 +52,11 @@ public final class ProfileMerge {
     }
 
     /**
-     * Aplica o perfil sobre o estado atual de bloqueio.
+     * Applies the profile over the current block state.
      *
-     * @param state estado atual de bloqueio; não é modificado
-     * @return uma decisão por domínio do perfil, inclusive os {@code KEPT}, em
-     *         ordem alfabética
+     * @param state current block state; not modified
+     * @return one decision per profile domain, including the {@code KEPT} ones, in
+     *         alphabetical order
      */
     public static Map<String, Decision> merge(Map<String, BlockEntry> state,
             Profile profile, Instant now) {
@@ -69,9 +69,9 @@ public final class ProfileMerge {
             Long offeredMillis = pe.getValue() == null ? null : pe.getValue().getDurationMillis();
             BlockEntry current = state == null ? null : state.get(domain);
 
-            // Entrada expirada que sobrou (o sweep roda antes, mas sem permissão
-            // no hosts ele não limpa nada) conta como ausente: re-bloquear a partir
-            // de um prazo morto não renasce o prazo, inventa um novo.
+            // A leftover expired entry (the sweep runs first, but without permission
+            // on the hosts file it cleans nothing) counts as absent: re-blocking from a
+            // dead deadline does not revive it; it creates a new one.
             if (current != null && current.isExpired(now)) {
                 current = null;
             }
@@ -82,7 +82,7 @@ public final class ProfileMerge {
                 continue;
             }
             if (current.getExpiresAt() == null) {
-                // Já permanente: nada é mais forte que infinito.
+                // Already permanent: nothing is stronger than infinity.
                 decisions.put(domain, new Decision(domain, Action.KEPT, current));
                 continue;
             }

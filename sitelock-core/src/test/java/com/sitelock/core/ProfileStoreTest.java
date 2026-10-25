@@ -18,10 +18,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Persistência do profiles.json. O contrato que importa mais é o do fim do
- * {@code BlockStore}: JSON ilegível vira {@link CorruptedStateException} e
- * <b>não apaga nada</b>. Um perfil é trabalho digitado; perder um por causa de
- * uma aspa sobrando seria a pior falha possível aqui.
+ * Persistence of profiles.json. The contract that matters most is the one from the
+ * {@code BlockStore}: unreadable JSON becomes a {@link CorruptedStateException} and
+ * <b>deletes nothing</b>. A profile is typed work; losing one because of
+ * a stray quote would be the worst possible failure here.
  */
 class ProfileStoreTest {
 
@@ -38,11 +38,11 @@ class ProfileStoreTest {
         return new Profile(at, at, m);
     }
 
-    // Map.of não aceita valor nulo, e "permanente" é justamente null.
-    private static Map<String, Long> durations(Object... pares) {
+    // Map.of does not accept a null value, and "permanent" is exactly null.
+    private static Map<String, Long> durations(Object... pairs) {
         Map<String, Long> m = new TreeMap<>();
-        for (int i = 0; i < pares.length; i += 2) {
-            m.put((String) pares[i], (Long) pares[i + 1]);
+        for (int i = 0; i < pairs.length; i += 2) {
+            m.put((String) pairs[i], (Long) pairs[i + 1]);
         }
         return m;
     }
@@ -51,19 +51,19 @@ class ProfileStoreTest {
     void roundTripsProfiles() throws Exception {
         Instant at = Instant.parse("2026-10-15T14:02:11Z");
         Map<String, Profile> profiles = new TreeMap<>();
-        profiles.put("trabalho", profile(at, durations("youtube.com", 28800000L, "tiktok.com", null)));
-        profiles.put("fim-de-semana", profile(at, durations("instagram.com", 3600000L)));
+        profiles.put("work", profile(at, durations("youtube.com", 28800000L, "tiktok.com", null)));
+        profiles.put("weekend", profile(at, durations("instagram.com", 3600000L)));
 
         store().save(profiles);
         Map<String, Profile> read = store().load();
 
         assertEquals(2, read.size());
-        Profile t = read.get("trabalho");
+        Profile t = read.get("work");
         assertEquals(at, t.getCreatedAt());
         assertEquals(at, t.getUpdatedAt());
         assertEquals(Long.valueOf(28800000L), t.getEntries().get("youtube.com").getDurationMillis());
         assertEquals(Long.valueOf(3600000L),
-                read.get("fim-de-semana").getEntries().get("instagram.com").getDurationMillis());
+                read.get("weekend").getEntries().get("instagram.com").getDurationMillis());
     }
 
     @Test
@@ -74,13 +74,13 @@ class ProfileStoreTest {
     @Test
     void corruptedJsonThrowsAndKeepsFile() throws Exception {
         Path file = tmp.resolve("profiles.json");
-        String lixo = "{ nao é json";
-        Files.writeString(file, lixo, StandardCharsets.UTF_8);
+        String garbage = "{ not json";
+        Files.writeString(file, garbage, StandardCharsets.UTF_8);
 
         ProfileStore store = store();
         assertThrows(CorruptedStateException.class, store::load);
-        assertEquals(lixo, Files.readString(file, StandardCharsets.UTF_8),
-                "corrupção não pode apagar o arquivo — o perfil é trabalho digitado");
+        assertEquals(garbage, Files.readString(file, StandardCharsets.UTF_8),
+                "corruption must not erase the file — the profile is typed work");
     }
 
     @Test
@@ -99,59 +99,59 @@ class ProfileStoreTest {
         assertTrue(read.containsKey("b"));
     }
 
-    // POR QUE: o delete solto era um load seguido de um save, e a receita que
-    // outro terminal gravou no meio do caminho sumia junto. O teste é
-    // determinístico: o outro escritor grava o arquivo por fora da trava.
+    // WHY: the standalone delete was a load followed by a save, and the recipe
+    // another terminal saved along the way vanished with it. The test is
+    // deterministic: the other writer writes the file outside the lock.
     @Test
-    void deleteNaoApagaOQueFoiEscritoPorOutro() throws Exception {
+    void deleteDoesNotEraseWhatAnotherWriterWrote() throws Exception {
         Path file = tmp.resolve("profiles.json");
         ProfileStore store = new ProfileStore(file);
         store.save(Map.of("x", profile(Instant.parse("2026-10-15T14:02:11Z"),
                 durations("x.com", 1000L))));
 
-        // "Outro terminal": enquanto o delete carrega o arquivo, outro escritor
-        // grava a receita "y" por fora da trava.
-        ProfileStore espiao = new ProfileStore(file) {
+        // "Another terminal": while the delete loads the file, another writer
+        // saves the recipe "y" outside the lock.
+        ProfileStore spy = new ProfileStore(file) {
             @Override
             public Map<String, Profile> load() throws IOException {
-                Map<String, Profile> perfis = super.load();
-                Map<String, Profile> concorrente = new TreeMap<>(perfis);
-                concorrente.put("y", profile(Instant.parse("2026-10-15T14:02:11Z"),
+                Map<String, Profile> profiles = super.load();
+                Map<String, Profile> concurrent = new TreeMap<>(profiles);
+                concurrent.put("y", profile(Instant.parse("2026-10-15T14:02:11Z"),
                         durations("y.com", 1000L)));
                 Files.writeString(file, ProfileStore.defaultMapper()
                         .writerWithDefaultPrettyPrinter()
                         .writeValueAsString(new ProfileDocument(
-                                ProfileDocument.CURRENT_VERSION, concorrente)),
+                                ProfileDocument.CURRENT_VERSION, concurrent)),
                         StandardCharsets.UTF_8);
-                return perfis;
+                return profiles;
             }
         };
 
-        espiao.delete("x");
+        spy.delete("x");
 
-        Map<String, Profile> depois = store.load();
-        assertFalse(depois.containsKey("x"), "o perfil apagado tem que sumir: " + depois.keySet());
-        assertTrue(depois.containsKey("y"),
-                "a escrita concorrente não pode se perder: " + depois.keySet());
+        Map<String, Profile> after = store.load();
+        assertFalse(after.containsKey("x"), "the deleted profile has to disappear: " + after.keySet());
+        assertTrue(after.containsKey("y"),
+                "the concurrent write must not be lost: " + after.keySet());
     }
 
     @Test
     void invalidNamesAreRejected() {
-        for (String nome : new String[]{"", " trabalho", "trabalho ", "a b", "../escape",
-                "perfil\tcom\ttab", "x".repeat(65), "perfil/../etc"}) {
-            assertThrows(IllegalArgumentException.class, () -> ProfileNames.require(nome),
-                    "deveria rejeitar: '" + nome + "'");
-            assertTrue(!ProfileNames.isValid(nome), "isValid deveria dizer não para '" + nome + "'");
+        for (String name : new String[]{"", " work", "work ", "a b", "../escape",
+                "profile\twith\ttab", "x".repeat(65), "profile/../etc"}) {
+            assertThrows(IllegalArgumentException.class, () -> ProfileNames.require(name),
+                    "should reject: '" + name + "'");
+            assertTrue(!ProfileNames.isValid(name), "isValid should say no to '" + name + "'");
         }
     }
 
     @Test
     void validNamesAreAccepted() {
-        assertTrue(ProfileNames.isValid("trabalho"));
-        assertTrue(ProfileNames.isValid("Perfil-1"));
+        assertTrue(ProfileNames.isValid("work"));
+        assertTrue(ProfileNames.isValid("Profile-1"));
         assertTrue(ProfileNames.isValid("a"));
         assertTrue(ProfileNames.isValid("x".repeat(64)));
-        assertEquals("trabalho", ProfileNames.require("trabalho"));
+        assertEquals("work", ProfileNames.require("work"));
     }
 
     @Test
@@ -159,14 +159,14 @@ class ProfileStoreTest {
         Instant at = Instant.parse("2026-10-15T14:02:11Z");
         store().save(Map.of("p", profile(at, durations("tiktok.com", null))));
 
-        Long duracao = store().load().get("p").getEntries().get("tiktok.com").getDurationMillis();
-        assertNull(duracao, "permanente é null, não 0");
+        Long duration = store().load().get("p").getEntries().get("tiktok.com").getDurationMillis();
+        assertNull(duration, "permanent is null, not 0");
     }
 
     @Test
     void versionIsWrittenAtTheRoot() throws Exception {
         store().save(Map.of());
         String json = Files.readString(tmp.resolve("profiles.json"), StandardCharsets.UTF_8);
-        assertTrue(json.contains("\"version\""), "o formato vai evoluir e precisa de onde versionar: " + json);
+        assertTrue(json.contains("\"version\""), "the format will evolve and needs a version field: " + json);
     }
 }

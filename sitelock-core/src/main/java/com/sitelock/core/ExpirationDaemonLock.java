@@ -10,28 +10,28 @@ import java.nio.file.StandardOpenOption;
 import java.util.Optional;
 
 /**
- * Trava de instância única do daemon, via {@code FileLock} retido pela vida
- * inteira do processo.
+ * Single-instance lock for the daemon, via a {@code FileLock} held for the whole
+ * life of the process.
  *
- * <p>É o SO que libera um {@code FileLock} quando o processo morre — até no
- * {@code kill -9}. Por isso um lock por PID não serve: sobrevive ao processo
- * que o criou e trava o próximo boot, porque o PID ainda parece vivo.
+ * <p>It is the OS that releases a {@code FileLock} when the process dies — even on
+ * {@code kill -9}. That is why a PID-based lock is no good: it survives the process
+ * that created it and blocks the next boot, because the PID still looks alive.
  *
- * <p><b>{@code tryLock}, não {@code lock}.</b> Lock de arquivo é por JVM, não
- * por canal: um segundo {@code lock()} na mesma JVM lança
+ * <p><b>{@code tryLock}, not {@code lock}.</b> A file lock is per JVM, not
+ * per channel: a second {@code lock()} in the same JVM throws
  * {@link OverlappingFileLockException}.
  *
- * <p>Entre <b>processos</b>, {@code lock()} bloqueia — foi o que a primeira
- * versão fazia: a segunda instância ficava pendurada para sempre, e o systemd
- * a reportava como ativa.
+ * <p>Between <b>processes</b>, {@code lock()} blocks — that is what the first
+ * version did: the second instance hung forever, and systemd
+ * reported it as active.
  */
 public final class ExpirationDaemonLock implements AutoCloseable {
 
     public static final String LOCK_FILE_NAME = "daemon.lock";
 
-    // Tempo total de espera antes de desistir: TENTATIVAS * INTERVALO_MS.
-    private static final int TENTATIVAS = 20;
-    private static final long INTERVALO_MS = 250;
+    // Total wait time before giving up: ATTEMPTS * INTERVAL_MS.
+    private static final int ATTEMPTS = 20;
+    private static final long INTERVAL_MS = 250;
 
     private final FileChannel channel;
     private final FileLock lock;
@@ -48,11 +48,11 @@ public final class ExpirationDaemonLock implements AutoCloseable {
     }
 
     /**
-     * Adquire a trava, com espera antes de desistir, e diz quem está segurando.
+     * Acquires the lock, waiting before giving up, and reports who is holding it.
      *
-     * @return a trava retida pela vida do processo
-     * @throws IOException se outro daemon já a tem, ou se o arquivo não puder
-     *                     ser criado
+     * @return the lock held for the life of the process
+     * @throws IOException if another daemon already has it, or if the file cannot
+     *                     be created
      */
     public static ExpirationDaemonLock acquire(Path stateDir) throws IOException {
         Path lockFile = lockPath(stateDir);
@@ -61,25 +61,25 @@ public final class ExpirationDaemonLock implements AutoCloseable {
                 StandardOpenOption.CREATE, StandardOpenOption.WRITE);
         FileLock lock = null;
         try {
-            for (int tentativa = 0; tentativa < TENTATIVAS; tentativa++) {
+            for (int attempt = 0; attempt < ATTEMPTS; attempt++) {
                 try {
                     lock = channel.tryLock();
                 } catch (OverlappingFileLockException e) {
-                    lock = null; // outra thread da MESMA JVM já tem
+                    lock = null; // another thread in the SAME JVM already has it
                 }
                 if (lock != null) {
                     SiteLockPaths.chownToUserIfConfigured(lockFile);
                     return new ExpirationDaemonLock(channel, lock, stateDir);
                 }
                 try {
-                    Thread.sleep(INTERVALO_MS);
+                    Thread.sleep(INTERVAL_MS);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
                 }
             }
             channel.close();
-            throw new IOException(outroRodando(stateDir));
+            throw new IOException(otherRunning(stateDir));
         } catch (IOException e) {
             if (lock == null) {
                 try {
@@ -91,18 +91,18 @@ public final class ExpirationDaemonLock implements AutoCloseable {
         }
     }
 
-    private static String outroRodando(Path stateDir) {
-        String pid = "outro processo";
+    private static String otherRunning(Path stateDir) {
+        String pid = "another process";
         try {
             Optional<ExpirationDaemonState> state = ExpirationDaemonState.read(stateDir);
             if (state.isPresent() && state.get().getPid() > 0) {
                 pid = "pid " + state.get().getPid();
             }
         } catch (IOException ignored) {
-            // Sem o registro, ainda assim a trava é a fonte da verdade.
+            // Without the record, the lock is still the source of truth.
         }
-        return "Já existe um daemon de expiração rodando (" + pid + "). "
-                + "Use 'siteblock daemon status' para ver, ou 'daemon stop' para encerrar.";
+        return "An expiration daemon is already running (" + pid + "). "
+                + "Use 'siteblock daemon status' to see it, or 'daemon stop' to stop it.";
     }
 
     public Path getStateDir() {

@@ -13,36 +13,36 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.Callable;
 
-// ATENÇÃO: os caminhos são resolvidos agora e embutidos no artefato — o
-// agendador roda como root sem SUDO_USER, e aí user.home é /root: o daemon
-// leria o blocks.json de outro usuário, e a feature viraria um no-op silencioso.
+// NOTE: the paths are resolved now and embedded in the artifact — the
+// scheduler runs as root without SUDO_USER, and then user.home is /root: the daemon
+// would read another user's blocks.json, and the feature would become a silent no-op.
 
-// POR QUE: o jar é copiado, não apontado de onde está — a unit apontava para
-// target/, que um mvn clean apaga, e ela entrava em loop de crash. A cópia mora
-// num diretório que só o root escreve.
+// WHY: the jar is copied, not pointed at where it is — the unit pointed at
+// target/, which mvn clean deletes, and it entered a crash loop. The copy lives
+// in a directory only root writes to.
 
 /**
- * siteblock daemon enable [--jar &lt;caminho&gt;] — instala o autostart.
+ * siteblock daemon enable [<path>] — installs autostart.
  *
- * <p>É instalação privilegiada: o daemon precisa escrever no {@code /etc/hosts},
- * e o uso normal do SiteBlock já pede root.
+ * <p>It is a privileged installation: the daemon needs to write {@code /etc/hosts},
+ * and normal SiteBlock usage already asks for root.
  */
 @Command(name = "enable",
-        description = "Instala o daemon de expiracao para subir a cada boot.",
+        description = "Installs the expiration daemon to come up at every boot.",
         mixinStandardHelpOptions = true)
 public class DaemonEnableCommand implements Callable<Integer> {
 
-    @Option(names = "--jar", paramLabel = "<caminho>",
-            description = "Caminho absoluto do fat-jar.Padrao: a property siteblock.jar.")
+    @Option(names = "--jar", paramLabel = "<path>",
+            description = "Absolute path of the fat-jar. Default: the siteblock.jar property.")
     String jarPath;
 
     @Option(names = "--state-file", hidden = true) String stateFileOverride;
 
-    // Injetados para teste; null = SO e raiz reais.
+    // Injected for tests; null = real OS and root.
     OsType osOverride;
     Path systemRootOverride;
     CommandRunner runnerOverride;
-    Boolean systemdPresenteOverride;
+    Boolean systemdPresentOverride;
 
     public DaemonEnableCommand() {
     }
@@ -55,9 +55,9 @@ public class DaemonEnableCommand implements Callable<Integer> {
     }
 
     DaemonEnableCommand(OsType os, Path systemRoot, String jarPath, CommandRunner runner,
-            Boolean systemdPresente) {
+            Boolean systemdPresent) {
         this(os, systemRoot, jarPath, runner);
-        this.systemdPresenteOverride = systemdPresente;
+        this.systemdPresentOverride = systemdPresent;
     }
 
     @Override
@@ -65,87 +65,87 @@ public class DaemonEnableCommand implements Callable<Integer> {
         OsType os = osOverride != null ? osOverride : OsType.detect();
         Path systemRoot = systemRootOverride != null ? systemRootOverride : Path.of("/");
 
-        if (!temAgendador(os)) {
-            System.err.println("Não encontrei " + nomeDoAgendador(os) + " nesta máquina.");
-            System.err.println("Sem ele não dá para subir o daemon automaticamente. "
-                    + "Você ainda pode rodar o daemon na mão, em outro terminal:");
+        if (!hasScheduler(os)) {
+            System.err.println("Could not find " + schedulerName(os) + " on this machine.");
+            System.err.println("Without it, the daemon cannot be started automatically. "
+                    + "You can still run the daemon manually, in another terminal:");
             System.err.println("  " + CliSupport.elevatedCommand("daemon start"));
-            System.err.println("Ele libera os expirados enquanto estiver aberto — mas fechar "
-                    + "o terminal encerra o daemon.");
+            System.err.println("It releases expired entries while open — but closing "
+                    + "the terminal stops the daemon.");
             return 1;
         }
 
-        if (!podeEscrever(diretorioDaInstalacao(os, systemRoot))) {
-            System.err.println("Erro: " + CliSupport.elevationHint("daemon enable"));
+        if (!isWritable(installDirectory(os, systemRoot))) {
+            System.err.println("Error: " + CliSupport.elevationHint("daemon enable"));
             return 1;
         }
 
-        AutostartPaths caminhos = new AutostartPaths(
+        AutostartPaths paths = new AutostartPaths(
                 SiteLockPaths.getStateDir(),
                 CliSupport.resolveHostsPath(null),
-                caminhoDoJava(),
-                caminhoDoJar(),
+                javaPath(),
+                resolvedJarPath(),
                 System.getProperty("java.class.path", "."),
-                usuarioReal(),
+                realUser(),
                 os);
 
-        // O jar é instalado antes do artefato, para que a unit aponte para a
-        // cópia estável e não para o caminho de build.
-        Path origem = caminhoDoJar() != null ? Paths.get(caminhoDoJar()) : null;
-        AutostartInstaller.InstallResult copia =
-                AutostartInstaller.installJar(os, systemRoot, origem);
-        if (!copia.success()) {
-            System.err.println("Erro: " + copia.detail());
+        // The jar is installed before the artifact, so the unit points at the
+        // stable copy and not at the build path.
+        Path source = resolvedJarPath() != null ? Paths.get(resolvedJarPath()) : null;
+        AutostartInstaller.InstallResult copy =
+                AutostartInstaller.installJar(os, systemRoot, source);
+        if (!copy.success()) {
+            System.err.println("Error: " + copy.detail());
             return 1;
         }
-        Path jarInstalado = copia.path();
-        if (jarInstalado == null) {
-            // ATENÇÃO: sem o caminho não há unit possível — melhor falhar aqui do
-            // que escrever um ExecStart apontando para o nada.
-            System.err.println("Erro: " + copia.detail());
+        Path installedJar = copy.path();
+        if (installedJar == null) {
+            // NOTE: without the path there is no possible unit — better to fail here than
+            // to write an ExecStart pointing at nothing.
+            System.err.println("Error: " + copy.detail());
             return 1;
         }
 
-        AutostartPaths caminhosFinais = new AutostartPaths(
-                caminhos.stateDir(), caminhos.hostsFile(), caminhos.javaBin(),
-                jarInstalado.toString(), caminhos.classpath(), caminhos.realUserName(), os);
+        AutostartPaths finalPaths = new AutostartPaths(
+                paths.stateDir(), paths.hostsFile(), paths.javaBin(),
+                installedJar.toString(), paths.classpath(), paths.realUserName(), os);
 
         AutostartInstaller installer = new AutostartInstaller(os, systemRoot, runnerOverride);
-        AutostartInstaller.InstallResult result = installer.install(caminhosFinais);
+        AutostartInstaller.InstallResult result = installer.install(finalPaths);
         if (!result.success()) {
-            System.err.println("Erro ao instalar o autostart: " + result.detail());
+            System.err.println("Error installing autostart: " + result.detail());
             return 1;
         }
 
-        System.out.println("Daemon de expiração instalado. Vai subir a cada boot.");
-        System.out.println("Jar: " + jarInstalado);
-        String aviso = avisoDonoDoInstall(os, systemRoot);
-        if (aviso != null) {
-            System.out.println(aviso);
+        System.out.println("Expiration daemon installed. It will come up at every boot.");
+        System.out.println("Jar: " + installedJar);
+        String warning = installOwnerWarning(os, systemRoot);
+        if (warning != null) {
+            System.out.println(warning);
         }
-        System.out.println("Depois de recompilar (mvn package), rode de novo: "
+        System.out.println("After rebuilding (mvn package), run again: "
                 + CliSupport.elevatedCommand("daemon enable"));
         return 0;
     }
 
-    // POR QUE: a posse dos arquivos que o daemon escreve volta para o usuário
-    // real, e não é user.name: sob sudo a JVM resolve user.name pelo uid (0 =
-    // "root"), que o chownToUserIfConfigured recusa — sem devolução, o reset
-    // --yes deixaria de funcionar sem sudo.
+    // WHY: ownership of the files the daemon writes goes back to the real
+    // user, and not user.name: under su the JVM resolves user.name from the uid (0 =
+    // "root"), which chownToUserIfConfigured refuses — without a return, reset
+    // --yes would stop working without su.
 
-    // ATENÇÃO: SiteLockPaths.realUserName() lê SUDO_USER e já rejeita root;
-    // sem sudo — de um pipeline, por exemplo — devolve vazio e o artefato não
-    // embute usuário.
-private String usuarioReal() {
+    // NOTE: SiteLockPaths.realUserName() reads SUDO_USER and already rejects root;
+    // without su — from a pipeline, for example — it returns empty and the artifact does
+    // not embed a user.
+    private String realUser() {
         return SiteLockPaths.realUserName().orElse(null);
     }
 
-    // systemd ausente é comum: container, WSL, distro enxuta. Fingir que
-    // funcionou seria pior que dizer que não deu — a pessoa acharia que está
-    // coberta quando não está.
-    private boolean temAgendador(OsType os) {
-        if (systemdPresenteOverride != null) {
-            return systemdPresenteOverride;
+    // Missing systemd is common: containers, WSL, slim distros. Pretending it
+    // worked would be worse than saying it did not — the person would think they are
+    // covered when they are not.
+    private boolean hasScheduler(OsType os) {
+        if (systemdPresentOverride != null) {
+            return systemdPresentOverride;
         }
         if (os.isWindows() || os.isMac()) {
             return true;
@@ -153,50 +153,50 @@ private String usuarioReal() {
         return Files.isDirectory(Path.of("/run/systemd/system"));
     }
 
-    private static String nomeDoAgendador(OsType os) {
+    private static String schedulerName(OsType os) {
         if (os.isMac()) {
             return "launchctl";
         }
         return "systemd";
     }
 
-    // O diretório que precisa ser gravável: no Linux e no macOS é o diretório
-    // do artefato (/etc/systemd/system, /Library/LaunchDaemons); no Windows não
-    // existe artefato em arquivo, e decide o diretório do jar (ProgramData/SiteBlock).
-    private static Path diretorioDaInstalacao(OsType os, Path systemRoot) {
-        Path artefato = AutostartInstaller.artifactPath(os, systemRoot);
-        if (artefato != null) {
-            Path parent = artefato.getParent();
-            return parent != null ? parent : artefato;
+    // The directory that needs to be writable: on Linux and macOS it is the artifact's
+    // directory (/etc/systemd/system, /Library/LaunchDaemons); on Windows there is
+    // no artifact file, and it decides the jar's directory (ProgramData/SiteBlock).
+    private static Path installDirectory(OsType os, Path systemRoot) {
+        Path artifact = AutostartInstaller.artifactPath(os, systemRoot);
+        if (artifact != null) {
+            Path parent = artifact.getParent();
+            return parent != null ? parent : artifact;
         }
         return AutostartInstaller.installDir(os, systemRoot);
     }
 
-    // Sobe até o ancestral existente mais próximo, porque o diretório ainda pode
-    // não existir (/etc/systemd/system não existe numa máquina sem systemd):
-    // o que decide é se chegamos a um diretório gravável.
+    // Walks up to the nearest existing ancestor, because the directory may still
+    // not exist (/run/systemd/system does not exist on a machine without systemd):
+    // what decides is whether we reached a writable directory.
 
-    // ATENÇÃO: o argumento é o diretório que precisa ser gravável, e não o
-    // arquivo do artefato — no Windows não existe arquivo.
-    private static boolean podeEscrever(Path diretorio) {
-        if (diretorio == null) {
+    // NOTE: the argument is the directory that needs to be writable, and not the
+    // artifact file — on Windows there is no file.
+    private static boolean isWritable(Path directory) {
+        if (directory == null) {
             return false;
         }
-        Path existente = diretorio;
-        while (existente != null && !Files.exists(existente)) {
-            existente = existente.getParent();
+        Path existing = directory;
+        while (existing != null && !Files.exists(existing)) {
+            existing = existing.getParent();
         }
-        return existente != null && Files.isWritable(existente);
+        return existing != null && Files.isWritable(existing);
     }
 
-    private static String caminhoDoJava() {
+    private static String javaPath() {
         String javaHome = System.getProperty("java.home", "");
         Path javaBin = Paths.get(javaHome, "bin", "java");
         return Files.isExecutable(javaBin) ? javaBin.toString() : "java";
     }
 
-    // A property primeiro; o classpath é reserva, e é um jar só no uso documentado.
-    private String caminhoDoJar() {
+    // The property first; the classpath is the fallback, and it is a single jar in the documented usage.
+    private String resolvedJarPath() {
         if (jarPath != null && !jarPath.isBlank()) {
             return jarPath;
         }
@@ -204,26 +204,26 @@ private String usuarioReal() {
         return prop == null || prop.isBlank() ? null : prop;
     }
 
-    // O jar do daemon fica num diretório que só o root escreve: se o diretório de
-    // instalação NÃO for do root — o caso de um diretório que já existia e era do
-    // usuário — o daemon executa código do usuário como root.
-    private String avisoDonoDoInstall(OsType os, Path systemRoot) {
+    // The daemon jar lives in a directory only root writes to: if the installation
+    // directory is NOT root's — the case of a directory that already existed and belonged to the
+    // user — the daemon runs user code as root.
+    private String installOwnerWarning(OsType os, Path systemRoot) {
         if (os.isWindows()) {
-            // ATENÇÃO: no Windows não existe uid root nem chown — quem protege o
-            // jar é a ACL da pasta, e o dono do ProgramData é o usuário que
-            // instalou. Pedir um chown ali é pedir um comando que não existe.
+            // NOTE: on Windows there is no root uid nor chown — what protects the
+            // jar is the folder's ACL, and the owner of ProgramData is the user who
+            // installed it. Asking for a chown there is asking for a command that does not exist.
             return null;
         }
         Path dir = AutostartInstaller.installDir(os, systemRoot);
         try {
-            String dono = Files.getOwner(dir).getName();
-            if (!"root".equals(dono.toLowerCase(java.util.Locale.ROOT))) {
-                return "Aviso: " + dir + " não é do root — o daemon executaria um jar que você "
-                        + "pode trocar. Rode: sudo chown root " + dir;
+            String owner = Files.getOwner(dir).getName();
+            if (!"root".equals(owner.toLowerCase(java.util.Locale.ROOT))) {
+                return "Warning: " + dir + " is not owned by root — the daemon would run a jar you "
+                        + "can swap. Run: sudo chown root " + dir;
             }
         } catch (Exception e) {
-            // Sem permissão de ler o dono: não dá para afirmar nada, e o aviso
-            // padrão seria alarmar sem motivo.
+            // No permission to read owner: cannot confirm anything, and the default
+            // warning would alarm without reason.
         }
         return null;
     }

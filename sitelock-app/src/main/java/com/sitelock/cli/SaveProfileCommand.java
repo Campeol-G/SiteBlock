@@ -18,17 +18,17 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.Callable;
 
-/** siteblock save profile <nome> [--force] — salva os bloqueios ativos como perfil. */
-@Command(name = "save", description = "Salva os bloqueios ativos como perfil.", mixinStandardHelpOptions = true)
+/** siteblock save profile <name> [--force] — saves active blocks as a profile. */
+@Command(name = "save", description = "Saves active blocks as a profile.", mixinStandardHelpOptions = true)
 public class SaveProfileCommand implements Callable<Integer> {
 
-    @Parameters(index = "0", paramLabel = "<sub>", description = "Sempre 'profile'.")
+    @Parameters(index = "0", paramLabel = "<sub>", description = "Always 'profile'.")
     String sub;
 
-    @Parameters(index = "1", paramLabel = "<nome>", description = "Nome do perfil.")
+    @Parameters(index = "1", paramLabel = "<name>", description = "Profile name.")
     String name;
 
-    @Option(names = "--force", description = "Sobrescreve um perfil existente.")
+    @Option(names = "--force", description = "Overwrites an existing profile.")
     boolean force;
 
     @Option(names = "--hosts-file", hidden = true) String hostsFileOverride;
@@ -43,14 +43,14 @@ public class SaveProfileCommand implements Callable<Integer> {
     @Override
     public Integer call() {
         if (!"profile".equals(sub)) {
-            System.err.println("Uso: siteblock save profile <nome> [--force]");
+            System.err.println("Usage: siteblock save profile <name> [--force]");
             return 2;
         }
         final String valid;
         try {
             valid = ProfileNames.require(name);
         } catch (IllegalArgumentException e) {
-            System.err.println("Erro: " + e.getMessage());
+            System.err.println("Error: " + e.getMessage());
             return 1;
         }
         ProfileStore store = new ProfileStore(CliSupport.resolveProfilesFile(stateFileOverride));
@@ -59,10 +59,10 @@ public class SaveProfileCommand implements Callable<Integer> {
         try {
             state = service.sweepExpired().state();
         } catch (CorruptedStateException e) {
-            System.err.println("Erro: estado corrompido (" + e.getMessage() + ").");
+            System.err.println("Error: corrupted state (" + e.getMessage() + ").");
             return 1;
         } catch (IOException e) {
-            System.err.println("Erro ao ler o estado: " + e.getMessage());
+            System.err.println("Error reading state: " + e.getMessage());
             return 1;
         }
         Instant now = Instant.now(service.getClock());
@@ -73,15 +73,15 @@ public class SaveProfileCommand implements Callable<Integer> {
             entries.put(e.getDomain(), new ProfileEntry(millis));
         }
         if (entries.isEmpty()) {
-            System.err.println("Nada está bloqueado agora — um perfil vazio não faria nada.");
+            System.err.println("Nothing is blocked right now — an empty profile would do nothing.");
             return 1;
         }
-        boolean[] jaExiste = {false};
+        boolean[] alreadyExists = {false};
         try {
             store.inTransaction(tx -> {
                 Map<String, Profile> profiles = tx.load();
                 if (profiles.containsKey(valid) && !force) {
-                    jaExiste[0] = true;
+                    alreadyExists[0] = true;
                     return null;
                 }
                 Instant createdAt = profiles.containsKey(valid) ? profiles.get(valid).getCreatedAt() : now;
@@ -90,14 +90,14 @@ public class SaveProfileCommand implements Callable<Integer> {
                 return null;
             });
         } catch (IOException e) {
-            System.err.println("Erro ao salvar o perfil: " + e.getMessage());
+            System.err.println("Error saving profile: " + e.getMessage());
             return 1;
         }
-        if (jaExiste[0]) {
-            System.err.println("Já existe um perfil '" + valid + "'. Use --force para sobrescrever.");
+        if (alreadyExists[0]) {
+            System.err.println("Profile '" + valid + "' already exists. Use --force to overwrite.");
             return 1;
         }
-        System.out.println("Perfil '" + valid + "' salvo com " + entries.size() + " domínio(s).");
+        System.out.println("Profile '" + valid + "' saved with " + entries.size() + " domain(s).");
         return 0;
     }
 }

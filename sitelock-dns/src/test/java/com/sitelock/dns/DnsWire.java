@@ -5,33 +5,33 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-// Monte e leitura de pacotes DNS para os testes de socket. Não usa a internet:
-// as consultas são montadas na mão e as respostas lidas direto do buffer,
-// porque o parser de produção só sabe ler consultas.
+// DNS packet building and reading for the socket tests. It does not use the
+// internet: queries are built by hand and responses are read straight from the
+// buffer, because the production parser only knows how to read queries.
 final class DnsWire {
 
     private DnsWire() {
     }
 
-    // Lê um inteiro de 16 bits big-endian.
+    // Reads a big-endian 16-bit integer.
     static int u16(byte[] data, int off) {
         return ((data[off] & 0xFF) << 8) | (data[off + 1] & 0xFF);
     }
 
-    // Escreve um inteiro de 16 bits big-endian.
+    // Writes a big-endian 16-bit integer.
     static void put16(byte[] data, int off, int value) {
         data[off] = (byte) (value >>> 8);
         data[off + 1] = (byte) value;
     }
 
-    // Codifica um nome em rótulos DNS ("exemplo.com" -> 7"exemplo"3"com"0).
+    // Encodes a name into DNS labels ("example.com" -> 7"example"3"com"0).
     static byte[] encodeName(String name) {
         String[] labels = name.split("\\.");
-        int tamanho = 1;
+        int size = 1;
         for (String l : labels) {
-            tamanho += 1 + l.length();
+            size += 1 + l.length();
         }
-        byte[] out = new byte[tamanho];
+        byte[] out = new byte[size];
         int off = 0;
         for (String l : labels) {
             byte[] bytes = l.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
@@ -43,7 +43,7 @@ final class DnsWire {
         return out;
     }
 
-    // Monta uma consulta padrão (QR=0, RD=1, uma pergunta).
+    // Builds a standard query (QR=0, RD=1, one question).
     static byte[] query(int id, String name, int type) {
         byte[] qname = encodeName(name);
         byte[] out = new byte[12 + qname.length + 4];
@@ -57,19 +57,19 @@ final class DnsWire {
         return out;
     }
 
-    // Resposta com uma cadeia de aliases, como um upstream de verdade monta: cada
-    // elo é um CNAME para o próximo, o último recebe o registro final (A/AAAA), e
-    // a pergunta é ecoada byte a byte, como o servidor exige antes de repassar.
+    // Response with an alias chain, the way a real upstream builds it: each link
+    // is a CNAME to the next, the last one gets the final record (A/AAAA), and
+    // the question is echoed byte for byte, as the server requires before relaying.
 
-    // ATENÇÃO: os nomes da section answer vêm comprimidos (ponteiro 0xC0xx) — é
-    // assim que o upstream real economiza bytes, e é o que o leitor de nomes segue.
-    static byte[] respostaEmCadeia(byte[] consulta, String[] cadeia,
-                                   int tipoFinal, byte[] rdataFinal) {
-        int id = u16(consulta, 0);
-        int fimPergunta = fimDaPergunta(consulta);
-        byte[] pergunta = Arrays.copyOfRange(consulta, 12, fimPergunta);
-        int elos = Math.max(0, cadeia.length - 1);
-        int anCount = elos + (tipoFinal > 0 ? 1 : 0);
+    // WARNING: names in the answer section come compressed (0xC0xx pointer) — that
+    // is how the real upstream saves bytes, and what the name reader follows.
+    static byte[] chainedResponse(byte[] query, String[] chain,
+                                  int finalType, byte[] finalRdata) {
+        int id = u16(query, 0);
+        int questionEnd = questionEnd(query);
+        byte[] question = Arrays.copyOfRange(query, 12, questionEnd);
+        int links = Math.max(0, chain.length - 1);
+        int anCount = links + (finalType > 0 ? 1 : 0);
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         out.write(id >>> 8);
@@ -84,14 +84,14 @@ final class DnsWire {
         out.write(0); // NSCOUNT
         out.write(0);
         out.write(0); // ARCOUNT
-        out.writeBytes(pergunta);
+        out.writeBytes(question);
 
-        // Offset de cada nome da cadeia: o primeiro é o QNAME ecoado (12), os
-        // demais são gravados dentro da RDATA do CNAME que os aponta.
-        int[] offsets = new int[cadeia.length];
+        // Offset of each name in the chain: the first is the echoed QNAME (12), the
+        // others are written inside the RDATA of the CNAME that points to them.
+        int[] offsets = new int[chain.length];
         offsets[0] = 12;
-        for (int i = 0; i < elos; i++) {
-            writePointer(out, offsets[i]); // owner = nome anterior
+        for (int i = 0; i < links; i++) {
+            writePointer(out, offsets[i]); // owner = previous name
             out.write(0);
             out.write(5); // TYPE CNAME
             out.write(0);
@@ -100,37 +100,37 @@ final class DnsWire {
             out.write(0);
             out.write(0);
             out.write(60); // TTL
-            byte[] alvo = encodeName(cadeia[i + 1]);
+            byte[] target = encodeName(chain[i + 1]);
             out.write(0);
-            out.write(alvo.length); // RDLEN
+            out.write(target.length); // RDLEN
             offsets[i + 1] = out.size();
-            out.writeBytes(alvo);
+            out.writeBytes(target);
         }
-        if (tipoFinal > 0) {
-            writePointer(out, offsets[cadeia.length - 1]);
-            out.write(tipoFinal >>> 8);
-            out.write(tipoFinal & 0xFF);
+        if (finalType > 0) {
+            writePointer(out, offsets[chain.length - 1]);
+            out.write(finalType >>> 8);
+            out.write(finalType & 0xFF);
             out.write(0);
             out.write(1); // CLASS IN
             out.write(0);
             out.write(0);
             out.write(0);
             out.write(60); // TTL
-            out.write(rdataFinal.length >>> 8);
-            out.write(rdataFinal.length & 0xFF);
-            out.writeBytes(rdataFinal);
+            out.write(finalRdata.length >>> 8);
+            out.write(finalRdata.length & 0xFF);
+            out.writeBytes(finalRdata);
         }
         return out.toByteArray();
     }
 
-    // Escreve um ponteiro de compressão (0xC0xx) para o offset informado.
+    // Writes a compression pointer (0xC0xx) to the given offset.
     private static void writePointer(ByteArrayOutputStream out, int offset) {
         out.write(0xC0 | ((offset >>> 8) & 0x3F));
         out.write(offset & 0xFF);
     }
 
-    // Offset do fim da seção question (após QTYPE/QCLASS).
-    static int fimDaPergunta(byte[] data) {
+    // Offset of the end of the question section (after QTYPE/QCLASS).
+    static int questionEnd(byte[] data) {
         int off = 12;
         while (off < data.length) {
             int len = data[off] & 0xFF;
@@ -146,7 +146,7 @@ final class DnsWire {
         return off + 4;
     }
 
-    // Pula um nome (com ponteiro de compressão) e devolve o offset seguinte.
+    // Skips a name (including a compression pointer) and returns the next offset.
     static int skipName(byte[] data, int off) {
         while (off < data.length) {
             int len = data[off] & 0xFF;
@@ -161,30 +161,30 @@ final class DnsWire {
         return off;
     }
 
-    // Resposta lida do buffer.
-    record Resposta(int id, int flags, int rcode, int qdCount, int anCount, List<Answer> answers) {
+    // Response read from the buffer.
+    record Response(int id, int flags, int rcode, int qdCount, int anCount, List<Answer> answers) {
 
-        boolean isResposta() {
+        boolean isResponse() {
             return (flags & 0x8000) != 0;
         }
 
-        // Primeiro RDATA da resposta, ou null.
-        byte[] primeiroRdata() {
+        // First RDATA in the response, or null.
+        byte[] firstRdata() {
             return answers.isEmpty() ? null : answers.get(0).rdata();
         }
     }
 
-    // Um registro da seção answer.
+    // An answer-section record.
     record Answer(int type, byte[] rdata) {
     }
 
-    // Lê uma resposta (header + question + answers).
-    static Resposta parse(byte[] data) {
+    // Reads a response (header + question + answers).
+    static Response parse(byte[] data) {
         int id = u16(data, 0);
         int flags = u16(data, 2);
         int qdCount = u16(data, 4);
         int anCount = u16(data, 6);
-        int off = fimDaPergunta(data);
+        int off = questionEnd(data);
         List<Answer> answers = new ArrayList<>();
         for (int i = 0; i < anCount; i++) {
             off = skipName(data, off);
@@ -198,6 +198,6 @@ final class DnsWire {
             off += rdlen;
             answers.add(new Answer(type, rdata));
         }
-        return new Resposta(id, flags, flags & 0x0F, qdCount, anCount, answers);
+        return new Response(id, flags, flags & 0x0F, qdCount, anCount, answers);
     }
 }
