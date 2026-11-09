@@ -134,26 +134,33 @@ public class BlockCommand implements Callable<Integer> {
                         return plan;
                     },
                     (p, state, tx) -> {
-                        for (String domain : p.recorded) {
-                            try {
-                                service.getBlocker().block(domain);
-                            } catch (IOException e) {
-                                try {
-                                    BlockEntry previous = p.previous.get(domain);
-                                    if (previous == null) {
-                                        state.remove(domain);
-                                    } else {
-                                        state.put(domain, previous);
-                                    }
-                                    tx.save(state);
-                                } catch (IOException rollbackFailure) {
-                                    System.err.println("CRITICAL ERROR: hosts failure AND state rollback failure for '"
-                                            + domain + "': " + rollbackFailure.getMessage());
+                        if (p.recorded.isEmpty()) {
+                            return;
+                        }
+                        try {
+                            service.getBlocker().blockAll(p.recorded);
+                        } catch (IOException e) {
+                            // Atomic batch: either all domains land in the hosts file or none.
+                            // Roll back the whole recorded set to the state before this command.
+                            for (String domain : p.recorded) {
+                                BlockEntry previous = p.previous.get(domain);
+                                if (previous == null) {
+                                    state.remove(domain);
+                                } else {
+                                    state.put(domain, previous);
                                 }
-                                System.err.println("Error blocking '" + domain + "': " + e.getMessage());
-                                p.failures++;
-                                continue;
                             }
+                            try {
+                                tx.save(state);
+                            } catch (IOException rollbackFailure) {
+                                System.err.println("CRITICAL ERROR: hosts failure AND state rollback failure: "
+                                        + rollbackFailure.getMessage());
+                            }
+                            System.err.println("Error blocking domains: " + e.getMessage());
+                            p.failures += p.recorded.size();
+                            return;
+                        }
+                        for (String domain : p.recorded) {
                             if (expiresAt == null) {
                                 System.out.println("Blocked " + domain + ".");
                             } else {

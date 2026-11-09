@@ -219,7 +219,7 @@ public final class HostsFileManager {
 
     private static int indexOfMarker(List<String> lines, String marker, int from) {
         for (int i = from; i < lines.size(); i++) {
-            if (lines.get(i).contains(marker)) {
+            if (lines.get(i).trim().equals(marker)) {
                 return i;
             }
         }

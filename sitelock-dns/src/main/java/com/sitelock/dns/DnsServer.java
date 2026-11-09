@@ -256,13 +256,16 @@ public class DnsServer {
         }
     }
 
+    // Single reusable receive buffer: the listener runs on one thread, so there
+    // is no race, and allocating 64 KB per packet under a flood only adds GC pressure.
+    private final byte[] receiveBuffer = new byte[MAX_PACKET_BYTES];
+
     // Waits for a packet and dispatches handling to the pool.
     // WHY: package-private so the test can simulate the loop crashing.
     void awaitAndDispatch(DatagramSocket ds) throws IOException {
-        byte[] buf = new byte[MAX_PACKET_BYTES];
-        DatagramPacket packet = new DatagramPacket(buf, buf.length);
+        DatagramPacket packet = new DatagramPacket(receiveBuffer, receiveBuffer.length);
         ds.receive(packet);
-        byte[] data = Arrays.copyOf(packet.getData(), packet.getLength());
+        byte[] data = Arrays.copyOf(receiveBuffer, packet.getLength());
         InetAddress client = packet.getAddress();
         int clientPort = packet.getPort();
         try {

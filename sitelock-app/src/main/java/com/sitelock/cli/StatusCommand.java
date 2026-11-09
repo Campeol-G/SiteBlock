@@ -222,11 +222,11 @@ public class StatusCommand implements Callable<Integer> {
         boolean inside = false;
         for (String line : content.split("\n", -1)) {
             String t = line.strip();
-            if (t.contains(HostsFileManager.START_MARKER)) {
+            if (t.equals(HostsFileManager.START_MARKER)) {
                 inside = true;
                 continue;
             }
-            if (t.contains(HostsFileManager.END_MARKER)) {
+            if (t.equals(HostsFileManager.END_MARKER)) {
                 inside = false;
                 continue;
             }

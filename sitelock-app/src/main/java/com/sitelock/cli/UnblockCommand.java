@@ -177,21 +177,27 @@ public class UnblockCommand implements Callable<Integer> {
                         return plan;
                     },
                     (p, stateNow, tx) -> {
-                        for (String domain : p.saved) {
-                            try {
-                                service.getBlocker().unblock(domain);
-                            } catch (IOException e) {
-                                try {
-                                    stateNow.put(domain, p.previous.get(domain));
-                                    tx.save(stateNow);
-                                } catch (IOException rollbackFailure) {
-                                    System.err.println("CRITICAL ERROR: hosts write failed AND the state of '"
-                                            + domain + "' could not be reverted: " + rollbackFailure.getMessage());
-                                }
-                                System.err.println("Error unblocking '" + domain + "': " + e.getMessage());
-                                p.failures++;
-                                continue;
+                        if (p.saved.isEmpty()) {
+                            return;
+                        }
+                        try {
+                            service.getBlocker().unblockAll(p.saved);
+                        } catch (IOException e) {
+                            // Atomic batch: either all saved domains leave the hosts file or none.
+                            for (String domain : p.saved) {
+                                stateNow.put(domain, p.previous.get(domain));
                             }
+                            try {
+                                tx.save(stateNow);
+                            } catch (IOException rollbackFailure) {
+                                System.err.println("CRITICAL ERROR: hosts write failed AND the state could not be "
+                                        + "reverted: " + rollbackFailure.getMessage());
+                            }
+                            System.err.println("Error unblocking domains: " + e.getMessage());
+                            p.failures += p.saved.size();
+                            return;
+                        }
+                        for (String domain : p.saved) {
                             System.out.println("Unblocked " + domain + ".");
                         }
                     });

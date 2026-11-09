@@ -32,7 +32,7 @@ public class ResetCommand implements Callable<Integer> {
     public Integer call() {
         if (!yes) {
             System.err.println("This will delete ALL block records from the state (blocks.json).");
-            System.err.println("The hosts file (" + SiteLockPaths.getHostsPath() + ") will NOT be changed by this command.");
+            System.err.println("The hosts file (" + CliSupport.resolveHostsPath(stateFileOverride) + ") will NOT be changed by this command.");
             System.err.println("Run again with --yes to confirm: siteblock reset --yes");
             return 2;
         }
